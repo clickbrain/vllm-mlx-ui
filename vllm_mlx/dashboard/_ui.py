@@ -2208,8 +2208,8 @@ def page_settings() -> None:
                     proc.wait()
 
                 if proc.returncode == 0:
-                    st.success("✅ Upgrade complete! Relaunching in 5 seconds…")
-                    st.markdown('<meta http-equiv="refresh" content="6">', unsafe_allow_html=True)
+                    st.success("✅ Upgrade complete! Relaunching in 12 seconds…")
+                    st.markdown('<meta http-equiv="refresh" content="13">', unsafe_allow_html=True)
                     uc.relaunch()
                 else:
                     # Brew exits 1 for dylib relinking warnings even when the
@@ -2224,9 +2224,9 @@ def page_settings() -> None:
                     if _linkage_warn and _installed:
                         st.success(
                             "✅ Upgrade complete (dylib relinking warning is cosmetic — "
-                            "the app is fine). Relaunching in 5 seconds…"
+                            "the app is fine). Relaunching in 12 seconds…"
                         )
-                        st.markdown('<meta http-equiv="refresh" content="6">', unsafe_allow_html=True)
+                        st.markdown('<meta http-equiv="refresh" content="13">', unsafe_allow_html=True)
                         uc.relaunch()
                     else:
                         st.error(f"❌ Upgrade failed (exit {proc.returncode}). See output above.")

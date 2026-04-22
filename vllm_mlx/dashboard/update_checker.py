@@ -250,12 +250,40 @@ def relaunch() -> None:
     except Exception:
         pass
 
-    binary = shutil.which("vllm-mlx-ui")
-    if binary:
-        subprocess.Popen([binary])
-    else:
-        # Fallback: re-exec current Python with same args
-        subprocess.Popen([sys.executable] + sys.argv)
+def relaunch() -> None:
+    """
+    Start a fresh vllm-mlx-ui process and terminate the current one.
+    Called after a successful upgrade.  If the inference server is currently
+    running, writes a flag file so the new process auto-starts it.
+    """
+    import os
+    import sys
 
-    time.sleep(5)   # let the new process bind its port
-    os._exit(0)     # hard-exit the current Streamlit process
+    # Write auto-start flag if the inference server is running right now
+    try:
+        from vllm_mlx.dashboard.server_manager import get_server_status, AUTO_START_FLAG, STATE_DIR
+        status = get_server_status()
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        if status.get("running"):
+            AUTO_START_FLAG.write_text("1")
+        else:
+            AUTO_START_FLAG.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    binary = shutil.which("vllm-mlx-ui")
+    cmd = [binary] if binary else [sys.executable] + sys.argv
+
+    # IMPORTANT: start_new_session=True puts the new process in its own
+    # process group so it is NOT killed when we os._exit() the current one.
+    # Redirect stdio so it has no inherited file descriptors.
+    subprocess.Popen(
+        cmd,
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    time.sleep(8)   # give the new process time to bind its ports
+    os._exit(0)     # hard-exit the current Streamlit process only
