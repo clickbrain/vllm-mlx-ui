@@ -232,10 +232,23 @@ def upgrade_command() -> list[str]:
 def relaunch() -> None:
     """
     Start a fresh vllm-mlx-ui process and terminate the current one.
-    Called after a successful upgrade.
+    Called after a successful upgrade.  If the inference server is currently
+    running, writes a flag file so the new process auto-starts it.
     """
     import os
     import sys
+
+    # Write auto-start flag if the inference server is running right now
+    try:
+        from vllm_mlx.dashboard.server_manager import get_server_status, AUTO_START_FLAG, STATE_DIR
+        status = get_server_status()
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        if status.get("running"):
+            AUTO_START_FLAG.write_text("1")
+        else:
+            AUTO_START_FLAG.unlink(missing_ok=True)
+    except Exception:
+        pass
 
     binary = shutil.which("vllm-mlx-ui")
     if binary:

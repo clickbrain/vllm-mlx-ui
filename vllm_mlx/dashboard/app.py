@@ -58,6 +58,25 @@ def main() -> None:
     else:
         print(f"[vllm-mlx] ⚠️  Management API did NOT start — check stderr for details", file=sys.stderr)
 
+    # Auto-start inference server if a post-upgrade relaunch flag is present
+    try:
+        from vllm_mlx.dashboard.server_manager import (
+            AUTO_START_FLAG, load_config, start_server, get_server_status,
+        )
+        if AUTO_START_FLAG.exists():
+            AUTO_START_FLAG.unlink(missing_ok=True)
+            _cfg = load_config()
+            if _cfg.get("model"):
+                print(f"[vllm-mlx] 🔄 Auto-starting inference server with model: {_cfg['model']}")
+                # Wait for mgmt API to be fully ready
+                _time.sleep(1.0)
+                _ok, _msg = start_server(_cfg)
+                print(f"[vllm-mlx] {'✅' if _ok else '⚠️ '} {_msg}")
+            else:
+                print("[vllm-mlx] ℹ️  Post-upgrade relaunch: no model configured, skipping auto-start.")
+    except Exception as _exc:
+        print(f"[vllm-mlx] ⚠️  Auto-start check failed: {_exc}", file=sys.stderr)
+
     ui_file = Path(__file__).parent / "_ui.py"
     result = subprocess.run(
         [

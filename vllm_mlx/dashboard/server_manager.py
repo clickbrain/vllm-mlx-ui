@@ -22,6 +22,7 @@ STATE_DIR = Path.home() / ".vllm_mlx_ui"
 PID_FILE = STATE_DIR / "server.pid"
 CONFIG_FILE = STATE_DIR / "server_config.json"
 LOG_FILE = STATE_DIR / "server.log"
+AUTO_START_FLAG = STATE_DIR / "auto_start_after_relaunch.flag"
 
 TOOL_CALL_PARSERS = [
     "",
