@@ -29,11 +29,14 @@ class VllmMlxUi < Formula
     # Create an isolated virtual environment
     system python, "-m", "venv", venv
 
-    # Upgrade pip first to avoid any legacy resolver warnings
-    system venv/"bin/pip", "install", "--upgrade", "pip", "setuptools", "wheel"
+    # Upgrade pip + build tools to a version that supports setuptools.backends.legacy
+    # (required by pyproject.toml / PEP 517 build backend)
+    system venv/"bin/pip", "install", "--upgrade", "pip", "setuptools>=68", "wheel"
 
-    # Install the package with the [ui] extra (streamlit, plotly, pandas, httpx)
-    system venv/"bin/pip", "install", ".[ui]"
+    # Install with --no-build-isolation so pip uses the venv's already-upgraded
+    # setuptools instead of trying to bootstrap a separate build environment
+    # (which would pull in the old bundled setuptools and fail).
+    system venv/"bin/pip", "install", "--no-build-isolation", ".[ui]"
 
     # Symlink all entry-point scripts into Homebrew's bin so they are on PATH
     %w[vllm-mlx vllm-mlx-ui vllm-mlx-chat vllm-mlx-bench].each do |cmd|
