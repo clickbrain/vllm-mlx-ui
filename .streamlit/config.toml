@@ -1,0 +1,8 @@
+[server]
+# Allow the dashboard to be embedded in iFrames (e.g. Home Assistant, Notion, custom portals)
+enableXsrfProtection = false
+enableCORS = false
+
+[browser]
+# Disable the "click-jacking" X-Frame-Options header so the UI can be iframed
+gatherUsageStats = false
