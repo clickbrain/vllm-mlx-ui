@@ -863,35 +863,45 @@ def page_server() -> None:
         submitted = st.form_submit_button("💾 Save configuration", type="primary")
 
     if submitted:
-        sm.save_config(
-            {
-                **config,
-                "model": selected_model,
-                "served_model_name": served_model_name.strip(),
-                "embedding_model": selected_emb,
-                "rerank_model": selected_rerank,
-                "host": host_value,
-                "port": int(port),
-                "api_key": api_key,
-                "rate_limit": int(rate_limit),
-                "continuous_batching": continuous_batching,
-                "max_tokens": int(max_tokens),
-                "reasoning_parser": reasoning_parser,
-                "tool_call_parser": tool_call_parser,
-                "gpu_memory_utilization": float(gpu_mem),
-                "enable_prefix_cache": enable_prefix_cache,
-                "cache_memory_mb": int(cache_memory_mb),
-                "kv_cache_quantization": kv_quant,
-                "use_paged_cache": use_paged,
-                "enable_mtp": enable_mtp,
-                "stream_interval": int(stream_interval),
-                "trust_remote_code": trust_remote,
-                "mllm": force_mllm,
-                "enable_metrics": enable_metrics_flag,
-                "offline": offline_mode,
-            }
-        )
-        st.success("✅ Configuration saved. Restart the server to apply changes.")
+        new_cfg = {
+            **config,
+            "model": selected_model,
+            "served_model_name": served_model_name.strip(),
+            "embedding_model": selected_emb,
+            "rerank_model": selected_rerank,
+            "host": host_value,
+            "port": int(port),
+            "api_key": api_key,
+            "rate_limit": int(rate_limit),
+            "continuous_batching": continuous_batching,
+            "max_tokens": int(max_tokens),
+            "reasoning_parser": reasoning_parser,
+            "tool_call_parser": tool_call_parser,
+            "gpu_memory_utilization": float(gpu_mem),
+            "enable_prefix_cache": enable_prefix_cache,
+            "cache_memory_mb": int(cache_memory_mb),
+            "kv_cache_quantization": kv_quant,
+            "use_paged_cache": use_paged,
+            "enable_mtp": enable_mtp,
+            "stream_interval": int(stream_interval),
+            "trust_remote_code": trust_remote,
+            "mllm": force_mllm,
+            "enable_metrics": enable_metrics_flag,
+            "offline": offline_mode,
+        }
+        sm.save_config(new_cfg)
+        if status["running"]:
+            st.warning("✅ Configuration saved.")
+            if st.button("🔄 Restart Server now to apply changes", type="primary",
+                         use_container_width=True, key="_restart_after_save"):
+                with st.spinner("Restarting…"):
+                    sm.stop_server()
+                    time.sleep(2)
+                    ok, msg = sm.start_server(new_cfg)
+                st.session_state["_srv_action_result"] = (ok, msg)
+                st.rerun()
+        else:
+            st.success("✅ Configuration saved.")
 
     if status["running"] and status["healthy"]:
         st.divider()
@@ -1859,6 +1869,22 @@ def page_chat() -> None:
 # ===========================================================================
 def page_settings() -> None:
     st.title("⚙️ Settings")
+
+    # ── Update banner (shown at top when updates are available) ─────────────
+    try:
+        from vllm_mlx.dashboard import update_checker as _uc
+        _cached = st.session_state.get("_update_cache", {}).get("result")
+        if _cached:
+            _outdated = [p for p in _cached if p.update_available]
+            if _outdated:
+                names = ", ".join(p.name for p in _outdated)
+                st.warning(
+                    f"🔔 **Updates available:** {names}  —  "
+                    "scroll down to **🔄 Updates** to upgrade with one click.",
+                    icon="⬆️",
+                )
+    except Exception:
+        pass
 
     st.subheader("🔑 HuggingFace")
     hf_token = st.text_input(
