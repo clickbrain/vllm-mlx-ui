@@ -90,7 +90,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
 # ── Remote management helpers ────────────────────────────────────────────────
 
 def _mgmt_base(config: dict[str, Any] | None = None) -> str | None:
-    """Return the management API base URL if remote mode is active."""
+    """Return the management API base URL if remote mode is active.
+
+    Returns None (forcing local mode) when the UI session has the connection
+    toggle set to "local", even if a remote_mgmt_url is configured.
+    """
+    # Respect the UI's local/remote mode toggle when running inside Streamlit.
+    try:
+        import streamlit as _st
+        if _st.session_state.get("connection_mode", "local") == "local":
+            return None
+    except Exception:
+        pass  # Not in a Streamlit context (e.g., CLI or mgmt API process)
     if config is None:
         config = load_config()
     url = config.get("remote_mgmt_url", "").strip()

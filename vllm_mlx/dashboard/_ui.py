@@ -40,7 +40,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# Custom CSS
+# Custom CSS — base styles (mode-specific overrides injected below)
 # ---------------------------------------------------------------------------
 st.markdown(
     """
@@ -60,6 +60,20 @@ div[data-testid="stMetric"] {
 section[data-testid="stSidebar"] button { width:100%; }
 div[data-testid="stChatMessage"] { padding:.5rem 0; }
 pre { max-height:420px; overflow-y:auto; }
+
+/* Mode badge styles */
+.mode-badge {
+    display:inline-block;
+    padding:.25rem .75rem;
+    border-radius:999px;
+    font-size:.8rem;
+    font-weight:700;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+    margin-bottom:.5rem;
+}
+.mode-badge-local  { background:#0a2540; color:#60a5fa; border:1px solid #2563eb; }
+.mode-badge-remote { background:#2d1500; color:#fbbf24; border:1px solid #d97706; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -82,6 +96,10 @@ def _init_state() -> None:
         "lib_sort": "size_gb",
         "chats": {},
         "active_chat_id": None,
+        # "local" or "remote" — controls which backend all API calls target.
+        # Defaults to "local"; switches to "remote" only when user explicitly
+        # toggles AND a remote_mgmt_url is configured in settings.
+        "connection_mode": "local",
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -91,9 +109,67 @@ def _init_state() -> None:
 _init_state()
 
 
+def _is_remote() -> bool:
+    """Return True when the user has toggled into remote mode."""
+    return st.session_state.get("connection_mode", "local") == "remote"
+
+
 # ---------------------------------------------------------------------------
-# Shared helpers
+# Mode-specific CSS — injected on every render so sidebar colours update
+# immediately when the toggle is flipped.
 # ---------------------------------------------------------------------------
+def _inject_mode_css() -> None:
+    if _is_remote():
+        st.markdown(
+            """
+<style>
+/* ── REMOTE MODE — amber/orange colour scheme ── */
+section[data-testid="stSidebar"] > div:first-child {
+    background: #1a0e00 !important;
+    border-right: 3px solid #d97706 !important;
+}
+/* Primary buttons amber */
+button[data-testid="baseButton-primary"] {
+    background-color: #d97706 !important;
+    border-color: #b45309 !important;
+    color: #fff !important;
+}
+button[data-testid="baseButton-primary"]:hover {
+    background-color: #b45309 !important;
+}
+/* Metric cards warm tint */
+div[data-testid="stMetric"] {
+    background: #1f1200 !important;
+    border-color: #78350f !important;
+}
+</style>
+""",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+<style>
+/* ── LOCAL MODE — blue colour scheme (default) ── */
+section[data-testid="stSidebar"] > div:first-child {
+    background: #0d1117 !important;
+    border-right: 3px solid #2563eb !important;
+}
+button[data-testid="baseButton-primary"] {
+    background-color: #1d4ed8 !important;
+    border-color: #1e40af !important;
+    color: #fff !important;
+}
+button[data-testid="baseButton-primary"]:hover {
+    background-color: #1e40af !important;
+}
+</style>
+""",
+            unsafe_allow_html=True,
+        )
+
+
+_inject_mode_css()
 def _api_headers(config: dict | None = None) -> dict[str, str]:
     if config is None:
         config = sm.load_config()
@@ -1856,12 +1932,25 @@ def page_settings() -> None:
     st.divider()
     st.subheader("🔗 Remote Server")
     st.caption(
-        "Use this section to control a vllm-mlx server running on **another machine**. "
-        "When configured, all operations (start/stop, model downloads, logs) run on the "
-        "remote machine — nothing is installed or downloaded locally."
+        "Configure the address of a vllm-mlx server running on **another machine**. "
+        "Once saved, use the **Local / Remote toggle in the sidebar** to switch between "
+        "controlling this machine or the remote one. All operations (start/stop, model "
+        "downloads, logs) route to whichever target is active."
     )
 
+    # Show current effective mode
+    _cur_mode = st.session_state.get("connection_mode", "local")
     _cfg_rs = sm._load_local_config()
+    _has_remote = bool(_cfg_rs.get("remote_mgmt_url", "").strip())
+    if _has_remote:
+        if _cur_mode == "remote":
+            st.success("🌐 **Currently in REMOTE mode** — operations target the remote server. "
+                       "Use the sidebar toggle to switch to Local.")
+        else:
+            st.info("🖥 **Currently in LOCAL mode** — operations target this machine. "
+                    "Use the sidebar toggle to switch to Remote.")
+    else:
+        st.warning("No remote server configured yet. Fill in the fields below and save to enable the toggle.")
     with st.form("remote_server_form"):
         remote_server_url = st.text_input(
             "Inference server URL",
@@ -2018,14 +2107,51 @@ PAGES = {
 }
 
 with st.sidebar:
+    # ── Branding ─────────────────────────────────────────────────────────────
+    _is_rem = _is_remote()
+    _badge_cls = "mode-badge-remote" if _is_rem else "mode-badge-local"
+    _badge_label = "🌐 REMOTE" if _is_rem else "🖥 LOCAL"
     st.markdown(
-        "<h2 style='margin:0;padding:0'>🚀 vllm-mlx</h2>"
-        "<p style='color:#8e8e93;margin:0;font-size:.85rem'>Apple Silicon Inference</p>",
+        f"<h2 style='margin:0;padding:0'>🚀 vllm-mlx</h2>"
+        f"<p style='color:#8e8e93;margin:0;font-size:.85rem'>Apple Silicon Inference</p>"
+        f"<div style='margin-top:.5rem'>"
+        f"<span class='mode-badge {_badge_cls}'>{_badge_label}</span>"
+        f"</div>",
         unsafe_allow_html=True,
     )
+
+    # ── Local / Remote toggle (only when a remote URL is configured) ──────────
+    _local_cfg = sm._load_local_config()
+    _has_remote_cfg = bool(_local_cfg.get("remote_mgmt_url", "").strip())
+
+    if _has_remote_cfg:
+        _remote_host = _local_cfg["remote_mgmt_url"].split("//")[-1].split(":")[0]
+        st.markdown(
+            "<p style='color:#8e8e93;font-size:.78rem;margin:0.4rem 0 0.1rem'>Connection target</p>",
+            unsafe_allow_html=True,
+        )
+        _mode_choice = st.radio(
+            "connection_target",
+            ["🖥  Local machine", f"🌐  {_remote_host}"],
+            index=1 if _is_rem else 0,
+            label_visibility="collapsed",
+            key="_mode_radio",
+        )
+        _new_mode = "remote" if _mode_choice.startswith("🌐") else "local"
+        if _new_mode != st.session_state.connection_mode:
+            st.session_state.connection_mode = _new_mode
+            st.rerun()
+    else:
+        st.markdown(
+            "<p style='color:#8e8e93;font-size:.75rem;margin:.3rem 0 0'>"
+            "Add a remote server in ⚙️ Settings to enable remote mode."
+            "</p>",
+            unsafe_allow_html=True,
+        )
+
     st.divider()
 
-    # Live status pill in sidebar
+    # ── Live server status pill ───────────────────────────────────────────────
     _status = sm.get_server_status()
     if _status["running"] and _status["healthy"]:
         st.success("● Server running")
@@ -2033,12 +2159,6 @@ with st.sidebar:
         st.warning("● Starting…")
     else:
         st.error("● Server stopped")
-
-    # Remote mode indicator
-    _local_cfg = sm._load_local_config()
-    if _local_cfg.get("remote_mgmt_url", "").strip():
-        _remote_host = _local_cfg["remote_mgmt_url"].split("//")[-1].split(":")[0]
-        st.info(f"🌐 Remote: **{_remote_host}**")
 
     # Quick model switcher
     _sb_cached = mm.get_cached_models()
