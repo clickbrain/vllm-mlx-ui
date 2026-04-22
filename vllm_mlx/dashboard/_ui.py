@@ -835,22 +835,37 @@ def page_models() -> None:
             cached = mm.get_cached_models()
 
         if not cached:
+            STARTER_MODEL = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+            st.markdown("### 📦 No models downloaded yet")
             st.markdown(
-                """
-### 📦 No models downloaded yet
-
-You need to download at least one model before you can start the server.
-
-**Quick start — recommended model (~1.8 GB):**
-```
-mlx-community/Llama-3.2-3B-Instruct-4bit
-```
-→ Click the **⬇ Download by ID** tab above, paste that model ID, and click Download.
-
-Or use the **🔍 Search MLX-Community** tab to browse and discover models.
-                """
+                "You need at least one model before you can start the server.  \n"
+                "Click below to download the recommended starter model (~1.8 GB), "
+                "or use the **🔍 Search** / **⬇ Download by ID** tabs to pick your own."
             )
-            st.info("💡 After downloading, come back to this tab — your model will appear here.")
+            col_btn, col_spacer = st.columns([2, 5])
+            with col_btn:
+                start_dl = st.button(
+                    "⬇️ Download Starter Model",
+                    type="primary",
+                    use_container_width=True,
+                    help=STARTER_MODEL,
+                )
+            st.caption(f"Starter model: `{STARTER_MODEL}`")
+            if start_dl or st.session_state.get("_starter_dl_triggered"):
+                st.session_state["_starter_dl_triggered"] = True
+                with st.spinner(
+                    f"Downloading **{STARTER_MODEL.split('/')[-1]}**…  "
+                    "This may take several minutes depending on your connection."
+                ):
+                    ok, msg = mm.download_model(STARTER_MODEL)
+                st.session_state.pop("_starter_dl_triggered", None)
+                if ok:
+                    st.success(f"✅ **{STARTER_MODEL.split('/')[-1]}** downloaded! "
+                               "Refresh this tab to see it in your library.")
+                    st.balloons()
+                else:
+                    st.error(f"❌ Download failed: {msg}")
+                    st.info("You can try again using the **⬇ Download by ID** tab above.")
         else:
             total_gb = sum(m["size_gb"] for m in cached)
             mc1, mc2 = st.columns(2)
