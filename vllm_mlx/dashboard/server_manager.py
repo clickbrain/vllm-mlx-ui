@@ -258,10 +258,16 @@ def _build_command(config: dict[str, Any]) -> list[str]:
         cmd += ["--api-key", config["api_key"]]
     if config.get("continuous_batching"):
         cmd += ["--continuous-batching"]
-    if config.get("max_tokens", 32768) != 32768:
-        cmd += ["--max-tokens", str(config["max_tokens"])]
-    if config.get("max_request_tokens", 32768) != 32768:
-        cmd += ["--max-request-tokens", str(config["max_request_tokens"])]
+    # max_request_tokens must be >= max_tokens; clamp defensively so a stale
+    # config never causes "cannot exceed" errors on launch.
+    _max_tok = config.get("max_tokens", 32768)
+    _max_req = config.get("max_request_tokens", 32768)
+    if _max_req < _max_tok:
+        _max_req = _max_tok
+    if _max_tok != 32768:
+        cmd += ["--max-tokens", str(_max_tok)]
+    if _max_req != 32768:
+        cmd += ["--max-request-tokens", str(_max_req)]
     if config.get("reasoning_parser"):
         cmd += ["--reasoning-parser", config["reasoning_parser"]]
     if config.get("tool_call_parser"):
