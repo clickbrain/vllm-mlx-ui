@@ -270,8 +270,6 @@ def _get_all_local_addresses() -> list[dict[str, str]]:
 def _connection_info_block(port: int, model: str = "", api_key: str = "", mgmt_port: int = 8502, lan_only: bool = False) -> None:
     """Render a connection info expander showing all available addresses."""
     addrs = _get_all_local_addresses()
-    # Filter to non-link-local for the primary suggestion if LAN-only requested
-    primary_addrs = [a for a in addrs if not a["ip"].startswith("169.254.")] or addrs
 
     with st.expander("📡 Connection info — copy these into your client", expanded=True):
         if model:
@@ -281,24 +279,30 @@ def _connection_info_block(port: int, model: str = "", api_key: str = "", mgmt_p
             st.markdown("**API key**")
             st.code(api_key, language="text")
 
-        st.markdown("**Available base URLs** — pick the one that works for your device:")
+        st.markdown("**Available addresses** — pick the one that works for your device:")
+
+        # Two rows per address: base URL and chat completions endpoint
         rows = []
         for a in addrs:
-            base = f"http://{a['ip']}:{port}/v1"
-            mgmt = f"http://{a['ip']}:{mgmt_port}"
-            rows.append(f"| `{a['label']}` | `{base}` | `{mgmt}` |")
+            base      = f"http://{a['ip']}:{port}/v1"
+            chat      = f"http://{a['ip']}:{port}/v1/chat/completions"
+            mgmt      = f"http://{a['ip']}:{mgmt_port}"
+            rows.append(
+                f"| `{a['label']}` | `{base}` | `{chat}` | `{mgmt}` |"
+            )
 
         table = (
-            "| Interface | Inference base URL | Management API |\n"
-            "|-----------|-------------------|----------------|\n"
+            "| Interface | Base URL (`/v1`) | Chat endpoint | Management API |\n"
+            "|-----------|-----------------|---------------|----------------|\n"
             + "\n".join(rows)
         )
         st.markdown(table)
         st.caption(
-            "💡 **Which URL to use?** "
-            "On the same Wi-Fi network, use the **Wi-Fi/Ethernet** address. "
-            "For a direct Mac-to-Mac Thunderbolt cable, use the **link-local** address. "
-            "On the same local network, **BradStudio.local** (your .local name) works without knowing the IP."
+            "💡 **Which URL to use?**  \n"
+            "• Most OpenAI-compatible clients (e.g. Cursor, Continue) want the **Base URL** (`/v1`).  \n"
+            "• Some clients (e.g. direct curl / custom apps) need the full **Chat endpoint** (`/v1/chat/completions`).  \n"
+            "• On the same Wi-Fi, use the **Wi-Fi/Ethernet** address.  "
+            "Direct Thunderbolt cable → use the **link-local** address."
         )
         if lan_only:
             st.warning(
@@ -1988,13 +1992,39 @@ def page_settings() -> None:
         active_url = remote_mgmt_url.strip() or _cfg_rs.get("remote_mgmt_url", "")
         try:
             import requests as _req
-            r = _req.get(f"{active_url.rstrip('/')}/health", timeout=2)
+            r = _req.get(f"{active_url.rstrip('/')}/health", timeout=3)
             if r.status_code == 200:
                 st.success(f"✅ Management API reachable at `{active_url}`")
             else:
-                st.warning(f"⚠️ Management API responded with {r.status_code}")
+                st.warning(f"⚠️ Management API responded with HTTP {r.status_code}")
         except Exception as _e:
-            st.error(f"❌ Cannot reach management API at `{active_url}`: {_e}")
+            _err = str(_e)
+            if "Connection refused" in _err:
+                reason = "**Connection refused** — the management API is not running on that address."
+                fix = (
+                    "**To fix this:** Open a terminal on the remote machine and run:\n"
+                    "```bash\nvllm-mlx-ui\n```\n"
+                    "The management API (port 8502) only runs while the dashboard is open on the server. "
+                    "Leave that terminal/window running, then try again here."
+                )
+            elif "timed out" in _err.lower() or "timeout" in _err.lower():
+                reason = "**Timed out** — the address is unreachable."
+                fix = (
+                    "Check that:  \n"
+                    "• The remote machine is on the same network  \n"
+                    "• macOS firewall on the server allows port 8502  \n"
+                    "  *(System Settings → Network → Firewall → Options, add `vllm-mlx-ui`)*  \n"
+                    "• Try a different address from the server's Connection Info panel"
+                )
+            elif "Name or service not known" in _err or "nodename nor servname" in _err:
+                reason = "**Hostname not found** — the `.local` name isn't resolving."
+                fix = "Try using the IP address instead of the `.local` hostname."
+            else:
+                reason = "Cannot reach management API."
+                fix = f"Error detail: `{_err[:200]}`"
+
+            st.error(f"❌ {reason}")
+            st.markdown(fix)
 
     st.divider()
     st.subheader("🔒 Security")
@@ -2068,11 +2098,93 @@ def page_settings() -> None:
     )
 
     st.divider()
+    st.subheader("🔄 Updates")
+
+    from vllm_mlx.dashboard import update_checker as uc
+    import importlib.metadata
+
+    _method = uc._detect_install_method()
+    _method_label = {"homebrew": "Homebrew (`brew upgrade`)",
+                     "pip": "pip (`pip install --upgrade`)"}.get(_method, "unknown")
+    st.caption(f"Install method detected: **{_method_label}**")
+
+    col_check, col_force = st.columns([2, 1])
+    with col_check:
+        _do_check = st.button("🔍 Check for updates", use_container_width=True)
+    with col_force:
+        _do_force = st.button("↺ Refresh", use_container_width=True,
+                              help="Bypass 1-hour cache and re-check now")
+
+    if _do_check or _do_force or st.session_state.get("_update_cache"):
+        with st.spinner("Checking versions…"):
+            _pkgs = uc.check_updates(force=bool(_do_force))
+
+        _any_update = any(p.update_available for p in _pkgs)
+        if _any_update:
+            st.warning(f"🔔 **{sum(p.update_available for p in _pkgs)} update(s) available**")
+        else:
+            st.success("✅ Everything is up to date")
+
+        # Package table
+        for pkg in _pkgs:
+            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+            c1.markdown(f"**{pkg.name}**")
+            c2.markdown(f"`{pkg.installed}`")
+            if pkg.update_available:
+                c3.markdown(f"⬆️ `{pkg.latest}`")
+                c4.markdown(f"[Notes]({pkg.url})")
+            elif pkg.latest not in ("unknown", ""):
+                c3.markdown(f"✓ `{pkg.latest}`")
+                c4.markdown(f"[Notes]({pkg.url})")
+            else:
+                c3.markdown("—")
+                c4.markdown("")
+
+        if _any_update:
+            st.divider()
+            st.markdown("### ⬆️ Upgrade now")
+            _cmd = uc.upgrade_command()
+            st.code(" ".join(_cmd), language="bash")
+            st.caption(
+                "The upgrade will reinstall the package and all dependencies, "
+                "then automatically relaunch the dashboard."
+            )
+            if st.button("⬆️ Upgrade & Relaunch", type="primary", use_container_width=False):
+                _out_area = st.empty()
+                _buf: list[str] = []
+
+                with st.spinner("Upgrading — this may take 1–2 minutes…"):
+                    proc = uc.subprocess.Popen(
+                        _cmd,
+                        stdout=uc.subprocess.PIPE,
+                        stderr=uc.subprocess.STDOUT,
+                        text=True,
+                    )
+                    assert proc.stdout
+                    for line in proc.stdout:
+                        _buf.append(line)
+                        # Show last 30 lines of output live
+                        _out_area.code("".join(_buf[-30:]), language=None)
+                    proc.wait()
+
+                if proc.returncode == 0:
+                    st.success("✅ Upgrade complete! Relaunching in 5 seconds…")
+                    st.markdown(
+                        '<meta http-equiv="refresh" content="6">',
+                        unsafe_allow_html=True,
+                    )
+                    uc.relaunch()
+                else:
+                    st.error(
+                        f"❌ Upgrade failed (exit {proc.returncode}). "
+                        "See output above for details."
+                    )
+
+    st.divider()
     st.subheader("ℹ️ About")
     import platform
     from vllm_mlx.dashboard import __version__ as _ui_ver
     try:
-        import importlib.metadata
         ver = importlib.metadata.version("vllm-mlx")
         st.write(f"**vllm-mlx version:** {ver}")
     except Exception:
