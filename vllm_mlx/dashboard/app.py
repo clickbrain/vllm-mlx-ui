@@ -37,12 +37,26 @@ def main() -> None:
             from vllm_mlx.dashboard.mgmt_server import start_mgmt_server
             # Always bind on all interfaces so remote dashboards can reach it.
             start_mgmt_server(host="0.0.0.0", port=mgmt_port)
+        except OSError as exc:
+            print(
+                f"[vllm-mlx] Management API failed to bind port {mgmt_port}: {exc}\n"
+                f"           Another process may already be using port {mgmt_port}. "
+                f"Try: lsof -i :{mgmt_port}",
+                file=sys.stderr,
+            )
         except Exception as exc:
             print(f"[vllm-mlx] Management API failed to start: {exc}", file=sys.stderr)
 
     mgmt_thread = threading.Thread(target=_start_mgmt, daemon=True)
     mgmt_thread.start()
-    print(f"[vllm-mlx] Management API running on port {mgmt_port}")
+
+    # Give the server a moment to bind before announcing it's ready
+    import time as _time
+    _time.sleep(1.0)
+    if mgmt_thread.is_alive():
+        print(f"[vllm-mlx] ✅ Management API listening on 0.0.0.0:{mgmt_port}")
+    else:
+        print(f"[vllm-mlx] ⚠️  Management API did NOT start — check stderr for details", file=sys.stderr)
 
     ui_file = Path(__file__).parent / "_ui.py"
     result = subprocess.run(

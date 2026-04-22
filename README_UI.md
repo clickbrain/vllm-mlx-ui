@@ -62,6 +62,18 @@ After install, start the dashboard with:
 vllm-mlx-ui
 ```
 
+**Upgrading (Homebrew):**
+```bash
+brew upgrade --fetch-HEAD vllm-mlx-ui
+```
+This upgrades the UI, the inference engine, and all Python dependencies in one step.
+
+**Uninstalling (Homebrew):**
+```bash
+brew uninstall vllm-mlx-ui
+brew untap clickbrain/vllm-mlx-ui
+```
+
 > **Don't have Homebrew?** Install it first:
 > ```bash
 > /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -85,6 +97,16 @@ This will:
 - Print the exact command to run if `vllm-mlx-ui` isn't on your PATH
 
 **After install:** Double-click the Desktop shortcut. Your browser opens automatically to the dashboard.
+
+**Upgrading (curl install):**
+```bash
+pip install --upgrade "git+https://github.com/clickbrain/vllm-mlx-ui.git#egg=vllm-mlx[ui]"
+```
+
+**Uninstalling (curl install):**
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/uninstall.sh)
+```
 
 > **Troubleshooting — "command not found: vllm-mlx-ui":**
 > The installer prints the exact full path to use, e.g.:
@@ -115,6 +137,16 @@ This will:
 3. Enter the IP address of the Mac running vllm-mlx (shown on that Mac's Server page)
 4. You now have full remote control — start/stop server, manage models, chat
 
+**Upgrading (remote install):**
+```bash
+pip install --upgrade "git+https://github.com/clickbrain/vllm-mlx-ui.git#egg=vllm-mlx[ui]"
+```
+
+**Uninstalling (remote install):**
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/uninstall.sh)
+```
+
 ---
 
 ### Option C — Clone the repository (developers)
@@ -126,9 +158,30 @@ pip install -e '.[ui]'
 vllm-mlx-ui
 ```
 
+**Upgrading (cloned repo):**
+```bash
+cd vllm-mlx-ui
+git pull
+pip install -e '.[ui]'
+```
+
+**Uninstalling (cloned repo):**
+```bash
+pip uninstall vllm-mlx
+rm -rf ~/Desktop/"Start vllm-mlx.command"
+# Optionally remove settings/history:
+rm -rf ~/.vllm_mlx_ui
+```
+
 ---
 
-### Uninstalling
+### Switching between install methods
+
+Your downloaded AI models are stored in `~/.cache/huggingface/hub/` — **completely separate from the software install**. You can uninstall via curl/pip and reinstall via Homebrew (or vice versa) without losing any models.
+
+---
+
+### Uninstalling (all methods)
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/uninstall.sh)
