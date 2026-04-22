@@ -389,118 +389,118 @@ def _swap_model(new_model_id: str) -> None:
 def page_overview() -> None:
     st.title("📊 Overview")
     config = sm.load_config()
-    refresh = st.session_state.get("refresh_rate", 5)
+    status = sm.get_server_status()
 
-    @st.fragment(run_every=refresh)
-    def _live_metrics() -> None:
-        status = sm.get_server_status()
+    if status["running"] and status["healthy"]:
+        h = status["health"]
+        _banner(
+            f"🟢 <strong>Server running</strong> &nbsp;·&nbsp; "
+            f"Model: <strong>{h.get('model_name', '—')}</strong> &nbsp;·&nbsp; "
+            f"Type: {h.get('model_type', 'llm')} &nbsp;·&nbsp; "
+            f"PID: {status['pid']}",
+            "green",
+        )
+    elif status["running"]:
+        _banner("🟡 <strong>Server starting</strong> — waiting for model to load…", "yellow")
+    else:
+        _banner("🔴 <strong>Server stopped</strong> — go to <em>Server</em> to start it.", "red")
 
-        if status["running"] and status["healthy"]:
-            h = status["health"]
-            _banner(
-                f"🟢 <strong>Server running</strong> &nbsp;·&nbsp; "
-                f"Model: <strong>{h.get('model_name', '—')}</strong> &nbsp;·&nbsp; "
-                f"Type: {h.get('model_type', 'llm')} &nbsp;·&nbsp; "
-                f"PID: {status['pid']}",
-                "green",
+    metrics = None
+    if status["running"] and status["healthy"]:
+        metrics = sm.get_metrics(config.get("api_key", ""))
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    if metrics:
+        uptime = int(metrics.get("uptime_s", 0))
+        h_val, rem = divmod(uptime, 3600)
+        m_val, s_val = divmod(rem, 60)
+        col1.metric("⏱ Uptime", f"{h_val:02d}:{m_val:02d}:{s_val:02d}")
+        col2.metric("📨 Active", metrics.get("num_running", 0))
+        col3.metric("⏳ Queued", metrics.get("num_waiting", 0))
+        col4.metric("✅ Completed", f"{metrics.get('total_requests_processed', 0):,}")
+
+        col5, col6, col7, col8 = st.columns(4)
+        col5.metric("📝 Prompt tokens", f"{metrics.get('total_prompt_tokens', 0):,}")
+        col6.metric("💬 Output tokens", f"{metrics.get('total_completion_tokens', 0):,}")
+        metal = metrics.get("metal") or {}
+        active_gb = metal.get("active_memory_gb")
+        peak_gb = metal.get("peak_memory_gb")
+        col7.metric("🔧 Metal memory", f"{active_gb:.2f} GB" if active_gb is not None else "—")
+        col8.metric("📈 Peak memory", f"{peak_gb:.2f} GB" if peak_gb is not None else "—")
+
+        st.session_state.metrics_history.append(
+            {
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "active": metrics.get("num_running", 0),
+                "queued": metrics.get("num_waiting", 0),
+                "total": metrics.get("total_requests_processed", 0),
+                "memory_gb": active_gb or 0,
+            }
+        )
+        if len(st.session_state.metrics_history) > 120:
+            st.session_state.metrics_history = st.session_state.metrics_history[-120:]
+    else:
+        for col, label in zip(
+            [col1, col2, col3, col4],
+            ["⏱ Uptime", "📨 Active", "⏳ Queued", "✅ Completed"],
+        ):
+            col.metric(label, "—")
+
+    history = st.session_state.metrics_history
+    if history:
+        df = pd.DataFrame(history)
+        left, right = st.columns(2)
+
+        with left:
+            st.subheader("Requests over time")
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=df["time"], y=df["active"], name="Active",
+                    fill="tozeroy", line=dict(color="#7C3AED", width=2),
+                    fillcolor="rgba(124,58,237,0.15)",
+                )
             )
-        elif status["running"]:
-            _banner("🟡 <strong>Server starting</strong> — waiting for model to load…", "yellow")
-        else:
-            _banner("🔴 <strong>Server stopped</strong> — go to <em>Server</em> to start it.", "red")
-
-        metrics = None
-        if status["running"]:
-            metrics = sm.get_metrics(config.get("api_key", ""))
-
-        col1, col2, col3, col4 = st.columns(4)
-
-        if metrics:
-            uptime = int(metrics.get("uptime_s", 0))
-            h_val, rem = divmod(uptime, 3600)
-            m_val, s_val = divmod(rem, 60)
-            col1.metric("⏱ Uptime", f"{h_val:02d}:{m_val:02d}:{s_val:02d}")
-            col2.metric("📨 Active", metrics.get("num_running", 0))
-            col3.metric("⏳ Queued", metrics.get("num_waiting", 0))
-            col4.metric("✅ Completed", f"{metrics.get('total_requests_processed', 0):,}")
-
-            col5, col6, col7, col8 = st.columns(4)
-            col5.metric("📝 Prompt tokens", f"{metrics.get('total_prompt_tokens', 0):,}")
-            col6.metric("💬 Output tokens", f"{metrics.get('total_completion_tokens', 0):,}")
-            metal = metrics.get("metal") or {}
-            active_gb = metal.get("active_memory_gb")
-            peak_gb = metal.get("peak_memory_gb")
-            col7.metric("🔧 Metal memory", f"{active_gb:.2f} GB" if active_gb is not None else "—")
-            col8.metric("📈 Peak memory", f"{peak_gb:.2f} GB" if peak_gb is not None else "—")
-
-            st.session_state.metrics_history.append(
-                {
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                    "active": metrics.get("num_running", 0),
-                    "queued": metrics.get("num_waiting", 0),
-                    "total": metrics.get("total_requests_processed", 0),
-                    "memory_gb": active_gb or 0,
-                }
+            fig.add_trace(
+                go.Scatter(
+                    x=df["time"], y=df["queued"], name="Queued",
+                    fill="tozeroy", line=dict(color="#F59E0B", width=2),
+                    fillcolor="rgba(245,158,11,0.1)",
+                )
             )
-            if len(st.session_state.metrics_history) > 120:
-                st.session_state.metrics_history = st.session_state.metrics_history[-120:]
-        else:
-            for col, label in zip(
-                [col1, col2, col3, col4],
-                ["⏱ Uptime", "📨 Active", "⏳ Queued", "✅ Completed"],
-            ):
-                col.metric(label, "—")
+            st.plotly_chart(_plotly_defaults(fig), width="stretch")
 
-        history = st.session_state.metrics_history
-        if history:
-            df = pd.DataFrame(history)
-            left, right = st.columns(2)
-
-            with left:
-                st.subheader("Requests over time")
-                fig = go.Figure()
-                fig.add_trace(
-                    go.Scatter(
-                        x=df["time"], y=df["active"], name="Active",
-                        fill="tozeroy", line=dict(color="#7C3AED", width=2),
-                        fillcolor="rgba(124,58,237,0.15)",
-                    )
+        with right:
+            st.subheader("Metal GPU memory (GB)")
+            fig2 = go.Figure()
+            fig2.add_trace(
+                go.Scatter(
+                    x=df["time"], y=df["memory_gb"], name="Memory GB",
+                    fill="tozeroy", line=dict(color="#10B981", width=2),
+                    fillcolor="rgba(16,185,129,0.15)",
                 )
-                fig.add_trace(
-                    go.Scatter(
-                        x=df["time"], y=df["queued"], name="Queued",
-                        fill="tozeroy", line=dict(color="#F59E0B", width=2),
-                        fillcolor="rgba(245,158,11,0.1)",
-                    )
-                )
-                st.plotly_chart(_plotly_defaults(fig), width="stretch")
+            )
+            st.plotly_chart(_plotly_defaults(fig2), width="stretch")
 
-            with right:
-                st.subheader("Metal GPU memory (GB)")
-                fig2 = go.Figure()
-                fig2.add_trace(
-                    go.Scatter(
-                        x=df["time"], y=df["memory_gb"], name="Memory GB",
-                        fill="tozeroy", line=dict(color="#10B981", width=2),
-                        fillcolor="rgba(16,185,129,0.15)",
-                    )
-                )
-                st.plotly_chart(_plotly_defaults(fig2), width="stretch")
+    if metrics and metrics.get("requests"):
+        st.subheader("Active requests")
+        st.dataframe(pd.DataFrame(metrics["requests"]), width="stretch", hide_index=True)
 
-        if metrics and metrics.get("requests"):
-            st.subheader("Active requests")
-            st.dataframe(pd.DataFrame(metrics["requests"]), width="stretch", hide_index=True)
+    if status["running"] and status["healthy"]:
+        try:
+            cache_data = sm.get_cache_stats(config.get("api_key", ""))
+            if cache_data and not cache_data.get("error"):
+                with st.expander("🗄 Cache statistics"):
+                    st.json(cache_data)
+        except Exception:
+            pass
 
-        if status["running"] and status["healthy"]:
-            try:
-                cache_data = sm.get_cache_stats(config.get("api_key", ""))
-                if cache_data and not cache_data.get("error"):
-                    with st.expander("🗄 Cache statistics"):
-                        st.json(cache_data)
-            except Exception:
-                pass
-
-    _live_metrics()
+    if status["running"]:
+        # Poll fast while model is loading, normal rate once healthy
+        poll_interval = 2 if not status["healthy"] else st.session_state.get("refresh_rate", 5)
+        time.sleep(poll_interval)
+        st.rerun()
 
 
 # ===========================================================================
