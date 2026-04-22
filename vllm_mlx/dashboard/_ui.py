@@ -575,6 +575,11 @@ def page_server() -> None:
                     with c2:
                         if st.button("🔄 Restart", use_container_width=True,
                                      type="primary", key="_restart_btn"):
+                            sel = st.session_state.get("_model_sel", "")
+                            if sel and not sel.startswith("✏️"):
+                                config["model"] = sel
+                            elif st.session_state.get("_model_sel_manual", ""):
+                                config["model"] = st.session_state["_model_sel_manual"]
                             with st.spinner("Restarting…"):
                                 sm.stop_server()
                                 time.sleep(2)
@@ -584,6 +589,12 @@ def page_server() -> None:
                 else:
                     if st.button("▶ Start Server", use_container_width=True,
                                  type="primary", key="_start_btn"):
+                        # Use the widget's current value — user may not have hit Save yet
+                        sel = st.session_state.get("_model_sel", "")
+                        if sel and not sel.startswith("✏️"):
+                            config["model"] = sel
+                        elif st.session_state.get("_model_sel_manual", ""):
+                            config["model"] = st.session_state["_model_sel_manual"]
                         with st.spinner("Starting server…"):
                             ok, msg = sm.start_server(config)
                         st.session_state["_srv_action_result"] = (ok, msg)
