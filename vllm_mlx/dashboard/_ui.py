@@ -306,7 +306,7 @@ def _connection_info_block(port: int, model: str = "", api_key: str = "", mgmt_p
         import pandas as _pd
         st.dataframe(
             _pd.DataFrame(rows),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
         st.caption(
@@ -469,7 +469,7 @@ def page_overview() -> None:
                     fillcolor="rgba(245,158,11,0.1)",
                 )
             )
-            st.plotly_chart(_plotly_defaults(fig), use_container_width=True)
+            st.plotly_chart(_plotly_defaults(fig), width="stretch")
 
         with right:
             st.subheader("Metal GPU memory (GB)")
@@ -481,11 +481,11 @@ def page_overview() -> None:
                     fillcolor="rgba(16,185,129,0.15)",
                 )
             )
-            st.plotly_chart(_plotly_defaults(fig2), use_container_width=True)
+            st.plotly_chart(_plotly_defaults(fig2), width="stretch")
 
     if metrics and metrics.get("requests"):
         st.subheader("Active requests")
-        st.dataframe(pd.DataFrame(metrics["requests"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(metrics["requests"]), width="stretch", hide_index=True)
 
     if status["running"] and status["healthy"]:
         url = sm.get_server_url(config)
@@ -577,7 +577,7 @@ def page_server() -> None:
                 if s["running"]:
                     c1, c2 = st.columns(2)
                     with c1:
-                        if st.button("⏹ Stop", use_container_width=True,
+                        if st.button("⏹ Stop", width="stretch",
                                      type="secondary", key="_stop_btn"):
                             with st.spinner("Stopping…"):
                                 ok, msg = sm.stop_server()
@@ -585,7 +585,7 @@ def page_server() -> None:
                             time.sleep(0.5)
                             st.rerun()
                     with c2:
-                        if st.button("🔄 Restart", use_container_width=True,
+                        if st.button("🔄 Restart", width="stretch",
                                      type="primary", key="_restart_btn"):
                             sel = st.session_state.get("_model_sel", "")
                             if sel and not sel.startswith("✏️"):
@@ -599,7 +599,7 @@ def page_server() -> None:
                             st.session_state["_srv_action_result"] = (ok, msg)
                             st.rerun()
                 else:
-                    if st.button("▶ Start Server", use_container_width=True,
+                    if st.button("▶ Start Server", width="stretch",
                                  type="primary", key="_start_btn"):
                         # Use the widget's current value — user may not have hit Save yet
                         sel = st.session_state.get("_model_sel", "")
@@ -663,7 +663,7 @@ def page_server() -> None:
         load_presets_btn = st.button(
             "✨ Load optimal settings",
             help="Read this model's HuggingFace card and pre-fill recommended settings",
-            use_container_width=True,
+            width="stretch",
         )
         model_size = next(
             (m["size_gb"] for m in cached_models if m["id"] == selected_model), None
@@ -906,7 +906,7 @@ def page_server() -> None:
         if status["running"]:
             st.warning("✅ Configuration saved.")
             if st.button("🔄 Restart Server now to apply changes", type="primary",
-                         use_container_width=True, key="_restart_after_save"):
+                         width="stretch", key="_restart_after_save"):
                 with st.spinner("Restarting…"):
                     sm.stop_server()
                     time.sleep(2)
@@ -921,11 +921,11 @@ def page_server() -> None:
         st.subheader("🗄 Cache controls")
         cc1, cc2, _ = st.columns([1, 1, 2])
         with cc1:
-            if st.button("🗑 Clear all caches", use_container_width=True):
+            if st.button("🗑 Clear all caches", width="stretch"):
                 ok, msg = sm.clear_cache("all", config.get("api_key", ""))
                 st.success(msg) if ok else st.error(msg)
         with cc2:
-            if st.button("🗑 Clear prefix cache", use_container_width=True):
+            if st.button("🗑 Clear prefix cache", width="stretch"):
                 ok, msg = sm.clear_cache("prefix", config.get("api_key", ""))
                 st.success(msg) if ok else st.error(msg)
 
@@ -972,7 +972,7 @@ def page_models() -> None:
                 start_dl = st.button(
                     "⬇️ Download Starter Model",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                     help=STARTER_MODEL,
                 )
             st.caption(f"Starter model: `{STARTER_MODEL}`")
@@ -1007,7 +1007,7 @@ def page_models() -> None:
                     title="Disk usage by model",
                     color_discrete_sequence=px.colors.qualitative.Vivid,
                 )
-                st.plotly_chart(_plotly_defaults(fig_pie, height=320), use_container_width=True)
+                st.plotly_chart(_plotly_defaults(fig_pie, height=320), width="stretch")
 
             st.divider()
 
@@ -1034,12 +1034,12 @@ def page_models() -> None:
                 with c_use:
                     if is_active:
                         st.button("✓ Active", key=f"use_{model['id']}", disabled=True,
-                                  use_container_width=True)
+                                  width="stretch")
                     else:
                         if st.button(
                             "⚡ Switch",
                             key=f"use_{model['id']}",
-                            use_container_width=True,
+                            width="stretch",
                             type="primary",
                             help="Switch the server to this model (restarts if running)",
                         ):
@@ -1049,7 +1049,7 @@ def page_models() -> None:
                     if st.button(
                         "🗑",
                         key=f"del_{model['id']}",
-                        use_container_width=True,
+                        width="stretch",
                         help="Delete from disk",
                     ):
                         st.session_state[f"_confirm_{model['id']}"] = True
@@ -1108,13 +1108,13 @@ def page_models() -> None:
                 label_visibility="collapsed",
             )
         with btn_col:
-            do_search = st.button("🔍 Search", type="primary", use_container_width=True)
+            do_search = st.button("🔍 Search", type="primary", width="stretch")
 
         st.caption("Quick filters:")
         qf_cols = st.columns(8)
         for i, tag in enumerate(["Llama", "Qwen", "Gemma", "Mistral", "Phi", "DeepSeek", "Falcon", "Mamba"]):
             with qf_cols[i]:
-                if st.button(tag, key=f"qf_{tag}", use_container_width=True):
+                if st.button(tag, key=f"qf_{tag}", width="stretch"):
                     st.session_state.search_query = tag
                     st.rerun()
 
@@ -1253,9 +1253,9 @@ def page_models() -> None:
                 with rc[5]:
                     if already:
                         st.button("✓ Got it", key=f"get_{r['id']}", disabled=True,
-                                  use_container_width=True)
+                                  width="stretch")
                     else:
-                        if st.button("⬇️ Get", key=f"get_{r['id']}", use_container_width=True):
+                        if st.button("⬇️ Get", key=f"get_{r['id']}", width="stretch"):
                             with st.spinner(
                                 f"Downloading **{r['id'].split('/')[-1]}**… "
                                 "this may take several minutes."
@@ -1421,7 +1421,7 @@ def page_benchmarks() -> None:
                     row[label] = round(r[key], 1) if isinstance(r[key], float) else r[key]
             rows.append(row)
 
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
         tps_data = [
             {
@@ -1438,7 +1438,7 @@ def page_benchmarks() -> None:
                 text="tok/s", color_discrete_sequence=px.colors.qualitative.Vivid,
             )
             fig.update_traces(texttemplate="%{text:.1f}", textposition="outside")
-            st.plotly_chart(_plotly_defaults(fig, 320), use_container_width=True)
+            st.plotly_chart(_plotly_defaults(fig, 320), width="stretch")
 
         ttft_data = [
             {
@@ -1455,7 +1455,7 @@ def page_benchmarks() -> None:
                 text="TTFT (ms)", color_discrete_sequence=px.colors.qualitative.Pastel,
             )
             fig2.update_traces(texttemplate="%{text:.0f}", textposition="outside")
-            st.plotly_chart(_plotly_defaults(fig2, 280), use_container_width=True)
+            st.plotly_chart(_plotly_defaults(fig2, 280), width="stretch")
 
         st.subheader("Detailed results")
         for i, r in enumerate(reversed(results_all)):
@@ -1556,7 +1556,7 @@ def page_chat() -> None:
     with st.sidebar:
         st.subheader("💬 Chats")
 
-        if st.button("➕ New chat", use_container_width=True, type="primary"):
+        if st.button("➕ New chat", width="stretch", type="primary"):
             new_id = _new_chat_id()
             st.session_state.chats[new_id] = {
                 "title": "New chat", "messages": [], "model": active_model, "starred": False,
@@ -1579,7 +1579,7 @@ def page_chat() -> None:
             c_btn, c_star, c_del = st.columns([6, 1, 1])
             with c_btn:
                 label = ("▶ " if is_active else "") + cd.get("title", "New chat")
-                if st.button(label, key=f"_cbtn_{cid2}", use_container_width=True,
+                if st.button(label, key=f"_cbtn_{cid2}", width="stretch",
                              type="primary" if is_active else "secondary"):
                     st.session_state.active_chat_id = cid2
                     st.rerun()
@@ -1656,7 +1656,7 @@ def page_chat() -> None:
             st.session_state.chats[cid]["title"] = new_title
             _save_chats(st.session_state.chats)
 
-        if st.button("🗑 Clear messages", use_container_width=True, key="_chat_clear",
+        if st.button("🗑 Clear messages", width="stretch", key="_chat_clear",
                      help="Clear all messages in this chat (keeps the chat entry)"):
             st.session_state.chats[cid]["messages"] = []
             _save_chats(st.session_state.chats)
@@ -1672,7 +1672,7 @@ def page_chat() -> None:
                 f"**{active_model.split('/')[-1]}** loaded."
             )
         with sw2:
-            if st.button("⚡ Switch", type="primary", use_container_width=True, key="_chat_swbtn"):
+            if st.button("⚡ Switch", type="primary", width="stretch", key="_chat_swbtn"):
                 _swap_model(chat_model)
 
     st.caption(
@@ -2153,7 +2153,7 @@ def page_settings() -> None:
 
     col_force, _ = st.columns([1, 3])
     with col_force:
-        if st.button("↺ Re-check now", use_container_width=True,
+        if st.button("↺ Re-check now", width="stretch",
                      help="Bypass 1-hour cache and check for updates now"):
             with st.spinner("Checking…"):
                 _pkgs = uc.check_updates(force=True)
@@ -2191,7 +2191,7 @@ def page_settings() -> None:
             # Auto-trigger if coming from sidebar button
             _auto_run = st.session_state.pop("_trigger_upgrade", False)
             if st.button("⬆️ Upgrade & Restart", type="primary",
-                         use_container_width=False, key="_do_upgrade_btn") or _auto_run:
+                         width="content", key="_do_upgrade_btn") or _auto_run:
                 _out_area = st.empty()
                 _buf: list[str] = []
                 with st.spinner("Upgrading — this takes 1–3 minutes…"):
@@ -2329,7 +2329,7 @@ with st.sidebar:
         )
         if _sb_sel != _sb_active:
             if st.button("Switch now", key="_sidebar_swap_btn", type="primary",
-                         use_container_width=True):
+                         width="stretch"):
                 st.session_state["_swap_confirm"] = None
                 _swap_model(_sb_sel)
 
@@ -2338,7 +2338,7 @@ with st.sidebar:
     for page_name in PAGES:
         if st.button(
             page_name,
-            use_container_width=True,
+            width="stretch",
             type="primary" if st.session_state.page == page_name else "secondary",
             key=f"nav_{page_name}",
         ):
@@ -2354,7 +2354,7 @@ with st.sidebar:
         _n = len(_upd_outdated)
         st.warning(f"⬆️ **{_n} update{'s' if _n > 1 else ''} available**")
         if st.button("Upgrade & Restart", type="primary",
-                     use_container_width=True, key="_sidebar_upgrade_btn"):
+                     width="stretch", key="_sidebar_upgrade_btn"):
             st.session_state["_trigger_upgrade"] = True
             st.session_state.page = "⚙️ Settings"
             st.rerun()
