@@ -102,7 +102,23 @@ def logs(lines: int = 200, _: None = Depends(_check_auth)) -> dict:
 
 @app.get("/metrics")
 def metrics(_: None = Depends(_check_auth)) -> dict:
-    return sm.get_metrics()
+    return sm.get_metrics() or {}
+
+
+# ── Cache proxy ───────────────────────────────────────────────────────────────
+
+@app.get("/cache/stats")
+def cache_stats(_: None = Depends(_check_auth)) -> dict:
+    """Proxy for /v1/cache/stats on the inference server."""
+    result = sm.get_cache_stats()
+    return result if result is not None else {"error": "unavailable"}
+
+
+@app.delete("/cache/{cache_type}")
+def clear_cache_proxy(cache_type: str, _: None = Depends(_check_auth)) -> dict:
+    """Proxy for cache clear (cache_type: 'all' or 'prefix')."""
+    ok, msg = sm.clear_cache(cache_type)
+    return {"ok": ok, "status": msg}
 
 
 # ── Config ────────────────────────────────────────────────────────────────────

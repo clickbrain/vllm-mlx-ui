@@ -401,8 +401,21 @@ def get_logs(last_n_lines: int = 150) -> str:
 
 
 def get_metrics(api_key: str = "") -> dict | None:
-    """Poll /v1/status for real-time engine metrics."""
+    """Poll for real-time engine metrics.
+    In remote mode, proxies through the management API so the caller
+    does not need direct access to the inference server port.
+    """
     config = load_config()
+    mgmt = _mgmt_base(config)
+    if mgmt:
+        try:
+            r = requests.get(f"{mgmt}/metrics", headers=_mgmt_headers(config), timeout=3)
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            pass
+        return None
+    # Local mode — call inference API directly
     url = get_server_url(config)
     headers = {}
     key = api_key or config.get("api_key", "")
@@ -417,9 +430,51 @@ def get_metrics(api_key: str = "") -> dict | None:
     return None
 
 
-def clear_cache(cache_type: str = "all", api_key: str = "") -> tuple[bool, str]:
-    """Clear server caches. cache_type: 'all' or 'prefix'."""
+def get_cache_stats(api_key: str = "") -> dict | None:
+    """Fetch cache statistics.
+    In remote mode, proxies through the management API.
+    """
     config = load_config()
+    mgmt = _mgmt_base(config)
+    if mgmt:
+        try:
+            r = requests.get(f"{mgmt}/cache/stats", headers=_mgmt_headers(config), timeout=3)
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            pass
+        return None
+    url = get_server_url(config)
+    headers = {}
+    key = api_key or config.get("api_key", "")
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    try:
+        r = requests.get(f"{url}/v1/cache/stats", headers=headers, timeout=2)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return None
+
+
+def clear_cache(cache_type: str = "all", api_key: str = "") -> tuple[bool, str]:
+    """Clear server caches. cache_type: 'all' or 'prefix'.
+    In remote mode, proxies through the management API.
+    """
+    config = load_config()
+    mgmt = _mgmt_base(config)
+    if mgmt:
+        try:
+            r = requests.delete(
+                f"{mgmt}/cache/{cache_type}", headers=_mgmt_headers(config), timeout=5
+            )
+            if r.status_code in (200, 204):
+                return True, r.json().get("status", "ok")
+            return False, f"HTTP {r.status_code}"
+        except Exception as e:
+            return False, str(e)
+    # Local mode
     url = get_server_url(config)
     headers = {}
     key = api_key or config.get("api_key", "")

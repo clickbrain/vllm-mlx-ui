@@ -488,14 +488,11 @@ def page_overview() -> None:
         st.dataframe(pd.DataFrame(metrics["requests"]), width="stretch", hide_index=True)
 
     if status["running"] and status["healthy"]:
-        url = sm.get_server_url(config)
         try:
-            r = requests.get(f"{url}/v1/cache/stats", headers=_api_headers(config), timeout=2)
-            if r.status_code == 200:
-                cache_data = r.json()
-                if not cache_data.get("error"):
-                    with st.expander("🗄 Cache statistics"):
-                        st.json(cache_data)
+            cache_data = sm.get_cache_stats(config.get("api_key", ""))
+            if cache_data and not cache_data.get("error"):
+                with st.expander("🗄 Cache statistics"):
+                    st.json(cache_data)
         except Exception:
             pass
 
