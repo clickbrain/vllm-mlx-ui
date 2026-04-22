@@ -57,9 +57,21 @@ brew tap clickbrain/vllm-mlx-ui https://github.com/clickbrain/vllm-mlx-ui
 brew install --HEAD clickbrain/vllm-mlx-ui/vllm-mlx-ui
 ```
 
-Then start the dashboard:
+After install, start the dashboard with:
 ```bash
 vllm-mlx-ui
+```
+
+**Upgrading (Homebrew):**
+```bash
+brew upgrade --fetch-HEAD vllm-mlx-ui
+```
+This upgrades the UI, the inference engine, and all Python dependencies in one step.
+
+**Uninstalling (Homebrew):**
+```bash
+brew uninstall vllm-mlx-ui
+brew untap clickbrain/vllm-mlx-ui
 ```
 
 > **Don't have Homebrew?** Get it at [brew.sh](https://brew.sh) or run:
@@ -82,13 +94,26 @@ This will:
 - Install the dashboard UI
 - Download the starter model: `mlx-community/Llama-3.2-3B-Instruct-4bit` (~2 GB)
 - Create a **"Start vllm-mlx.command"** shortcut on your Desktop
+- Print the exact command to run if `vllm-mlx-ui` isn't on your PATH
 
 **After install:** Double-click the Desktop shortcut. Your browser opens automatically to the dashboard.
 
+**Upgrading (curl install):**
+```bash
+pip install --upgrade "git+https://github.com/clickbrain/vllm-mlx-ui.git#egg=vllm-mlx[ui]"
+```
+
+**Uninstalling (curl install):**
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/uninstall.sh)
+```
+
 > **Troubleshooting — "command not found: vllm-mlx-ui":**
-> The installer prints the exact full path, e.g.:
-> `/opt/homebrew/Caskroom/miniconda/base/bin/vllm-mlx-ui`
-> Run that directly, or use the Homebrew method above.
+> The installer prints the exact full path to use, e.g.:
+> ```
+> /opt/homebrew/Caskroom/miniconda/base/bin/vllm-mlx-ui
+> ```
+> Run that path directly, or switch to the Homebrew install method above — Homebrew always puts commands on PATH.
 
 > **To allow remote access from other devices:** Go to **Server → Configuration** and change *Listen on* to `0.0.0.0 — all network interfaces`, then restart. The Server page will show all your IP addresses to share with clients.
 
@@ -112,6 +137,16 @@ This will:
 3. Enter the IP address of the Mac running vllm-mlx (shown on that Mac's Server page)
 4. You now have full remote control — start/stop server, manage models, chat
 
+**Upgrading (remote install):**
+```bash
+pip install --upgrade "git+https://github.com/clickbrain/vllm-mlx-ui.git#egg=vllm-mlx[ui]"
+```
+
+**Uninstalling (remote install):**
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/uninstall.sh)
+```
+
 ---
 
 ### Option C — Clone the repository (developers)
@@ -123,9 +158,30 @@ pip install -e '.[ui]'
 vllm-mlx-ui
 ```
 
+**Upgrading (cloned repo):**
+```bash
+cd vllm-mlx-ui
+git pull
+pip install -e '.[ui]'
+```
+
+**Uninstalling (cloned repo):**
+```bash
+pip uninstall vllm-mlx
+rm -rf ~/Desktop/"Start vllm-mlx.command"
+# Optionally remove settings and chat history:
+rm -rf ~/.vllm_mlx_ui
+```
+
 ---
 
-### Uninstalling
+### Switching between install methods
+
+Your downloaded AI models are stored in `~/.cache/huggingface/hub/` — completely separate from the software. You can uninstall and reinstall using any method without losing any models.
+
+---
+
+### Uninstalling (all methods)
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/uninstall.sh)
@@ -142,15 +198,6 @@ vllm-mlx-ui
 ```
 
 Or directly with Streamlit:
-
-```bash
-streamlit run vllm_mlx/dashboard/_ui.py
-```
-
-The dashboard opens at `http://localhost:8501`.
-
----
-
 
 ```bash
 streamlit run vllm_mlx/dashboard/_ui.py
