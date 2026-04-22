@@ -281,22 +281,21 @@ def _connection_info_block(port: int, model: str = "", api_key: str = "", mgmt_p
 
         st.markdown("**Available addresses** — pick the one that works for your device:")
 
-        # Two rows per address: base URL and chat completions endpoint
         rows = []
         for a in addrs:
-            base      = f"http://{a['ip']}:{port}/v1"
-            chat      = f"http://{a['ip']}:{port}/v1/chat/completions"
-            mgmt      = f"http://{a['ip']}:{mgmt_port}"
-            rows.append(
-                f"| `{a['label']}` | `{base}` | `{chat}` | `{mgmt}` |"
-            )
+            rows.append({
+                "Interface":      a["label"],
+                "Base URL (/v1)": f"http://{a['ip']}:{port}/v1",
+                "Chat endpoint":  f"http://{a['ip']}:{port}/v1/chat/completions",
+                "Management API": f"http://{a['ip']}:{mgmt_port}",
+            })
 
-        table = (
-            "| Interface | Base URL (`/v1`) | Chat endpoint | Management API |\n"
-            "|-----------|-----------------|---------------|----------------|\n"
-            + "\n".join(rows)
+        import pandas as _pd
+        st.dataframe(
+            _pd.DataFrame(rows),
+            use_container_width=True,
+            hide_index=True,
         )
-        st.markdown(table)
         st.caption(
             "💡 **Which URL to use?**  \n"
             "• Most OpenAI-compatible clients (e.g. Cursor, Continue) want the **Base URL** (`/v1`).  \n"
