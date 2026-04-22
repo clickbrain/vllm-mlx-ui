@@ -1,6 +1,6 @@
 # vllm-mlx Dashboard UI with local and remote network access
 
-A comprehensive macOS web dashboard for [vllm-mlx](https://github.com/waybarrios/vllm-mlx) — the high-performance Apple Silicon LLM inference server.
+A comprehensive macOS web dashboard for [vllm-mlx](https://github.com/waybarrios/vllm-mlx) — the high-performance Apple Silicon LLM inference server. Run powerful AI models completely locally: no cloud, no subscriptions, no data leaving your Mac.
 
 > **Note:** This UI was fully designed and coded by AI (GitHub Copilot / Claude). It is offered as a contribution to the vllm-mlx community.
 
@@ -371,6 +371,29 @@ State is stored in `~/.vllm_mlx_ui/`:
 - `server.log` — server log output
 - `benchmark_results.json` — benchmark history
 - `chats.json` — chat history
+
+---
+
+## 🔒 Privacy & Data Ownership
+
+**Your AI. Your data. Full stop.**
+
+vllm-mlx is built on a simple principle: AI should run on *your* hardware, under *your* control, with none of your data leaving your machine. This dashboard exists to make that as easy as possible.
+
+- **Everything runs locally.** Inference, chat, benchmarks, model management — all of it happens on your Mac. No cloud, no subscription, no usage limits.
+- **Your conversations never leave your device.** Chat history is stored in `~/.vllm_mlx_ui/chats.json` on your Mac and nowhere else.
+- **Your prompts and model outputs are never transmitted.** The AI runs entirely on your Apple Silicon chip. No third-party servers see your queries or responses.
+- **Streamlit telemetry is disabled.** The dashboard framework (Streamlit) normally collects anonymous usage stats. We explicitly disable this at startup — it never runs.
+
+The only times this software contacts the internet are actions you explicitly trigger:
+
+| Action | Destination | What is sent |
+|--------|-------------|--------------|
+| Download a model | `huggingface.co` | The model ID you requested |
+| Search for models | `huggingface.co` | Your search query |
+| Check for updates | `api.github.com`, `pypi.org` | Nothing — these are read-only public API calls |
+
+No account required. No telemetry. No analytics. No backdoors.
 
 ---
 
