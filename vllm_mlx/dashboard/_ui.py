@@ -525,6 +525,18 @@ def page_server() -> None:
     config = sm.load_config()
     status = sm.get_server_status()
 
+    # Show persistent result from previous button action (survives rerun)
+    if "_srv_action_result" in st.session_state:
+        ok, msg = st.session_state.pop("_srv_action_result")
+        if ok:
+            st.success(msg)
+        else:
+            st.error(msg)
+            logs = sm.get_logs(last_n_lines=30).strip()
+            if logs:
+                with st.expander("📋 Server log (click to diagnose)"):
+                    st.code(logs, language="text")
+
     status_ph = st.empty()
     btns_ph = st.empty()
 
@@ -557,7 +569,7 @@ def page_server() -> None:
                                      type="secondary", key="_stop_btn"):
                             with st.spinner("Stopping…"):
                                 ok, msg = sm.stop_server()
-                            st.success(msg) if ok else st.error(msg)
+                            st.session_state["_srv_action_result"] = (ok, msg)
                             time.sleep(0.5)
                             st.rerun()
                     with c2:
@@ -567,14 +579,14 @@ def page_server() -> None:
                                 sm.stop_server()
                                 time.sleep(2)
                                 ok, msg = sm.start_server(config)
-                            st.success(msg) if ok else st.error(msg)
+                            st.session_state["_srv_action_result"] = (ok, msg)
                             st.rerun()
                 else:
                     if st.button("▶ Start Server", use_container_width=True,
                                  type="primary", key="_start_btn"):
                         with st.spinner("Starting server…"):
                             ok, msg = sm.start_server(config)
-                        st.success(msg) if ok else st.error(msg)
+                        st.session_state["_srv_action_result"] = (ok, msg)
                         st.rerun()
 
     _render_status(status)
@@ -1040,7 +1052,7 @@ def page_models() -> None:
                         if st.button("Yes, delete", key=f"_yes_{model['id']}", type="primary"):
                             with st.spinner(f"Deleting {model['id']}…"):
                                 ok, msg = mm.delete_model(model["id"])
-                            st.success(msg) if ok else st.error(msg)
+                            st.toast(msg, icon="✅" if ok else "❌")
                             st.session_state.pop(f"_confirm_{model['id']}", None)
                             time.sleep(0.5)
                             st.rerun()
