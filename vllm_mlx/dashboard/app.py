@@ -1,10 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """CLI entry point — launches the Streamlit dashboard and management API server."""
 
+import logging
 import subprocess
 import sys
 import threading
 from pathlib import Path
+
+# Suppress the noisy "missing ScriptRunContext" warnings that fire on every
+# AnyIO worker thread request to the management API (FastAPI/uvicorn runs in
+# the same process as Streamlit and uses AnyIO threads that have no Streamlit
+# context). These warnings are harmless — the management API doesn't use
+# Streamlit session state.
+logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(
+    logging.ERROR
+)
 
 
 def main() -> None:
