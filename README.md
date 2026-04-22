@@ -32,19 +32,44 @@ The vllm-mlx Dashboard gives you a beautiful, zero-configuration web UI to contr
 
 ## Installation
 
-### Which installer do I need?
+### Which method is right for you?
 
-| Scenario | Use |
-|----------|-----|
-| You have an Apple Silicon Mac and want to run AI locally | **Option A** |
-| You have a second device and want to control the AI Mac from it | **Option B** (on the second device) |
-| Developer / advanced user wanting full control | **Option C** (clone) |
+| Scenario | Recommended method |
+|----------|--------------------|
+| New user on Apple Silicon Mac | **Homebrew** (easiest — always on PATH) |
+| Quick one-line install without Homebrew | **curl installer** |
+| Second device to control the AI Mac remotely | **Remote installer** (Option B) |
+| Developer wanting editable source | **Clone** (Option C) |
 
-**You do not need to choose between local and remote.** Option A installs everything — your Apple Silicon Mac can run the AI server AND be controlled remotely. Just make sure you enable network access in Settings.
+**You do not need to choose between local and remote.** The full install lets your Mac both run the AI server AND be controlled from other devices — just enable network access in **Settings**.
 
 ---
 
-### Option A — Full Install (Recommended for most users)
+### Option A — Homebrew (recommended for new users)
+
+Homebrew puts `vllm-mlx-ui` permanently on your PATH so the command always works, even outside conda or pyenv sessions.
+
+```bash
+# 1. Add the tap (one time only)
+brew tap clickbrain/vllm-mlx-ui https://github.com/clickbrain/vllm-mlx-ui
+
+# 2. Install (takes 3–10 minutes on first run)
+brew install --HEAD clickbrain/vllm-mlx-ui/vllm-mlx-ui
+```
+
+Then start the dashboard:
+```bash
+vllm-mlx-ui
+```
+
+> **Don't have Homebrew?** Get it at [brew.sh](https://brew.sh) or run:
+> ```bash
+> /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+> ```
+
+---
+
+### Option A2 — curl installer (no Homebrew required)
 
 Run this on the Apple Silicon Mac that will host the AI server:
 
@@ -56,17 +81,22 @@ This will:
 - Install vllm-mlx and all ML dependencies
 - Install the dashboard UI
 - Download the starter model: `mlx-community/Llama-3.2-3B-Instruct-4bit` (~2 GB)
-- Create a **"vllm-mlx.command"** shortcut on your Desktop
+- Create a **"Start vllm-mlx.command"** shortcut on your Desktop
 
 **After install:** Double-click the Desktop shortcut. Your browser opens automatically to the dashboard.
 
-> **To allow remote access from other devices:** Go to **Server → Configuration** and change *Listen on* to `0.0.0.0 — all network interfaces`, then restart. The Server page will show all your IP addresses and hostnames to share with clients.
+> **Troubleshooting — "command not found: vllm-mlx-ui":**
+> The installer prints the exact full path, e.g.:
+> `/opt/homebrew/Caskroom/miniconda/base/bin/vllm-mlx-ui`
+> Run that directly, or use the Homebrew method above.
+
+> **To allow remote access from other devices:** Go to **Server → Configuration** and change *Listen on* to `0.0.0.0 — all network interfaces`, then restart. The Server page will show all your IP addresses to share with clients.
 
 ---
 
 ### Option B — Remote Dashboard Only
 
-Run this on any Mac (or Linux machine) that will **control** a vllm-mlx server running on another machine. No AI model or GPU software is installed — this is a lightweight ~30 MB control panel.
+Run this on any Mac (or Linux machine) that will **control** a vllm-mlx server running on another machine. No AI model or GPU software is installed locally.
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/install-remote.sh)
@@ -89,18 +119,19 @@ This will:
 ```bash
 git clone https://github.com/clickbrain/vllm-mlx-ui.git
 cd vllm-mlx-ui
-pip install -r requirements.txt   # or: pip install '.[all]'
-vllm-mlx-ui
-```
-
-Or, if installing as part of the full vllm-mlx package:
-
-```bash
-git clone https://github.com/waybarrios/vllm-mlx.git
-cd vllm-mlx
 pip install -e '.[ui]'
 vllm-mlx-ui
 ```
+
+---
+
+### Uninstalling
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/uninstall.sh)
+```
+
+Removes the package (pip or Homebrew), Desktop shortcut, and optionally your settings, chat history, and downloaded models.
 
 ---
 
