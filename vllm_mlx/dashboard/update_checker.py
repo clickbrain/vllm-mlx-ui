@@ -226,6 +226,38 @@ def upgrade_command() -> list[str]:
     ]
 
 
+def _find_binary() -> list[str]:
+    """
+    Return the command to relaunch vllm-mlx-ui as a list of strings.
+    Tries multiple strategies so the binary is found even when the
+    Streamlit subprocess has a stripped-down PATH.
+    """
+    import sys
+
+    # 1. Current process PATH (works in most environments)
+    found = shutil.which("vllm-mlx-ui")
+    if found:
+        return [found]
+
+    # 2. Common Homebrew locations (macOS Apple Silicon and Intel)
+    for candidate in [
+        "/opt/homebrew/bin/vllm-mlx-ui",
+        "/usr/local/bin/vllm-mlx-ui",
+    ]:
+        if shutil.os.path.isfile(candidate) and shutil.os.access(candidate, shutil.os.X_OK):
+            return [candidate]
+
+    # 3. Same bin directory as the current Python interpreter
+    from pathlib import Path
+    sibling = Path(sys.executable).parent / "vllm-mlx-ui"
+    if sibling.exists():
+        return [str(sibling)]
+
+    # 4. Last resort: re-run as a Python module (always works but skips
+    #    Homebrew's PATH manipulation)
+    return [sys.executable, "-m", "vllm_mlx.dashboard.app"]
+
+
 def relaunch() -> None:
     """
     Start a fresh vllm-mlx-ui process and terminate the current one.
@@ -233,7 +265,6 @@ def relaunch() -> None:
     running, writes a flag file so the new process auto-starts it.
     """
     import os
-    import sys
 
     # Write auto-start flag if the inference server is running right now
     try:
@@ -247,29 +278,7 @@ def relaunch() -> None:
     except Exception:
         pass
 
-def relaunch() -> None:
-    """
-    Start a fresh vllm-mlx-ui process and terminate the current one.
-    Called after a successful upgrade.  If the inference server is currently
-    running, writes a flag file so the new process auto-starts it.
-    """
-    import os
-    import sys
-
-    # Write auto-start flag if the inference server is running right now
-    try:
-        from vllm_mlx.dashboard.server_manager import get_server_status, AUTO_START_FLAG, STATE_DIR
-        status = get_server_status()
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
-        if status.get("running"):
-            AUTO_START_FLAG.write_text("1")
-        else:
-            AUTO_START_FLAG.unlink(missing_ok=True)
-    except Exception:
-        pass
-
-    binary = shutil.which("vllm-mlx-ui")
-    cmd = [binary] if binary else [sys.executable] + sys.argv
+    cmd = _find_binary()
 
     # IMPORTANT: start_new_session=True puts the new process in its own
     # process group so it is NOT killed when we os._exit() the current one.
