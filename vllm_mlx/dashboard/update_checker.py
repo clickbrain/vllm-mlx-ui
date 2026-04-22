@@ -132,6 +132,7 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
     Return a list of PackageInfo for each tracked package.
     Results are cached in Streamlit session state for _CACHE_TTL seconds.
     Pass force=True to bypass the cache.
+    Checks run in parallel so the total wait is ~3 seconds max.
     """
     try:
         import streamlit as st
@@ -141,58 +142,70 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
     except Exception:
         cache = {}
 
-    results: list[PackageInfo] = []
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    # ── 1. vllm-mlx-ui (our UI project, Homebrew HEAD install) ────────────────
-    ui_installed_commit = _homebrew_installed_commit()
-    ui_latest_commit = _github_latest_commit_sha("clickbrain", "vllm-mlx-ui")
-    ui_update = (
-        bool(ui_installed_commit)
-        and bool(ui_latest_commit)
-        and ui_latest_commit not in ("unknown", "")
-        and ui_installed_commit != ui_latest_commit
-    )
-    from vllm_mlx.dashboard import __version__ as _ui_ver
-    results.append(PackageInfo(
-        name="vllm-mlx-ui (dashboard)",
-        installed=f"v{_ui_ver} ({ui_installed_commit or 'pip'})",
-        latest=f"commit {ui_latest_commit}",
-        update_available=ui_update,
-        url="https://github.com/clickbrain/vllm-mlx-ui/commits/main",
-    ))
+    def _check_ui():
+        ui_installed_commit = _homebrew_installed_commit()
+        ui_latest_commit = _github_latest_commit_sha("clickbrain", "vllm-mlx-ui")
+        ui_update = (
+            bool(ui_installed_commit)
+            and ui_latest_commit not in ("unknown", "")
+            and ui_installed_commit != ui_latest_commit
+        )
+        from vllm_mlx.dashboard import __version__ as _ui_ver
+        return PackageInfo(
+            name="vllm-mlx-ui (dashboard)",
+            installed=f"v{_ui_ver} ({ui_installed_commit or 'pip'})",
+            latest=f"commit {ui_latest_commit}",
+            update_available=ui_update,
+            url="https://github.com/clickbrain/vllm-mlx-ui/commits/main",
+        )
 
-    # ── 2. vllm-mlx (upstream inference engine) ───────────────────────────────
-    vllm_installed = _installed_version("vllm-mlx")
-    vllm_latest = _github_latest_tag("waybarrios", "vllm-mlx")
-    results.append(PackageInfo(
-        name="vllm-mlx (inference engine)",
-        installed=vllm_installed,
-        latest=vllm_latest,
-        update_available=_version_gt(vllm_latest, vllm_installed),
-        url="https://github.com/waybarrios/vllm-mlx/releases",
-    ))
+    def _check_vllm():
+        vllm_installed = _installed_version("vllm-mlx")
+        vllm_latest = _github_latest_tag("waybarrios", "vllm-mlx")
+        return PackageInfo(
+            name="vllm-mlx (inference engine)",
+            installed=vllm_installed,
+            latest=vllm_latest,
+            update_available=_version_gt(vllm_latest, vllm_installed),
+            url="https://github.com/waybarrios/vllm-mlx/releases",
+        )
 
-    # ── 3. mlx-lm ─────────────────────────────────────────────────────────────
-    mlxlm_installed = _installed_version("mlx-lm")
-    mlxlm_latest = _pypi_latest("mlx-lm")
-    results.append(PackageInfo(
-        name="mlx-lm",
-        installed=mlxlm_installed,
-        latest=mlxlm_latest,
-        update_available=_version_gt(mlxlm_latest, mlxlm_installed),
-        url="https://pypi.org/project/mlx-lm/#history",
-    ))
+    def _check_mlxlm():
+        inst = _installed_version("mlx-lm")
+        latest = _pypi_latest("mlx-lm")
+        return PackageInfo(
+            name="mlx-lm",
+            installed=inst,
+            latest=latest,
+            update_available=_version_gt(latest, inst),
+            url="https://pypi.org/project/mlx-lm/#history",
+        )
 
-    # ── 4. huggingface-hub ────────────────────────────────────────────────────
-    hfhub_installed = _installed_version("huggingface-hub")
-    hfhub_latest = _pypi_latest("huggingface-hub")
-    results.append(PackageInfo(
-        name="huggingface-hub",
-        installed=hfhub_installed,
-        latest=hfhub_latest,
-        update_available=_version_gt(hfhub_latest, hfhub_installed),
-        url="https://pypi.org/project/huggingface-hub/#history",
-    ))
+    def _check_hfhub():
+        inst = _installed_version("huggingface-hub")
+        latest = _pypi_latest("huggingface-hub")
+        return PackageInfo(
+            name="huggingface-hub",
+            installed=inst,
+            latest=latest,
+            update_available=_version_gt(latest, inst),
+            url="https://pypi.org/project/huggingface-hub/#history",
+        )
+
+    # Run all checks in parallel — total wait is max(individual timeouts) ≈ 3s
+    checkers = [_check_ui, _check_vllm, _check_mlxlm, _check_hfhub]
+    results: list[PackageInfo] = [None] * len(checkers)  # type: ignore[list-item]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(fn): i for i, fn in enumerate(checkers)}
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                results[idx] = future.result()
+            except Exception:
+                pass
+    results = [r for r in results if r is not None]
 
     try:
         import streamlit as st

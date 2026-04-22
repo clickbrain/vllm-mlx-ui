@@ -109,6 +109,19 @@ def _init_state() -> None:
 _init_state()
 
 
+# ── Auto update check (once per session, non-blocking background thread) ────
+if not st.session_state.get("_update_check_started"):
+    st.session_state["_update_check_started"] = True
+    import threading as _threading
+    def _bg_update_check():
+        try:
+            from vllm_mlx.dashboard import update_checker as _uc
+            _uc.check_updates()   # stores result in session_state when done
+        except Exception:
+            pass
+    _threading.Thread(target=_bg_update_check, daemon=True).start()
+
+
 def _is_remote() -> bool:
     """Return True when the user has toggled into remote mode."""
     return st.session_state.get("connection_mode", "local") == "remote"
@@ -1870,22 +1883,6 @@ def page_chat() -> None:
 def page_settings() -> None:
     st.title("⚙️ Settings")
 
-    # ── Update banner (shown at top when updates are available) ─────────────
-    try:
-        from vllm_mlx.dashboard import update_checker as _uc
-        _cached = st.session_state.get("_update_cache", {}).get("result")
-        if _cached:
-            _outdated = [p for p in _cached if p.update_available]
-            if _outdated:
-                names = ", ".join(p.name for p in _outdated)
-                st.warning(
-                    f"🔔 **Updates available:** {names}  —  "
-                    "scroll down to **🔄 Updates** to upgrade with one click.",
-                    icon="⬆️",
-                )
-    except Exception:
-        pass
-
     st.subheader("🔑 HuggingFace")
     hf_token = st.text_input(
         "HuggingFace token",
@@ -2149,31 +2146,27 @@ def page_settings() -> None:
     st.subheader("🔄 Updates")
 
     from vllm_mlx.dashboard import update_checker as uc
-    import importlib.metadata
 
     _method = uc._detect_install_method()
-    _method_label = {"homebrew": "Homebrew (`brew upgrade`)",
-                     "pip": "pip (`pip install --upgrade`)"}.get(_method, "unknown")
-    st.caption(f"Install method detected: **{_method_label}**")
+    _method_label = {"homebrew": "Homebrew", "pip": "pip"}.get(_method, "unknown")
+    st.caption(f"Install method: **{_method_label}** · Updates checked automatically on startup (hourly)")
 
-    col_check, col_force = st.columns([2, 1])
-    with col_check:
-        _do_check = st.button("🔍 Check for updates", use_container_width=True)
+    col_force, _ = st.columns([1, 3])
     with col_force:
-        _do_force = st.button("↺ Refresh", use_container_width=True,
-                              help="Bypass 1-hour cache and re-check now")
+        if st.button("↺ Re-check now", use_container_width=True,
+                     help="Bypass 1-hour cache and check for updates now"):
+            with st.spinner("Checking…"):
+                _pkgs = uc.check_updates(force=True)
+            st.rerun()
 
-    if _do_check or _do_force or st.session_state.get("_update_cache"):
-        with st.spinner("Checking versions…"):
-            _pkgs = uc.check_updates(force=bool(_do_force))
-
+    _pkgs = st.session_state.get("_update_cache", {}).get("results", [])
+    if _pkgs:
         _any_update = any(p.update_available for p in _pkgs)
         if _any_update:
             st.warning(f"🔔 **{sum(p.update_available for p in _pkgs)} update(s) available**")
         else:
             st.success("✅ Everything is up to date")
 
-        # Package table
         for pkg in _pkgs:
             c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
             c1.markdown(f"**{pkg.name}**")
@@ -2188,20 +2181,20 @@ def page_settings() -> None:
                 c3.markdown("—")
                 c4.markdown("")
 
-        if _any_update:
+        if _any_update or st.session_state.get("_trigger_upgrade"):
             st.divider()
             st.markdown("### ⬆️ Upgrade now")
             _cmd = uc.upgrade_command()
             st.code(" ".join(_cmd), language="bash")
-            st.caption(
-                "The upgrade will reinstall the package and all dependencies, "
-                "then automatically relaunch the dashboard."
-            )
-            if st.button("⬆️ Upgrade & Relaunch", type="primary", use_container_width=False):
+            st.caption("Upgrades the dashboard, inference engine, and all dependencies, then relaunches automatically.")
+
+            # Auto-trigger if coming from sidebar button
+            _auto_run = st.session_state.pop("_trigger_upgrade", False)
+            if st.button("⬆️ Upgrade & Restart", type="primary",
+                         use_container_width=False, key="_do_upgrade_btn") or _auto_run:
                 _out_area = st.empty()
                 _buf: list[str] = []
-
-                with st.spinner("Upgrading — this may take 1–2 minutes…"):
+                with st.spinner("Upgrading — this takes 1–3 minutes…"):
                     proc = uc.subprocess.Popen(
                         _cmd,
                         stdout=uc.subprocess.PIPE,
@@ -2211,22 +2204,18 @@ def page_settings() -> None:
                     assert proc.stdout
                     for line in proc.stdout:
                         _buf.append(line)
-                        # Show last 30 lines of output live
                         _out_area.code("".join(_buf[-30:]), language=None)
                     proc.wait()
 
                 if proc.returncode == 0:
                     st.success("✅ Upgrade complete! Relaunching in 5 seconds…")
-                    st.markdown(
-                        '<meta http-equiv="refresh" content="6">',
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown('<meta http-equiv="refresh" content="6">', unsafe_allow_html=True)
                     uc.relaunch()
                 else:
-                    st.error(
-                        f"❌ Upgrade failed (exit {proc.returncode}). "
-                        "See output above for details."
-                    )
+                    st.error(f"❌ Upgrade failed (exit {proc.returncode}). See output above.")
+    else:
+        st.info("Update check is running in the background — results will appear shortly. "
+                "Reload the page or click Re-check now.")
 
     st.divider()
     st.subheader("ℹ️ About")
@@ -2354,6 +2343,20 @@ with st.sidebar:
             key=f"nav_{page_name}",
         ):
             st.session_state.page = page_name
+            st.rerun()
+
+    # ── Update available banner (shown at bottom of sidebar) ─────────────────
+    _upd_cache = st.session_state.get("_update_cache", {})
+    _upd_results = _upd_cache.get("results", [])
+    _upd_outdated = [p for p in _upd_results if p.update_available]
+    if _upd_outdated:
+        st.divider()
+        _n = len(_upd_outdated)
+        st.warning(f"⬆️ **{_n} update{'s' if _n > 1 else ''} available**")
+        if st.button("Upgrade & Restart", type="primary",
+                     use_container_width=True, key="_sidebar_upgrade_btn"):
+            st.session_state["_trigger_upgrade"] = True
+            st.session_state.page = "⚙️ Settings"
             st.rerun()
 
 # Render the selected page
