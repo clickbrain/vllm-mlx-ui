@@ -3,4 +3,4 @@
 
 #: Dashboard UI version — updated with every release (independent of the core
 #: vllm-mlx package version tracked in pyproject.toml).
-__version__ = "1.3.0"
+__version__ = "1.4.0"

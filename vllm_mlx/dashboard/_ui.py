@@ -1395,20 +1395,61 @@ def page_chat() -> None:
         if st.button("➕ New chat", use_container_width=True, type="primary"):
             new_id = _new_chat_id()
             st.session_state.chats[new_id] = {
-                "title": "New chat", "messages": [], "model": active_model
+                "title": "New chat", "messages": [], "model": active_model, "starred": False,
             }
             st.session_state.active_chat_id = new_id
             _save_chats(st.session_state.chats)
             st.rerun()
 
         st.divider()
-        for chat_id, chat_data in reversed(list(st.session_state.chats.items())):
-            is_active = chat_id == st.session_state.active_chat_id
-            label = ("▶ " if is_active else "   ") + chat_data.get("title", "New chat")
-            if st.button(label, key=f"_chat_btn_{chat_id}", use_container_width=True,
-                         type="primary" if is_active else "secondary"):
-                st.session_state.active_chat_id = chat_id
-                st.rerun()
+
+        # Sort: starred first, then most-recent (reversed insertion order)
+        all_chats = list(st.session_state.chats.items())
+        starred = [(cid2, cd) for cid2, cd in reversed(all_chats) if cd.get("starred")]
+        unstarred = [(cid2, cd) for cid2, cd in reversed(all_chats) if not cd.get("starred")]
+
+        def _render_chat_row(cid2: str, cd: dict) -> None:
+            """Render a single chat row: [title button] [⭐] [✕]."""
+            is_active = cid2 == st.session_state.active_chat_id
+            is_starred = cd.get("starred", False)
+            c_btn, c_star, c_del = st.columns([6, 1, 1])
+            with c_btn:
+                label = ("▶ " if is_active else "") + cd.get("title", "New chat")
+                if st.button(label, key=f"_cbtn_{cid2}", use_container_width=True,
+                             type="primary" if is_active else "secondary"):
+                    st.session_state.active_chat_id = cid2
+                    st.rerun()
+            with c_star:
+                star_icon = "⭐" if is_starred else "☆"
+                if st.button(star_icon, key=f"_cstar_{cid2}",
+                             help="Favourite / unfavourite this chat"):
+                    st.session_state.chats[cid2]["starred"] = not is_starred
+                    _save_chats(st.session_state.chats)
+                    st.rerun()
+            with c_del:
+                if st.button("✕", key=f"_cdel_{cid2}", help="Delete this chat"):
+                    del st.session_state.chats[cid2]
+                    _save_chats(st.session_state.chats)
+                    remaining = list(st.session_state.chats.keys())
+                    if remaining:
+                        st.session_state.active_chat_id = remaining[-1]
+                    else:
+                        new_id2 = _new_chat_id()
+                        st.session_state.chats[new_id2] = {
+                            "title": "New chat", "messages": [], "model": active_model, "starred": False,
+                        }
+                        st.session_state.active_chat_id = new_id2
+                    _save_chats(st.session_state.chats)
+                    st.rerun()
+
+        if starred:
+            st.caption("⭐ Favourites")
+            for cid2, cd in starred:
+                _render_chat_row(cid2, cd)
+            if unstarred:
+                st.caption("Recent")
+        for cid2, cd in unstarred:
+            _render_chat_row(cid2, cd)
 
         st.divider()
         st.subheader("⚙️ Parameters")
@@ -1451,30 +1492,11 @@ def page_chat() -> None:
             st.session_state.chats[cid]["title"] = new_title
             _save_chats(st.session_state.chats)
 
-        col_clr, col_del = st.columns(2)
-        with col_clr:
-            if st.button("🗑 Clear", use_container_width=True, key="_chat_clear",
-                         help="Clear messages in this chat"):
-                st.session_state.chats[cid]["messages"] = []
-                _save_chats(st.session_state.chats)
-                st.rerun()
-        with col_del:
-            if st.button("✕ Delete", use_container_width=True, key="_chat_delete",
-                         type="secondary", help="Delete this chat entirely"):
-                del st.session_state.chats[cid]
-                _save_chats(st.session_state.chats)
-                # Switch to another chat or create new one
-                remaining = list(st.session_state.chats.keys())
-                if remaining:
-                    st.session_state.active_chat_id = remaining[-1]
-                else:
-                    new_id = _new_chat_id()
-                    st.session_state.chats[new_id] = {
-                        "title": "New chat", "messages": [], "model": active_model
-                    }
-                    st.session_state.active_chat_id = new_id
-                _save_chats(st.session_state.chats)
-                st.rerun()
+        if st.button("🗑 Clear messages", use_container_width=True, key="_chat_clear",
+                     help="Clear all messages in this chat (keeps the chat entry)"):
+            st.session_state.chats[cid]["messages"] = []
+            _save_chats(st.session_state.chats)
+            st.rerun()
 
     # ── If selected model differs from loaded model, offer to switch ──────────
     chat_model = chat.get("model", active_model)
@@ -1495,6 +1517,15 @@ def page_chat() -> None:
         f"Type: {model_type}"
     )
 
+    # Text/code file types supported for all models
+    _TEXT_EXTENSIONS = [
+        "txt", "md", "py", "js", "ts", "jsx", "tsx", "html", "css",
+        "json", "yaml", "yml", "toml", "xml", "csv", "sh", "bash",
+        "c", "cpp", "h", "hpp", "java", "rs", "go", "rb", "php",
+        "swift", "kt", "r", "sql", "graphql", "tf", "dockerfile",
+        "ini", "cfg", "conf", "env", "log",
+    ]
+
     sp_col, img_col = st.columns([3, 1])
     with sp_col:
         system_prompt = st.text_area(
@@ -1507,15 +1538,25 @@ def page_chat() -> None:
         st.session_state.system_prompt = system_prompt
 
     uploaded_image = None
-    if model_type == "mllm":
-        with img_col:
+    uploaded_text_file = None
+
+    with img_col:
+        if model_type == "mllm":
             st.caption("📷 Vision model")
             uploaded_image = st.file_uploader(
                 "Attach image",
                 type=["jpg", "jpeg", "png", "webp", "gif"],
                 help="Attach an image to your next message. The model will analyse it.",
-                key="_chat_upload",
+                key="_chat_upload_img",
             )
+        st.caption("📄 Attach file")
+        uploaded_text_file = st.file_uploader(
+            "Attach text/code file",
+            type=_TEXT_EXTENSIONS,
+            help="Attach a text or code file. Its content will be included in your message "
+                 "as context. Files over 100 KB will be truncated.",
+            key="_chat_upload_text",
+        )
 
     messages_display = st.session_state.chats[cid].get("messages", [])
     for msg in messages_display:
@@ -1539,10 +1580,32 @@ def page_chat() -> None:
                 _swap_model(chat_model)
             st.rerun()
 
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        # Build the effective user prompt, prepending any attached text file
+        effective_prompt = prompt
+        if uploaded_text_file is not None:
+            raw = uploaded_text_file.getvalue()
+            _MAX_FILE_BYTES = 100_000
+            if len(raw) > _MAX_FILE_BYTES:
+                st.warning(
+                    f"⚠️ **{uploaded_text_file.name}** is large ({len(raw)//1024} KB); "
+                    "truncated to 100 KB."
+                )
+                raw = raw[:_MAX_FILE_BYTES]
+            file_text = raw.decode("utf-8", errors="replace")
+            fname = uploaded_text_file.name
+            ext_hint = fname.rsplit(".", 1)[-1] if "." in fname else ""
+            effective_prompt = (
+                f"[File: {fname}]\n"
+                f"```{ext_hint}\n{file_text}\n```\n\n"
+                f"{prompt}"
+            )
 
-        user_msg: Any = {"role": "user", "content": prompt}
+        with st.chat_message("user"):
+            st.markdown(prompt)  # Show only the user's typed text in the chat bubble
+            if uploaded_text_file is not None:
+                st.caption(f"📄 {uploaded_text_file.name} attached")
+
+        user_msg: Any = {"role": "user", "content": effective_prompt}
         if uploaded_image is not None:
             img_bytes = uploaded_image.getvalue()
             b64_img = base64.b64encode(img_bytes).decode()
@@ -1550,7 +1613,7 @@ def page_chat() -> None:
             user_msg = {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": prompt},
+                    {"type": "text", "text": effective_prompt},
                     {"type": "image_url", "image_url": {"url": f"data:image/{ext};base64,{b64_img}"}},
                 ],
             }
@@ -1862,6 +1925,19 @@ def page_settings() -> None:
             + "\n".join(rows)
         )
         st.caption("The model field in your client determines which model gets loaded. The proxy handles the switch automatically.")
+
+    st.divider()
+    st.subheader("🔌 Built-in Gradio Chat & Extensions")
+    st.markdown(
+        "**vllm-mlx** ships with its own minimal Gradio chat UI** separate from this dashboard. "
+        "You can launch it in a new terminal tab with:\n"
+        "```bash\nvllm-mlx-chat --model mlx-community/Llama-3.2-3B-Instruct-4bit\n```"
+        "\nIt will open at `http://127.0.0.1:7860`.\n\n"
+        "**Extending this dashboard:** The dashboard is pure Python/Streamlit. "
+        "Advanced users can edit `vllm_mlx/dashboard/_ui.py` to add new pages or widgets. "
+        "Streamlit components let you embed any web content — "
+        "see [Streamlit Components](https://streamlit.io/components) for the gallery."
+    )
 
     st.divider()
     st.subheader("ℹ️ About")

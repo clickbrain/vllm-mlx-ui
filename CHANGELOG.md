@@ -6,6 +6,29 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
 
 ---
 
+## [UI 1.4.0] — 2026-04-22
+
+### Added
+- **Text/code file uploads in Chat** — A file uploader is now always visible on the
+  Chat page, accepting `.txt`, `.py`, `.js`, `.ts`, `.md`, `.json`, `.yaml`, `.sh`,
+  `.c`, `.cpp`, `.java`, `.rs`, `.go`, `.sql`, and many more extensions.  The file
+  content is prepended to the user's message as a fenced code block (100 KB cap with
+  a visible warning for large files).  Works for all models — not just vision models.
+- **Chat history: per-chat ⭐ favourite toggle** — Each chat row in the sidebar now
+  shows a star button.  Starred chats are pinned to the top of the chat list under a
+  "Favourites" heading; unstarred chats appear below.  State is persisted in
+  `chats.json`.
+- **Chat history: per-chat ✕ delete button** — Every chat row now has an inline
+  delete button.  Previously only the active chat could be deleted.
+- **Gradio & extension info** in Settings page — explains how to launch the
+  built-in `vllm-mlx-chat` Gradio UI and how to extend the Streamlit dashboard.
+
+### Fixed
+- Chat sidebar: duplicate indented delete code (orphaned from refactor) removed.
+- `"starred"` key back-filled for existing chats on first load; no migration needed.
+
+---
+
 ## [UI 1.3.0] — 2026-04-22
 
 ### Security
