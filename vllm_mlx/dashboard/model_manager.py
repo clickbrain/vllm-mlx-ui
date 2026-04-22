@@ -71,7 +71,12 @@ def search_mlx_models(query: str = "", limit: int = 50) -> list[dict[str, Any]]:
 
 
 def get_cached_models() -> list[dict[str, Any]]:
-    """Return all HuggingFace model repos cached on the server (local or remote)."""
+    """Return all HuggingFace model repos cached on the server (local or remote).
+
+    Only returns repos that contain actual model weight files (safetensors, npz,
+    bin, gguf, etc.) — metadata-only stubs created by config.json prefetches are
+    excluded.  Also filters out repos smaller than 50 MB.
+    """
     mgmt = _mgmt_base()
     if mgmt:
         try:
@@ -82,11 +87,33 @@ def get_cached_models() -> list[dict[str, Any]]:
     try:
         from huggingface_hub import scan_cache_dir
 
+        # Extensions that indicate real model weights are present
+        WEIGHT_SUFFIXES = {
+            ".safetensors", ".bin", ".pt", ".pth", ".gguf",
+            ".npz", ".ggml", ".q4_0", ".q4_1", ".q8_0",
+        }
+        MIN_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB — metadata stubs are always tiny
+
         cache_info = scan_cache_dir()
         models = []
         for repo in cache_info.repos:
             if repo.repo_type != "model":
                 continue
+            if repo.size_on_disk < MIN_SIZE_BYTES:
+                continue  # metadata-only stub — skip
+
+            # Check that at least one weight file exists in any revision
+            has_weights = False
+            for rev in repo.revisions:
+                for f in rev.files:
+                    if Path(f.file_path).suffix.lower() in WEIGHT_SUFFIXES:
+                        has_weights = True
+                        break
+                if has_weights:
+                    break
+            if not has_weights:
+                continue
+
             models.append(
                 {
                     "id": repo.repo_id,

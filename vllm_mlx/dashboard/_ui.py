@@ -822,7 +822,7 @@ def page_models() -> None:
     st.title("📦 Models")
 
     tab_lib, tab_search, tab_direct = st.tabs(
-        ["�� My library", "🔍 Search mlx-community", "⬇️ Download by ID"]
+        ["📚 My library", "🔍 Search mlx-community", "⬇️ Download by ID"]
     )
 
     # ── My library ───────────────────────────────────────────────────────────
@@ -1015,7 +1015,7 @@ def page_models() -> None:
             with f1:
                 sort_by = st.selectbox(
                     "Sort by",
-                    ["⬇️ Downloads", "❤️ Likes", "🔤 Name (A–Z)"],
+                    ["⬇️ Downloads", "❤️ Likes", "🆕 Most recent", "🔤 Name (A–Z)"],
                     key="sort_res",
                 )
             with f2:
@@ -1054,6 +1054,10 @@ def page_models() -> None:
                                   reverse=True)
             elif sort_by == "❤️ Likes":
                 filtered = sorted(filtered, key=lambda x: x.get("likes", 0) or 0,
+                                  reverse=True)
+            elif sort_by == "🆕 Most recent":
+                filtered = sorted(filtered,
+                                  key=lambda x: x.get("last_modified") or "",
                                   reverse=True)
             else:
                 filtered = sorted(filtered, key=lambda x: x.get("id", ""))
