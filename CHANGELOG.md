@@ -6,7 +6,36 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
 
 ---
 
-## [UI 1.4.0] — 2026-04-22
+## [UI 1.4.1] — 2026-04-22
+
+### Fixed
+- **install.sh: critical bug** — installer was downloading vllm-mlx from
+  `waybarrios/vllm-mlx` (upstream without dashboard code), causing
+  `ModuleNotFoundError: No module named 'vllm_mlx.dashboard'` on first launch.
+  Now installs from `clickbrain/vllm-mlx-ui` which includes the dashboard.
+- **install.sh: launch shortcut robustness** — the generated `Start vllm-mlx.command`
+  now sources conda `profile.d` scripts before launching, and resolves the exact
+  Python bin directory at install time. This fixes "command not found: vllm-mlx-ui"
+  errors when double-clicking outside a conda terminal session.
+- **install.sh: completion message** — corrected "Playground" → "Chat".
+
+### Added
+- **uninstall.sh** — Interactive uninstaller. Removes the pip package (or Homebrew
+  formula), Desktop shortcut, and `~/.vllm_mlx_ui/` state directory. Offers to
+  remove only mlx-community models, all HF cache models, or neither — with size
+  information shown before each prompt.
+- **Homebrew formula** (`Formula/vllm-mlx-ui.rb`) — Install via:
+  ```
+  brew tap clickbrain/vllm-mlx-ui https://github.com/clickbrain/vllm-mlx-ui
+  brew install --HEAD clickbrain/vllm-mlx-ui/vllm-mlx-ui
+  ```
+  The formula creates an isolated Python venv inside Homebrew's `libexec/` and
+  symlinks all entry points (`vllm-mlx`, `vllm-mlx-ui`, etc.) into Homebrew's
+  `bin/` so they are always on PATH without any conda activation.
+
+---
+
+
 
 ### Added
 - **Text/code file uploads in Chat** — A file uploader is now always visible on the
