@@ -68,7 +68,7 @@ step "Downloading dashboard files"
 INSTALL_DIR="$HOME/.vllm_mlx_remote"
 mkdir -p "$INSTALL_DIR"
 
-REPO="clickbrain/vllm-mlx-ui"
+REPO="brad-sandbox/vllm-mlx-ui"
 GITHUB_RAW="https://raw.githubusercontent.com/${REPO}/main"
 
 # Fallback to original repo if brad-sandbox repo doesn't exist yet

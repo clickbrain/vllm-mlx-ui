@@ -121,6 +121,117 @@ def _plotly_defaults(fig: go.Figure, height: int = 260) -> go.Figure:
     return fig
 
 
+def _get_all_local_addresses() -> list[dict[str, str]]:
+    """
+    Return every routable IPv4 address on this machine, plus the mDNS .local name.
+
+    Each entry: {"label": human-readable name, "ip": the address/hostname}
+    Uses `ifconfig` on macOS (no extra dependencies).
+    """
+    import re as _re
+    import socket as _sock
+    import subprocess as _sub
+
+    results: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    # --- parse ifconfig for all IPv4 addresses ----------------------------------
+    try:
+        raw = _sub.run(
+            ["ifconfig"], capture_output=True, text=True, timeout=3
+        ).stdout
+        # Each interface block starts with "<ifname>: ..."
+        # We look for: inet <ip> netmask ... [broadcast ...]
+        iface = "unknown"
+        for line in raw.splitlines():
+            m_iface = _re.match(r'^(\S+):', line)
+            if m_iface:
+                iface = m_iface.group(1)
+            m_inet = _re.match(r'\s+inet (\d+\.\d+\.\d+\.\d+)', line)
+            if m_inet:
+                ip = m_inet.group(1)
+                if ip.startswith("127.") or ip in seen:
+                    continue
+                seen.add(ip)
+                # Give a friendly label based on interface name / address range
+                if iface.startswith("en"):
+                    if ip.startswith("169.254."):
+                        label = f"{iface} (link-local / Thunderbolt or USB-C)"
+                    else:
+                        label = f"{iface} (Wi-Fi / Ethernet)"
+                elif iface.startswith("bridge") or iface.startswith("vmnet"):
+                    label = f"{iface} (virtual network)"
+                elif iface.startswith("utun") or iface.startswith("tun") or iface.startswith("ppp"):
+                    label = f"{iface} (VPN)"
+                elif ip.startswith("169.254."):
+                    label = f"{iface} (link-local)"
+                else:
+                    label = iface
+                results.append({"label": label, "ip": ip})
+    except Exception:
+        pass
+
+    # --- fallback if ifconfig failed --------------------------------------------
+    if not results:
+        try:
+            ip = _sock.gethostbyname(_sock.gethostname())
+            if not ip.startswith("127."):
+                results.append({"label": "detected IP", "ip": ip})
+        except Exception:
+            results.append({"label": "localhost", "ip": "127.0.0.1"})
+
+    # --- mDNS .local hostname ---------------------------------------------------
+    try:
+        hostname = _sock.gethostname()
+        local_name = hostname if hostname.endswith(".local") else f"{hostname}.local"
+        results.append({"label": ".local mDNS (works on same network without IP)", "ip": local_name})
+    except Exception:
+        pass
+
+    return results
+
+
+def _connection_info_block(port: int, model: str = "", api_key: str = "", mgmt_port: int = 8502, lan_only: bool = False) -> None:
+    """Render a connection info expander showing all available addresses."""
+    addrs = _get_all_local_addresses()
+    # Filter to non-link-local for the primary suggestion if LAN-only requested
+    primary_addrs = [a for a in addrs if not a["ip"].startswith("169.254.")] or addrs
+
+    with st.expander("📡 Connection info — copy these into your client", expanded=True):
+        if model:
+            st.markdown("**Model ID** (paste into your client's model field)")
+            st.code(model, language="text")
+        if api_key:
+            st.markdown("**API key**")
+            st.code(api_key, language="text")
+
+        st.markdown("**Available base URLs** — pick the one that works for your device:")
+        rows = []
+        for a in addrs:
+            base = f"http://{a['ip']}:{port}/v1"
+            mgmt = f"http://{a['ip']}:{mgmt_port}"
+            rows.append(f"| `{a['label']}` | `{base}` | `{mgmt}` |")
+
+        table = (
+            "| Interface | Inference base URL | Management API |\n"
+            "|-----------|-------------------|----------------|\n"
+            + "\n".join(rows)
+        )
+        st.markdown(table)
+        st.caption(
+            "💡 **Which URL to use?** "
+            "On the same Wi-Fi network, use the **Wi-Fi/Ethernet** address. "
+            "For a direct Mac-to-Mac Thunderbolt cable, use the **link-local** address. "
+            "On the same local network, **BradStudio.local** (your .local name) works without knowing the IP."
+        )
+        if lan_only:
+            st.warning(
+                "⚠️ Server is listening on **localhost only**. "
+                "To allow other devices to connect, change *Listen on* in Server → Configuration to "
+                "**0.0.0.0 — all interfaces** and restart."
+            )
+
+
 def _swap_model(new_model_id: str) -> None:
     """Stop the server (if running), update the model config, and restart."""
     config = sm.load_config()
@@ -151,42 +262,27 @@ def _swap_model(new_model_id: str) -> None:
 
     if ok:
         st.success(f"✅ Switched to **{new_model_id.split('/')[-1]}**. Model is loading — this takes 10–60 seconds.")
-
-        # Show connection info + optimal settings immediately
-        try:
-            import socket as _sock
-            _lan_ip = _sock.gethostbyname(_sock.gethostname())
-        except Exception:
-            _lan_ip = "127.0.0.1"
-        _srv_port = config.get("port", 8000)
-        _base_url = (
-            f"http://{_lan_ip}:{_srv_port}"
-            if config.get("host", "127.0.0.1") == "0.0.0.0"
-            else f"http://127.0.0.1:{_srv_port}"
+        if presets:
+            parts = []
+            if presets.get("context_length"):
+                parts.append(f"Context: **{presets['context_length']:,}** tokens")
+            if presets.get("architecture"):
+                parts.append(f"Arch: {presets['architecture']}")
+            if presets.get("bits"):
+                parts.append(f"{presets['bits']}-bit")
+            if presets.get("recommended_temperature"):
+                parts.append(f"Temp: {presets['recommended_temperature']}")
+            if presets.get("is_vision"):
+                parts.append("👁 Vision model")
+            if parts:
+                st.info("✨ Optimal settings applied — " + " · ".join(parts))
+        _connection_info_block(
+            port=config.get("port", 8000),
+            model=new_model_id,
+            api_key=config.get("api_key", ""),
+            mgmt_port=config.get("mgmt_port", 8502),
+            lan_only=config.get("host", "127.0.0.1") == "127.0.0.1",
         )
-        with st.expander("📡 Client connection info for this model", expanded=True):
-            ci1, ci2 = st.columns(2)
-            with ci1:
-                st.markdown("**OpenAI base URL**")
-                st.code(f"{_base_url}/v1", language="text")
-                st.markdown("**Model ID**")
-                st.code(new_model_id, language="text")
-            with ci2:
-                if config.get("api_key", ""):
-                    st.markdown("**API key**")
-                    st.code(config["api_key"], language="text")
-                if presets:
-                    st.markdown("**Optimal settings loaded:**")
-                    if presets.get("context_length"):
-                        st.write(f"• Context length: **{presets['context_length']:,}** tokens")
-                    if presets.get("architecture"):
-                        st.write(f"• Architecture: {presets['architecture']}")
-                    if presets.get("bits"):
-                        st.write(f"• Quantisation: {presets['bits']}-bit")
-                    if presets.get("recommended_temperature"):
-                        st.write(f"• Temperature: {presets['recommended_temperature']}")
-                    if presets.get("is_vision"):
-                        st.write("• 👁 Vision / multimodal model")
         st.session_state["_swap_confirm"] = None
         import time as _time
         _time.sleep(1)
@@ -410,40 +506,14 @@ def page_server() -> None:
 
     # ── Connection info card ─────────────────────────────────────────────────
     if status["running"] and status["healthy"]:
-        try:
-            import socket as _sock
-            _lan_ip = _sock.gethostbyname(_sock.gethostname())
-        except Exception:
-            _lan_ip = "127.0.0.1"
-        _srv_port = config.get("port", 8000)
-        _mgmt_port = config.get("mgmt_port", 8502)
         _model_loaded = status["health"].get("model_name", config.get("model", ""))
-        _api_key = config.get("api_key", "")
-        _base_url = (
-            f"http://{_lan_ip}:{_srv_port}"
-            if config.get("host", "127.0.0.1") == "0.0.0.0"
-            else f"http://127.0.0.1:{_srv_port}"
+        _connection_info_block(
+            port=config.get("port", 8000),
+            model=_model_loaded,
+            api_key=config.get("api_key", ""),
+            mgmt_port=config.get("mgmt_port", 8502),
+            lan_only=config.get("host", "127.0.0.1") == "127.0.0.1",
         )
-        with st.expander("📡 Connection info — copy these into your client", expanded=True):
-            ci1, ci2 = st.columns(2)
-            with ci1:
-                st.markdown("**OpenAI base URL**")
-                st.code(f"{_base_url}/v1", language="text")
-                st.markdown("**Model ID**")
-                st.code(_model_loaded, language="text")
-            with ci2:
-                if _api_key:
-                    st.markdown("**API key**")
-                    st.code(_api_key, language="text")
-                st.markdown("**Management API** (remote control)")
-                _mgmt_host = _lan_ip if config.get("host", "127.0.0.1") == "0.0.0.0" else "127.0.0.1"
-                st.code(f"http://{_mgmt_host}:{_mgmt_port}", language="text")
-            if config.get("host", "127.0.0.1") == "127.0.0.1":
-                st.caption(
-                    "⚠️ Server is listening on **localhost only**. "
-                    "To allow other devices on your network, change *Listen on* below to "
-                    "**0.0.0.0 — all network interfaces** and restart."
-                )
 
     st.subheader("⚙️ Configuration")
     st.caption("Save changes, then (re)start the server to apply them.")
@@ -1653,18 +1723,17 @@ def page_settings() -> None:
         st.success("✅ Saved. **Restart vllm-mlx-ui** for the change to take effect.")
 
     if ui_host_val == "0.0.0.0":
-        try:
-            import socket as _socket
-            _lan_ip = _socket.gethostbyname(_socket.gethostname())
-        except Exception:
-            _lan_ip = "<your-mac-ip>"
-        st.info(
-            f"🌐 Once restarted, the dashboard will be reachable at:\n\n"
-            f"**http://{_lan_ip}:{ui_port_sel}**\n\n"
-            "Share that URL with anyone on the same network."
+        st.markdown("🌐 **Once restarted, the dashboard will be reachable at these addresses:**")
+        _dash_addrs = _get_all_local_addresses()
+        rows = [f"| `{a['label']}` | `http://{a['ip']}:{int(ui_port_sel)}` |" for a in _dash_addrs]
+        st.markdown(
+            "| Interface | Dashboard URL |\n"
+            "|-----------|---------------|\n"
+            + "\n".join(rows)
         )
+        st.caption("Share any of these with devices on the same network. The Wi-Fi/Ethernet address is usually best.")
     else:
-        st.info(f"🔒 Dashboard is only accessible at **http://127.0.0.1:{ui_port_sel}** (this Mac).")
+        st.info(f"🔒 Dashboard is only accessible at **http://127.0.0.1:{int(ui_port_sel)}** (this Mac).")
 
     st.divider()
     st.subheader("🔗 Remote Server")
@@ -1740,13 +1809,16 @@ def page_settings() -> None:
             st.info("Auto Switch disabled.")
 
     if _cfg_ams.get("auto_model_switch", False):
-        try:
-            import socket as _sock
-            _my_ip = _sock.gethostbyname(_sock.gethostname())
-        except Exception:
-            _my_ip = "<this-mac-ip>"
-        st.code(f"http://{_my_ip}:8502/v1/chat/completions", language="text")
-        st.caption("Use this URL as your OpenAI base URL. The model field in your client determines which model is loaded.")
+        _proxy_port = _cfg_ams.get("mgmt_port", 8502)
+        _proxy_addrs = _get_all_local_addresses()
+        st.markdown("**Proxy URLs** (use one of these as your OpenAI base URL):")
+        rows = [f"| `{a['label']}` | `http://{a['ip']}:{_proxy_port}/v1` |" for a in _proxy_addrs]
+        st.markdown(
+            "| Interface | Proxy base URL |\n"
+            "|-----------|----------------|\n"
+            + "\n".join(rows)
+        )
+        st.caption("The model field in your client determines which model gets loaded. The proxy handles the switch automatically.")
 
     st.divider()
     st.subheader("ℹ️ About")

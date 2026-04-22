@@ -13,7 +13,7 @@ The vllm-mlx Dashboard gives you a beautiful, zero-configuration web UI to contr
 | Feature | Description |
 |---------|-------------|
 | 📊 **Overview** | Live metrics (tokens/sec, GPU memory, latency), server health at a glance |
-| 🖥️ **Server** | Start / stop / restart the server, full configuration with dropdowns, connection info for clients |
+| 🖥️ **Server** | Start / stop / restart the server, full configuration with dropdowns, all connection URLs shown |
 | 📦 **Models** | Browse your downloaded models, search the mlx-community on HuggingFace, download by ID, one-click model switching, model card links |
 | ⚡ **Benchmarks** | Run performance benchmarks, compare models, view historical results with charts |
 | 💬 **Chat** | Built-in chat with full history, named conversations, per-chat model switching |
@@ -24,50 +24,83 @@ The vllm-mlx Dashboard gives you a beautiful, zero-configuration web UI to contr
 ## Requirements
 
 - **macOS 13 (Ventura) or later**
-- **Apple Silicon Mac** (M1, M2, M3, or M4)
+- **Apple Silicon Mac** (M1, M2, M3, or M4)  
+  *(Remote-only dashboard works on any OS with Python 3.10+)*
 - **Python 3.10 or later**
 
 ---
 
 ## Installation
 
-### Option A — Full Install (Server + UI + Default Model)
+### Which installer do I need?
+
+| Scenario | Use |
+|----------|-----|
+| You have an Apple Silicon Mac and want to run AI locally | **Option A** |
+| You have a second device and want to control the AI Mac from it | **Option B** (on the second device) |
+| Developer / advanced user wanting full control | **Option C** (clone) |
+
+**You do not need to choose between local and remote.** Option A installs everything — your Apple Silicon Mac can run the AI server AND be controlled remotely. Just make sure you enable network access in Settings.
+
+---
+
+### Option A — Full Install (Recommended for most users)
 
 Run this on the Apple Silicon Mac that will host the AI server:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/brad-sandbox/vllm-mlx-ui/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/install.sh)
 ```
 
 This will:
-- Install vllm-mlx and all dependencies
+- Install vllm-mlx and all ML dependencies
 - Install the dashboard UI
 - Download the starter model: `mlx-community/Llama-3.2-3B-Instruct-4bit` (~2 GB)
 - Create a **"vllm-mlx.command"** shortcut on your Desktop
 
 **After install:** Double-click the Desktop shortcut. Your browser opens automatically to the dashboard.
 
+> **To allow remote access from other devices:** Go to **Server → Configuration** and change *Listen on* to `0.0.0.0 — all network interfaces`, then restart. The Server page will show all your IP addresses and hostnames to share with clients.
+
 ---
 
 ### Option B — Remote Dashboard Only
 
-Run this on any Mac (or Linux) that will **control** a vllm-mlx server on another machine. No AI model or GPU software is installed.
+Run this on any Mac (or Linux machine) that will **control** a vllm-mlx server running on another machine. No AI model or GPU software is installed — this is a lightweight ~30 MB control panel.
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/brad-sandbox/vllm-mlx-ui/main/install-remote.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/install-remote.sh)
 ```
 
 This will:
-- Install only the lightweight dashboard (~30 MB)
+- Install only the dashboard libraries (Streamlit, Plotly, etc.)
 - Create a **"vllm-mlx Remote.command"** shortcut on your Desktop
 
 **After install:**
 1. Double-click the Desktop shortcut
 2. Go to **⚙️ Settings → 🔗 Remote Server**
-3. Enter the IP address of the Mac running vllm-mlx
+3. Enter the IP address of the Mac running vllm-mlx (shown on that Mac's Server page)
 4. You now have full remote control — start/stop server, manage models, chat
 
-> **Can I run both?** Yes. If you have vllm-mlx installed locally *and* want to manage a remote server, you can do both from the same dashboard. Configure the remote server in Settings, and use the local controls for your own machine.
+---
+
+### Option C — Clone the repository (developers)
+
+```bash
+git clone https://github.com/clickbrain/vllm-mlx-ui.git
+cd vllm-mlx-ui
+pip install -r requirements.txt   # or: pip install '.[all]'
+vllm-mlx-ui
+```
+
+Or, if installing as part of the full vllm-mlx package:
+
+```bash
+git clone https://github.com/waybarrios/vllm-mlx.git
+cd vllm-mlx
+pip install -e '.[ui]'
+vllm-mlx-ui
+```
 
 ---
 
@@ -77,7 +110,16 @@ This will:
 vllm-mlx-ui
 ```
 
-Or, if you installed manually:
+Or directly with Streamlit:
+
+```bash
+streamlit run vllm_mlx/dashboard/_ui.py
+```
+
+The dashboard opens at `http://localhost:8501`.
+
+---
+
 
 ```bash
 streamlit run vllm_mlx/dashboard/_ui.py
