@@ -2209,7 +2209,24 @@ def page_settings() -> None:
                     st.markdown('<meta http-equiv="refresh" content="6">', unsafe_allow_html=True)
                     uc.relaunch()
                 else:
-                    st.error(f"❌ Upgrade failed (exit {proc.returncode}). See output above.")
+                    # Brew exits 1 for dylib relinking warnings even when the
+                    # install succeeded. Treat it as success if the output
+                    # contains the installed-cellar summary line (🍺 …HEAD-…).
+                    full_output = "".join(_buf)
+                    _linkage_warn = "Failed to fix install linkage" in full_output
+                    _installed = any(
+                        ("🍺" in ln or "HEAD-" in ln) and "built in" in ln
+                        for ln in _buf
+                    )
+                    if _linkage_warn and _installed:
+                        st.success(
+                            "✅ Upgrade complete (dylib relinking warning is cosmetic — "
+                            "the app is fine). Relaunching in 5 seconds…"
+                        )
+                        st.markdown('<meta http-equiv="refresh" content="6">', unsafe_allow_html=True)
+                        uc.relaunch()
+                    else:
+                        st.error(f"❌ Upgrade failed (exit {proc.returncode}). See output above.")
     else:
         st.info("Update check is running in the background — results will appear shortly. "
                 "Reload the page or click Re-check now.")
