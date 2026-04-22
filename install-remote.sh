@@ -58,9 +58,18 @@ fi
 
 # ── Install dashboard deps ─────────────────────────────────────
 step "Installing dashboard libraries"
-info "Installing Streamlit, Plotly, Pandas, httpx (no MLX / no model weights)…"
+info "Installing Streamlit, Plotly, Pandas, httpx, HuggingFace Hub (no MLX / no model weights)…"
 "$PYTHON" -m pip install --upgrade pip -q
-"$PYTHON" -m pip install "streamlit>=1.30.0" "plotly>=5.0.0" "pandas>=2.0.0" "requests" "httpx>=0.27.0" "fastapi" "uvicorn" -q
+"$PYTHON" -m pip install \
+    "streamlit>=1.30.0" \
+    "plotly>=5.0.0" \
+    "pandas>=2.0.0" \
+    "requests>=2.28.0" \
+    "httpx>=0.27.0" \
+    "fastapi>=0.100.0" \
+    "uvicorn>=0.23.0" \
+    "huggingface-hub>=0.23.0" \
+    -q
 success "Dashboard libraries installed"
 
 # ── Download dashboard files from GitHub ─────────────────────

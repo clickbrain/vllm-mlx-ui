@@ -1361,7 +1361,18 @@ def page_chat() -> None:
 
     h = status.get("health", {})
     active_model = h.get("model_name", config.get("model", "default"))
-    model_type = h.get("model_type", "llm")
+
+    # Determine whether the loaded model supports vision/multimodal input.
+    # Prefer the live health endpoint's model_type; fall back to the saved
+    # config flag and model-ID pattern matching so the uploader shows even
+    # when the health endpoint doesn't surface this field.
+    _vision_patterns = {"-vl-", "-vision", "llava", "idefics", "pixtral", "qwen2-vl", "pali"}
+    _is_vision = (
+        h.get("model_type") == "mllm"
+        or config.get("mllm", False)
+        or any(p in active_model.lower() for p in _vision_patterns)
+    )
+    model_type = "mllm" if _is_vision else h.get("model_type", "llm")
     url = sm.get_server_url(config)
 
     # ── Load / init chat state ────────────────────────────────────────────────
@@ -1498,10 +1509,11 @@ def page_chat() -> None:
     uploaded_image = None
     if model_type == "mllm":
         with img_col:
+            st.caption("📷 Vision model")
             uploaded_image = st.file_uploader(
-                "Image (optional)",
+                "Attach image",
                 type=["jpg", "jpeg", "png", "webp", "gif"],
-                help="Attach an image to your next message.",
+                help="Attach an image to your next message. The model will analyse it.",
                 key="_chat_upload",
             )
 
@@ -1854,12 +1866,14 @@ def page_settings() -> None:
     st.divider()
     st.subheader("ℹ️ About")
     import platform
+    from vllm_mlx.dashboard import __version__ as _ui_ver
     try:
         import importlib.metadata
         ver = importlib.metadata.version("vllm-mlx")
         st.write(f"**vllm-mlx version:** {ver}")
     except Exception:
         pass
+    st.write(f"**Dashboard UI version:** {_ui_ver}")
     st.write(f"**Python:** {platform.python_version()}")
     st.write(f"**Platform:** {platform.mac_ver()[0] or platform.platform()}")
 
@@ -1868,6 +1882,12 @@ def page_settings() -> None:
         st.write(f"**MLX device:** {mx.default_device()}")
     except ImportError:
         pass
+
+    st.markdown(
+        "📋 [Changelog](https://github.com/clickbrain/vllm-mlx-ui/blob/main/CHANGELOG.md) &nbsp;·&nbsp; "
+        "🔒 [Security Guide](https://github.com/clickbrain/vllm-mlx-ui/blob/main/docs/SECURITY.md) &nbsp;·&nbsp; "
+        "📖 [README](https://github.com/clickbrain/vllm-mlx-ui/blob/main/README_UI.md)"
+    )
 
 
 # ===========================================================================
