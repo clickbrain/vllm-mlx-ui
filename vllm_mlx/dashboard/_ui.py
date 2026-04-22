@@ -391,17 +391,39 @@ def page_overview() -> None:
     config = sm.load_config()
     status = sm.get_server_status()
 
+    # While model is loading, poll only the banner via a fragment so the rest
+    # of the page stays stable (no whole-page grey-fade every 2 seconds).
+    if status["running"] and not status["healthy"]:
+        @st.fragment(run_every=2)
+        def _overview_loading_banner():
+            s = sm.get_server_status()
+            if s["running"] and not s["healthy"]:
+                _banner("🟡 <strong>Server starting</strong> — waiting for model to load…", "yellow")
+                st.caption("Model is loading into memory. This can take up to 60 seconds.")
+            else:
+                st.rerun()  # Healthy or stopped — full page rerun
+        _overview_loading_banner()
+        col1, col2, col3, col4 = st.columns(4)
+        for col, label in zip(
+            [col1, col2, col3, col4],
+            ["⏱ Uptime", "📨 Active", "⏳ Queued", "✅ Completed"],
+        ):
+            col.metric(label, "—")
+        return
+
     if status["running"] and status["healthy"]:
         h = status["health"]
+        # Prefer full model ID from config — health endpoint may return short name
+        model_display = h.get("model_name", config.get("model", "—"))
+        if "/" not in model_display and config.get("model"):
+            model_display = config["model"]
         _banner(
             f"🟢 <strong>Server running</strong> &nbsp;·&nbsp; "
-            f"Model: <strong>{h.get('model_name', '—')}</strong> &nbsp;·&nbsp; "
+            f"Model: <strong>{model_display}</strong> &nbsp;·&nbsp; "
             f"Type: {h.get('model_type', 'llm')} &nbsp;·&nbsp; "
             f"PID: {status['pid']}",
             "green",
         )
-    elif status["running"]:
-        _banner("🟡 <strong>Server starting</strong> — waiting for model to load…", "yellow")
     else:
         _banner("🔴 <strong>Server stopped</strong> — go to <em>Server</em> to start it.", "red")
 
@@ -496,10 +518,9 @@ def page_overview() -> None:
         except Exception:
             pass
 
-    if status["running"]:
-        # Poll fast while model is loading, normal rate once healthy
-        poll_interval = 2 if not status["healthy"] else st.session_state.get("refresh_rate", 5)
-        time.sleep(poll_interval)
+    if status["running"] and status["healthy"]:
+        # Live metrics dashboard — full page refresh at configured interval
+        time.sleep(st.session_state.get("refresh_rate", 5))
         st.rerun()
 
 
@@ -548,75 +569,86 @@ def page_server() -> None:
                 with st.expander("📋 Server log (click to diagnose)"):
                     st.code(logs, language="text")
 
-    status_ph = st.empty()
-    btns_ph = st.empty()
-
-    def _render_status(s: dict) -> None:
-        with status_ph.container():
-            col_status, col_btns = st.columns([3, 1])
-            with col_status:
-                if s["running"] and s["healthy"]:
-                    h = s["health"]
-                    st.success(
-                        f"🟢 Running — PID {s['pid']} · "
-                        f"Model: **{h.get('model_name', '—')}** · "
-                        f"Type: {h.get('model_type', 'llm')}"
-                    )
-                elif s["running"]:
-                    st.warning(f"🟡 Starting — PID {s['pid']} · loading model…")
-                    st.caption("The model is loading into memory. This can take up to 60 seconds.")
-                else:
-                    st.error("🔴 Stopped")
-                    # Show recent log lines if the server died unexpectedly
-                    recent = sm.get_logs(last_n_lines=10).strip()
-                    if recent and "start the server" not in recent:
-                        with st.expander("📋 Last log output (click to see why it stopped)"):
-                            st.code(recent, language="text")
-            with col_btns:
-                if s["running"]:
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        if st.button("⏹ Stop", width="stretch",
-                                     type="secondary", key="_stop_btn"):
-                            with st.spinner("Stopping…"):
-                                ok, msg = sm.stop_server()
-                            st.session_state["_srv_action_result"] = (ok, msg)
-                            time.sleep(0.5)
-                            st.rerun()
-                    with c2:
-                        if st.button("🔄 Restart", width="stretch",
-                                     type="primary", key="_restart_btn"):
-                            sel = st.session_state.get("_model_sel", "")
-                            if sel and not sel.startswith("✏️"):
-                                config["model"] = sel
-                            elif st.session_state.get("_model_sel_manual", ""):
-                                config["model"] = st.session_state["_model_sel_manual"]
-                            with st.spinner("Restarting…"):
-                                sm.stop_server()
-                                time.sleep(2)
-                                ok, msg = sm.start_server(config)
-                            st.session_state["_srv_action_result"] = (ok, msg)
-                            st.rerun()
-                else:
-                    if st.button("▶ Start Server", width="stretch",
-                                 type="primary", key="_start_btn"):
-                        # Use the widget's current value — user may not have hit Save yet
+    def _render_status_banner(s: dict) -> None:
+        """Render status banner + action buttons. Safe to call from a fragment."""
+        col_status, col_btns = st.columns([3, 1])
+        with col_status:
+            if s["running"] and s["healthy"]:
+                h = s["health"]
+                # Prefer full model ID from config — health endpoint may return short name
+                model_display = h.get("model_name", config.get("model", "—"))
+                if "/" not in model_display and config.get("model"):
+                    model_display = config["model"]
+                st.success(
+                    f"🟢 Running — PID {s['pid']} · "
+                    f"Model: **{model_display}** · "
+                    f"Type: {h.get('model_type', 'llm')}"
+                )
+            elif s["running"]:
+                st.warning(f"🟡 Starting — PID {s['pid']} · loading model…")
+                st.caption("The model is loading into memory. This can take up to 60 seconds.")
+            else:
+                st.error("🔴 Stopped")
+                recent = sm.get_logs(last_n_lines=10).strip()
+                if recent and "start the server" not in recent:
+                    with st.expander("📋 Last log output (click to see why it stopped)"):
+                        st.code(recent, language="text")
+        with col_btns:
+            if s["running"]:
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("⏹ Stop", width="stretch",
+                                 type="secondary", key="_stop_btn"):
+                        with st.spinner("Stopping…"):
+                            ok, msg = sm.stop_server()
+                        st.session_state["_srv_action_result"] = (ok, msg)
+                        time.sleep(0.5)
+                        st.rerun()
+                with c2:
+                    if st.button("🔄 Restart", width="stretch",
+                                 type="primary", key="_restart_btn"):
                         sel = st.session_state.get("_model_sel", "")
                         if sel and not sel.startswith("✏️"):
                             config["model"] = sel
                         elif st.session_state.get("_model_sel_manual", ""):
                             config["model"] = st.session_state["_model_sel_manual"]
-                        with st.spinner("Starting server…"):
+                        with st.spinner("Restarting…"):
+                            sm.stop_server()
+                            time.sleep(2)
                             ok, msg = sm.start_server(config)
                         st.session_state["_srv_action_result"] = (ok, msg)
                         st.rerun()
+            else:
+                if st.button("▶ Start Server", width="stretch",
+                             type="primary", key="_start_btn"):
+                    sel = st.session_state.get("_model_sel", "")
+                    if sel and not sel.startswith("✏️"):
+                        config["model"] = sel
+                    elif st.session_state.get("_model_sel_manual", ""):
+                        config["model"] = st.session_state["_model_sel_manual"]
+                    with st.spinner("Starting server…"):
+                        ok, msg = sm.start_server(config)
+                    st.session_state["_srv_action_result"] = (ok, msg)
+                    st.rerun()
 
-    _render_status(status)
-
-    # Auto-refresh while server is starting up (but not healthy yet)
+    # While the model is loading, poll every 3 seconds using a fragment so
+    # only the small status area refreshes — not the entire page.
     if status["running"] and not status["healthy"]:
-        time.sleep(3)
-        st.rerun()
+        @st.fragment(run_every=3)
+        def _loading_status_fragment():
+            s = sm.get_server_status()
+            _render_status_banner(s)
+            # Show live server log so the user can see what's happening
+            logs = sm.get_logs(last_n_lines=30).strip()
+            if logs:
+                with st.expander("📋 Server log (live)", expanded=False):
+                    st.code(logs[-4000:], language="text")
+            # When model finishes loading, do a full rerun to show connection info
+            if s["running"] and s["healthy"]:
+                st.rerun()
+        _loading_status_fragment()
+    else:
+        _render_status_banner(status)
 
     # ── Connection info card ─────────────────────────────────────────────────
     if status["running"] and status["healthy"]:
@@ -2159,7 +2191,7 @@ def page_settings() -> None:
                 _pkgs = uc.check_updates(force=True)
             st.rerun()
 
-    _pkgs = st.session_state.get("_update_cache", {}).get("results", [])
+    _pkgs = uc._cache.get("results", [])
     if _pkgs:
         _any_update = any(p.update_available for p in _pkgs)
         if _any_update:
@@ -2363,8 +2395,11 @@ with st.sidebar:
             st.rerun()
 
     # ── Update available banner (shown at bottom of sidebar) ─────────────────
-    _upd_cache = st.session_state.get("_update_cache", {})
-    _upd_results = _upd_cache.get("results", [])
+    try:
+        from vllm_mlx.dashboard import update_checker as _uc_mod
+        _upd_results = _uc_mod._cache.get("results", [])
+    except Exception:
+        _upd_results = []
     _upd_outdated = [p for p in _upd_results if p.update_available]
     if _upd_outdated:
         st.divider()

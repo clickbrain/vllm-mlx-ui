@@ -22,6 +22,11 @@ import requests
 
 _CACHE_TTL = 3600  # seconds
 
+# Module-level cache — written by background threads, read by UI thread.
+# Avoids touching st.session_state from non-Streamlit threads (which produces
+# "missing ScriptRunContext" warnings on every call).
+_cache: dict = {}
+
 
 class PackageInfo(NamedTuple):
     name: str           # display name
@@ -130,17 +135,14 @@ def _detect_install_method() -> str:
 def check_updates(force: bool = False) -> list[PackageInfo]:
     """
     Return a list of PackageInfo for each tracked package.
-    Results are cached in Streamlit session state for _CACHE_TTL seconds.
+    Results are cached in a module-level dict for _CACHE_TTL seconds.
     Pass force=True to bypass the cache.
     Checks run in parallel so the total wait is ~3 seconds max.
+    Safe to call from background threads — does not touch st.session_state.
     """
-    try:
-        import streamlit as st
-        cache = st.session_state.get("_update_cache", {})
-        if not force and cache.get("ts", 0) + _CACHE_TTL > time.time():
-            return cache.get("results", [])
-    except Exception:
-        cache = {}
+    global _cache
+    if not force and _cache.get("ts", 0) + _CACHE_TTL > time.time():
+        return _cache.get("results", [])
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -207,12 +209,7 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
                 pass
     results = [r for r in results if r is not None]
 
-    try:
-        import streamlit as st
-        st.session_state["_update_cache"] = {"ts": time.time(), "results": results}
-    except Exception:
-        pass
-
+    _cache = {"ts": time.time(), "results": results}
     return results
 
 

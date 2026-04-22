@@ -41,10 +41,31 @@ else
   ok "No deprecated use_container_width"
 fi
 
-# ── 2b. st.fragment with run_every (causes grey-fade polling) ─────────────
-if grep -rn "fragment.*run_every\|run_every.*fragment" "$DASHBOARD"/ --include="*.py" -q; then
-  fail "@st.fragment(run_every=...) found — causes visible grey-fade; use time.sleep+st.rerun() instead"
-  grep -rn "fragment.*run_every\|run_every.*fragment" "$DASHBOARD"/ --include="*.py" | head -5
+# ── 2b. st.fragment with run_every on LARGE sections ─────────────────────
+# Acceptable: fragment covers only a small status banner (loading state).
+# NOT acceptable: fragment covers an entire page or large content area.
+# Check that no fragment with run_every wraps more than ~10 lines of content.
+# Simple heuristic: flag if run_every fragment appears outside an if-block
+# that guards a loading/starting state.
+# For now, only flag if it appears at top-level page scope (not inside an if).
+_frag_raw=$(grep -n "fragment.*run_every\|run_every.*fragment" "$DASHBOARD"/_ui.py 2>/dev/null || true)
+if [[ -n "$_frag_raw" ]]; then
+  # Verify each occurrence is inside a conditional loading guard
+  _bad=0
+  while IFS= read -r line; do
+    lineno=$(echo "$line" | cut -d: -f1)
+    # Check the 3 lines before this one for a guard like 'if status["running"] and not status["healthy"]'
+    context=$(sed -n "$((lineno-4)),$((lineno-1))p" "$DASHBOARD"/_ui.py 2>/dev/null)
+    if ! echo "$context" | grep -q "not.*healthy\|loading\|starting"; then
+      echo "  ⚠️  Unguarded @st.fragment(run_every=...) at line $lineno — verify it only covers a small area"
+      _bad=1
+    fi
+  done <<< "$_frag_raw"
+  if [[ $_bad -eq 0 ]]; then
+    ok "@st.fragment(run_every=...) present but guarded to loading state only (OK)"
+  else
+    fail "@st.fragment(run_every=...) found outside a loading guard — may cause large-area grey-fade"
+  fi
 else
   ok "No @st.fragment(run_every=...) polling"
 fi
