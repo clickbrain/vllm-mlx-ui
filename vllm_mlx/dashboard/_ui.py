@@ -1794,6 +1794,33 @@ def page_settings() -> None:
             st.error(f"❌ Cannot reach management API at `{active_url}`: {_e}")
 
     st.divider()
+    st.subheader("🔒 Security")
+    _cfg_sec = sm._load_local_config()
+    _mgmt_key = _cfg_sec.get("mgmt_api_key", "").strip()
+    _inf_key  = _cfg_sec.get("api_key", "").strip()
+    _ui_host  = _cfg_sec.get("ui_host", "127.0.0.1")
+    _inf_host = _cfg_sec.get("host", "127.0.0.1")
+
+    # Warn when the server is exposed but has no API key
+    if not _mgmt_key and _ui_host == "0.0.0.0":
+        st.warning(
+            "⚠️ **The management API has no key set** and the dashboard is accessible "
+            "to anyone on your network.  Anyone on your Wi-Fi could start/stop the server "
+            "or manage models.  Set a **Management API key** in the Remote Server section "
+            "below to protect it."
+        )
+    if not _inf_key and _inf_host == "0.0.0.0":
+        st.warning(
+            "⚠️ **The inference server has no API key** and is bound to all interfaces. "
+            "Anyone on your network can send chat requests.  Add an **API key** on the "
+            "Server page to require authentication."
+        )
+    if _mgmt_key and _inf_key and (_ui_host == "0.0.0.0" or _inf_host == "0.0.0.0"):
+        st.success("✅ Both the inference server and management API are protected by API keys.")
+    elif _ui_host == "127.0.0.1" and _inf_host == "127.0.0.1":
+        st.info("🔒 Both servers are bound to localhost — only accessible from this Mac.")
+
+    st.divider()
     st.subheader("🔄 Auto Model Switch (Proxy)")
     _cfg_ams = sm.load_config()
     ams_enabled = _cfg_ams.get("auto_model_switch", False)

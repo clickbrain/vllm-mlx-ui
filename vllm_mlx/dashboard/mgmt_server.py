@@ -14,6 +14,7 @@ local dashboard uses.
 
 from __future__ import annotations
 
+import re
 import threading
 from typing import Any
 
@@ -204,12 +205,30 @@ def delete_benchmark(result_id: str, _: None = Depends(_check_auth)) -> dict:
 _swap_lock = threading.Lock()
 
 
+_HF_REPO_RE = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?/[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$')
+
+
 def _hot_swap_if_needed(requested_model: str) -> None:
-    """Reload the inference server if the requested model differs from loaded."""
+    """Reload the inference server if the requested model differs from loaded.
+
+    Security: only allows swapping to a model that is already cached on this
+    machine.  Requests for uncached model IDs are silently ignored — the current
+    model stays loaded.  This prevents a remote client from triggering an
+    arbitrary download.
+    """
+    # Basic format validation — must look like org/repo
+    if not _HF_REPO_RE.match(requested_model):
+        return
+
     cfg = sm.load_config()
     current = cfg.get("model", "").strip()
     if current == requested_model:
         return
+
+    # Only allow switching to a model that's already downloaded
+    cached_ids = {m["id"] for m in mm.get_cached_models()}
+    if requested_model not in cached_ids:
+        return  # Refuse — not cached; do not trigger a download
 
     with _swap_lock:
         # Re-check inside lock in case another thread already swapped

@@ -157,6 +157,9 @@ def download_model(
         return True, f"Downloaded to {local_dir}"
     except Exception as e:
         return False, str(e)
+    finally:
+        if hf_token:
+            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
 
 
 def get_download_status(model_id: str) -> dict[str, Any]:
@@ -305,6 +308,9 @@ def get_model_presets(model_id: str, hf_token: str | None = None) -> dict[str, A
 
     except Exception:
         pass
+    finally:
+        if hf_token:
+            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
 
     return presets
 

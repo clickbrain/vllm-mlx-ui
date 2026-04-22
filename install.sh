@@ -88,13 +88,22 @@ success "pip updated"
 
 # ── Install vllm-mlx with UI extras ─────────────────────────
 step "Installing vllm-mlx"
-info "This installs vllm-mlx plus the dashboard, chart libraries, and all"
-info "required dependencies (MLX, HuggingFace Hub, FastAPI, etc.)"
-info "This may take 2–5 minutes on a fast connection…"
-echo ""
 
 # Detect if we are inside the repo (developer mode) or running standalone
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Check if vllm-mlx is already installed
+ALREADY_INSTALLED=false
+if "$PYTHON" -m pip show vllm-mlx &>/dev/null 2>&1; then
+    INSTALLED_VER=$("$PYTHON" -m pip show vllm-mlx 2>/dev/null | grep '^Version:' | awk '{print $2}')
+    warn "vllm-mlx ${INSTALLED_VER} is already installed — upgrading to latest…"
+    ALREADY_INSTALLED=true
+else
+    info "This installs vllm-mlx plus the dashboard, chart libraries, and all"
+    info "required dependencies (MLX, HuggingFace Hub, FastAPI, etc.)"
+    info "This may take 2–5 minutes on a fast connection…"
+    echo ""
+fi
 if [[ -f "$SCRIPT_DIR/pyproject.toml" ]]; then
     info "Detected repo directory — installing in editable mode"
     "$PYTHON" -m pip install -e "$SCRIPT_DIR[ui]" -q
@@ -126,12 +135,28 @@ echo ""
 
 "$PYTHON" - << PYEOF
 import sys
+MODEL = "$MODEL"
+print("  Checking if model is already downloaded…")
+try:
+    from huggingface_hub import try_to_load_from_cache, scan_cache_dir
+    # Check if this model already has weight files in the cache
+    cache_info = scan_cache_dir()
+    for repo in cache_info.repos:
+        if repo.repo_id == MODEL and repo.size_on_disk > 50 * 1024 * 1024:
+            for rev in repo.revisions:
+                for f in rev.files:
+                    if any(f.file_path.endswith(ext) for ext in ('.safetensors', '.npz', '.bin', '.gguf')):
+                        print(f"  ✅ Model already cached at: {repo.repo_path}")
+                        sys.exit(0)
+except Exception:
+    pass  # Fall through to download
+
 print("  Connecting to HuggingFace Hub…")
 try:
-    from huggingface_hub import snapshot_download, hf_hub_url
+    from huggingface_hub import snapshot_download
     print("  Downloading — this may take a few minutes…")
     path = snapshot_download(
-        repo_id="$MODEL",
+        repo_id=MODEL,
         local_files_only=False,
         ignore_patterns=["*.pt", "*.bin", "original/*"],
     )

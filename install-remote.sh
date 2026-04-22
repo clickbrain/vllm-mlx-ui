@@ -68,10 +68,10 @@ step "Downloading dashboard files"
 INSTALL_DIR="$HOME/.vllm_mlx_remote"
 mkdir -p "$INSTALL_DIR"
 
-REPO="brad-sandbox/vllm-mlx-ui"
+REPO="clickbrain/vllm-mlx-ui"
 GITHUB_RAW="https://raw.githubusercontent.com/${REPO}/main"
 
-# Fallback to original repo if brad-sandbox repo doesn't exist yet
+# Fallback to upstream repo if clickbrain/vllm-mlx-ui is unavailable
 if ! curl -fsSL --head "${GITHUB_RAW}/vllm_mlx/dashboard/_ui.py" &>/dev/null; then
     GITHUB_RAW="https://raw.githubusercontent.com/waybarrios/vllm-mlx/main"
     info "Using waybarrios/vllm-mlx source"
