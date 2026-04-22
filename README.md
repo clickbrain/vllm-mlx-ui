@@ -1,4 +1,4 @@
-# vllm-mlx Dashboard UI
+# vllm-mlx Dashboard UI with local and remote network access
 
 A comprehensive macOS web dashboard for [vllm-mlx](https://github.com/waybarrios/vllm-mlx) — the high-performance Apple Silicon LLM inference server.
 
