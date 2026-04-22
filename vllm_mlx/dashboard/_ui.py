@@ -564,10 +564,22 @@ def page_server() -> None:
             st.success(msg)
         else:
             st.error(msg)
-            logs = sm.get_logs(last_n_lines=30).strip()
-            if logs:
-                with st.expander("📋 Server log (click to diagnose)"):
-                    st.code(logs, language="text")
+            # Port-conflict: offer a one-click fix
+            if "already in use" in msg or "stale server" in msg.lower():
+                port = config.get("port", 8000)
+                host = config.get("host", "127.0.0.1")
+                if st.button(f"🔪 Kill stale server on port {port}", type="primary"):
+                    killed, kmsg = sm.kill_stale_server(port, host)
+                    if killed:
+                        st.success(kmsg + " Click ▶ Start Server to continue.")
+                    else:
+                        st.error(kmsg)
+                    st.rerun()
+            else:
+                logs = sm.get_logs(last_n_lines=30).strip()
+                if logs:
+                    with st.expander("📋 Server log (click to diagnose)"):
+                        st.code(logs, language="text")
 
     def _render_status_banner(s: dict) -> None:
         """Render status banner + action buttons. Safe to call from a fragment."""
@@ -637,9 +649,29 @@ def page_server() -> None:
         @st.fragment(run_every=3)
         def _loading_status_fragment():
             s = sm.get_server_status()
+            logs = sm.get_logs(last_n_lines=40).strip()
+
+            # Detect port-conflict crash — stop spinning and show a fix button
+            if "address already in use" in logs.lower() or "eaddrinuse" in logs.lower():
+                port = config.get("port", 8000)
+                host = config.get("host", "127.0.0.1")
+                sm.PID_FILE.unlink(missing_ok=True)
+                _banner(
+                    f"🔴 <strong>Start failed</strong> — port {port} is already in use "
+                    f"by a previous server session.", "red"
+                )
+                if st.button(f"🔪 Kill stale server on port {port}", type="primary",
+                             key="kill_stale_fragment"):
+                    killed, kmsg = sm.kill_stale_server(port, host)
+                    if killed:
+                        st.success(kmsg + " Click ▶ Start Server to try again.")
+                    else:
+                        st.error(kmsg)
+                    st.rerun()
+                return
+
             _render_status_banner(s)
             # Show live server log so the user can see what's happening
-            logs = sm.get_logs(last_n_lines=30).strip()
             if logs:
                 with st.expander("📋 Server log (live)", expanded=False):
                     st.code(logs[-4000:], language="text")

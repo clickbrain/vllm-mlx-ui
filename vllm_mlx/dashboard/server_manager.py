@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -258,15 +259,16 @@ def _build_command(config: dict[str, Any]) -> list[str]:
         cmd += ["--api-key", config["api_key"]]
     if config.get("continuous_batching"):
         cmd += ["--continuous-batching"]
-    # Always emit both --max-tokens and --max-request-tokens together so the
-    # two values are always consistent and vllm-mlx never falls back to its
-    # own (potentially lower) internal default for one while we override the
-    # other.  Clamp so max_request_tokens >= max_tokens.
+    # Only pass token limit flags when the user has changed them from the
+    # default (32768).  But when we DO pass one, always pass both together
+    # so vllm-mlx never mixes our override with its own internal default.
+    # Clamp so max_request_tokens >= max_tokens regardless of stale configs.
     _max_tok = config.get("max_tokens", 32768)
     _max_req = config.get("max_request_tokens", 32768)
     if _max_req < _max_tok:
         _max_req = _max_tok
-    cmd += ["--max-tokens", str(_max_tok), "--max-request-tokens", str(_max_req)]
+    if _max_tok != 32768 or _max_req != 32768:
+        cmd += ["--max-tokens", str(_max_tok), "--max-request-tokens", str(_max_req)]
     if config.get("reasoning_parser"):
         cmd += ["--reasoning-parser", config["reasoning_parser"]]
     if config.get("tool_call_parser"):
@@ -309,7 +311,47 @@ def _build_command(config: dict[str, Any]) -> list[str]:
     return cmd
 
 
-def start_server(config: dict[str, Any]) -> tuple[bool, str]:
+def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+    """Return True if something is already listening on host:port."""
+    check_host = "127.0.0.1" if host == "0.0.0.0" else host
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex((check_host, port)) == 0
+
+
+def kill_stale_server(port: int, host: str = "127.0.0.1") -> tuple[bool, str]:
+    """
+    Find and kill whatever process is listening on port, then clean up our
+    state files.  Called when the UI detects an EADDRINUSE situation.
+    """
+    import subprocess as _sp
+    check_host = "127.0.0.1" if host == "0.0.0.0" else host
+    try:
+        result = _sp.run(
+            ["lsof", "-ti", f"TCP:{port}", "-sTCP:LISTEN"],
+            capture_output=True, text=True,
+        )
+        pids = [int(p) for p in result.stdout.strip().split() if p.strip().isdigit()]
+        if not pids:
+            PID_FILE.unlink(missing_ok=True)
+            return True, f"Port {port} is no longer in use."
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        time.sleep(1.5)
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        PID_FILE.unlink(missing_ok=True)
+        return True, f"Killed stale server process(es) {pids} on port {port}."
+    except Exception as e:
+        return False, f"Could not kill stale server: {e}"
+
+
     """
     Start the server as a background subprocess (local) or via mgmt API (remote).
     Returns immediately — the server loads the model asynchronously.
@@ -331,6 +373,15 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
 
     if not config.get("model", "").strip():
         return False, "No model specified. Set a model in the configuration below."
+
+    # Check for a stale server occupying the port BEFORE spending minutes loading
+    port = int(config.get("port", 8000))
+    host = config.get("host", "127.0.0.1")
+    if _port_in_use(port, host):
+        return False, (
+            f"⚠️ Port {port} is already in use by a previous server session.\n"
+            f"Click **Kill stale server** below to free the port, then try again."
+        )
 
     save_config(config)
     _ensure_state_dir()
