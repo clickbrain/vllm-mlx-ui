@@ -835,9 +835,22 @@ def page_models() -> None:
             cached = mm.get_cached_models()
 
         if not cached:
-            st.info(
-                "No models found yet. Use the **Search** or **Download by ID** tab to get started."
+            st.markdown(
+                """
+### 📦 No models downloaded yet
+
+You need to download at least one model before you can start the server.
+
+**Quick start — recommended model (~1.8 GB):**
+```
+mlx-community/Llama-3.2-3B-Instruct-4bit
+```
+→ Click the **⬇ Download by ID** tab above, paste that model ID, and click Download.
+
+Or use the **🔍 Search MLX-Community** tab to browse and discover models.
+                """
             )
+            st.info("💡 After downloading, come back to this tab — your model will appear here.")
         else:
             total_gb = sum(m["size_gb"] for m in cached)
             mc1, mc2 = st.columns(2)
@@ -1069,6 +1082,16 @@ def page_models() -> None:
                 count_msg += " (filtered)"
             st.write(count_msg)
 
+            # Full-width banner for the last download result (cleared after display)
+            if st.session_state.get("_dl_result"):
+                _dl_ok, _dl_msg, _dl_id = st.session_state.pop("_dl_result")
+                short_name = _dl_id.split("/")[-1]
+                if _dl_ok:
+                    st.success(f"✅ **{short_name}** downloaded successfully  \n"
+                               f"`{_dl_id}`")
+                else:
+                    st.error(f"❌ Download failed for **{short_name}**: {_dl_msg}")
+
             hdr = st.columns([4, 1, 1, 1, 1, 1])
             for col, label in zip(hdr, ["Model", "⬇️", "❤️", "Bits", "Card", ""]):
                 col.markdown(f"**{label}**")
@@ -1101,11 +1124,12 @@ def page_models() -> None:
                                     r["id"],
                                     hf_token=st.session_state.get("hf_token") or None,
                                 )
+                            # Store result in session state and rerun so the
+                            # banner renders full-width above the table
+                            st.session_state["_dl_result"] = (ok, msg, r["id"])
                             if ok:
-                                st.success(f"✅ {msg}")
                                 st.balloons()
-                            else:
-                                st.error(msg)
+                            st.rerun()
 
     # ── Download by ID ───────────────────────────────────────────────────────
     with tab_direct:
