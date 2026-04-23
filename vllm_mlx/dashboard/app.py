@@ -56,6 +56,60 @@ def _kill_stale_ui(ui_pid_file: Path) -> bool:
         return False
 
 
+def _kill_process_on_port(port: int) -> bool:
+    """
+    Find and terminate whatever process is listening on *port*.
+    Tries psutil first (fast, no subprocess), then falls back to lsof.
+    Returns True if a process was found and signalled.
+    """
+    import time as _t
+
+    pids: list[int] = []
+
+    # Strategy 1: psutil (most reliable)
+    try:
+        import psutil
+        for conn in psutil.net_connections(kind="tcp"):
+            if conn.laddr.port == port and conn.status == psutil.CONN_LISTEN:
+                if conn.pid and conn.pid != os.getpid():
+                    pids.append(conn.pid)
+    except Exception:
+        pass
+
+    # Strategy 2: lsof fallback
+    if not pids:
+        try:
+            import subprocess as _sp
+            out = _sp.check_output(
+                ["lsof", "-ti", f"tcp:{port}"], text=True, stderr=_sp.DEVNULL
+            ).strip()
+            for p in out.split():
+                pid = int(p)
+                if pid != os.getpid():
+                    pids.append(pid)
+        except Exception:
+            pass
+
+    if not pids:
+        return False
+
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    _t.sleep(1.5)
+
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    return True
+
+
 def main() -> None:
     try:
         import streamlit  # noqa: F401
@@ -82,6 +136,12 @@ def main() -> None:
         ui_port = "8501"
         mgmt_port = 8502
 
+    # Clear any stale previous UI instance BEFORE writing our own PID.
+    # (If we write first, the retry logic in _start_mgmt would read our
+    # own PID and signal ourselves.)
+    if UI_PID_FILE.exists():
+        _kill_stale_ui(UI_PID_FILE)
+
     # Write our PID so the Shutdown button and future startups can find us
     try:
         UI_PID_FILE.write_text(str(os.getpid()))
@@ -99,7 +159,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
     # Start the management API server in a daemon thread.
-    # If the port is already in use, try killing a stale previous instance first.
+    # If the port is already in use, find and clear the process holding it.
     def _start_mgmt() -> None:
         try:
             from vllm_mlx.dashboard.mgmt_server import start_mgmt_server
@@ -107,21 +167,24 @@ def main() -> None:
         except OSError as exc:
             if "address already in use" in str(exc).lower() or exc.errno == 48:
                 print(
-                    f"[vllm-mlx] Port {mgmt_port} in use — trying to clear stale process…",
+                    f"[vllm-mlx] Port {mgmt_port} in use — clearing stale process…",
                     file=sys.stderr,
                 )
-                if _kill_stale_ui(UI_PID_FILE):
+                if _kill_process_on_port(mgmt_port):
                     import time as _t
                     _t.sleep(1.0)
                     try:
                         from vllm_mlx.dashboard.mgmt_server import start_mgmt_server
                         start_mgmt_server(host="0.0.0.0", port=mgmt_port)
                         return
-                    except Exception:
-                        pass
+                    except Exception as retry_exc:
+                        print(
+                            f"[vllm-mlx] Retry failed: {retry_exc}",
+                            file=sys.stderr,
+                        )
             print(
                 f"[vllm-mlx] Management API failed to bind port {mgmt_port}: {exc}\n"
-                f"           Try: lsof -i :{mgmt_port} | grep LISTEN",
+                f"           Try: lsof -ti tcp:{mgmt_port} | xargs kill",
                 file=sys.stderr,
             )
         except Exception as exc:
