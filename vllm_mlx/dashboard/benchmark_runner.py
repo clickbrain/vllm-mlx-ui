@@ -104,6 +104,22 @@ def run_benchmark(
         success = False
         output_lines.append(f"Error: {e}\n")
 
+    raw_output = "".join(output_lines)
+
+    # Detect Metal out-of-memory crash — give a specific error code so the
+    # UI can show an actionable message instead of a generic failure.
+    _OOM_SIGNALS = (
+        "outofmemory",
+        "out of memory",
+        "insufficient memory",
+        "kIOGPUCommandBufferCallbackErrorOutOfMemory",
+        "METAL] Command buffer execution failed",
+        "std::bad_alloc",
+    )
+    is_oom = not success and any(
+        sig.lower() in raw_output.lower() for sig in _OOM_SIGNALS
+    )
+
     # Try to parse the JSON output file written by vllm-mlx-bench --output
     if output_file.exists():
         try:
@@ -114,6 +130,8 @@ def run_benchmark(
             data["prompts"] = prompts
             data["max_tokens"] = max_tokens
             data["success"] = success
+            if is_oom:
+                data["error"] = "out_of_memory"
             save_result(data)
             return data
         except Exception:
@@ -126,7 +144,9 @@ def run_benchmark(
         "prompts": prompts,
         "max_tokens": max_tokens,
         "success": success,
-        "raw_output": "".join(output_lines),
+        "raw_output": raw_output,
     }
+    if is_oom:
+        result["error"] = "out_of_memory"
     save_result(result)
     return result

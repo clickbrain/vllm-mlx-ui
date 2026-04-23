@@ -1414,8 +1414,28 @@ def page_benchmarks() -> None:
         st.subheader("Run a benchmark on your hardware")
         st.caption(
             "Measures TTFT, TPOT, tokens/sec, and memory. "
-            "No server needs to be running — the benchmark loads the model itself."
+            "The benchmark loads the model itself — the inference server does not need to be running."
         )
+
+        # ── Warn if inference server is running (double memory usage = likely OOM) ──
+        _bench_status = sm.get_server_status()
+        _server_running = _bench_status["running"]
+        if _server_running:
+            _bench_model_name = (_bench_status.get("health") or {}).get(
+                "model_name", sm.load_config().get("model", "")
+            )
+            st.warning(
+                "⚠️ **The inference server is currently running.** "
+                "Benchmarking while the server is active loads a second copy of the model "
+                "into GPU memory, which will likely cause an out-of-memory crash.\n\n"
+                "**Stop the server before running a benchmark** to avoid crashes.",
+                icon="⚠️",
+            )
+            if st.button("⏹ Stop server now & continue", type="primary",
+                         key="_bench_stop_server"):
+                with st.spinner("Stopping server…"):
+                    sm.stop_server()
+                st.rerun()
 
         cached = mm.get_cached_models()
         model_ids = [m["id"] for m in cached]
@@ -1443,10 +1463,16 @@ def page_benchmarks() -> None:
                 is_mllm = st.checkbox("Vision / multimodal model (MLLM)")
                 is_video = st.checkbox("Video benchmark (MLLM only)")
                 st.info(
-                    "💡 Close other heavy apps before benchmarking to free GPU memory.\n\n"
+                    "💡 Stop the inference server and close other heavy apps "
+                    "before benchmarking to free GPU memory.\n\n"
                     "Results are saved automatically for comparison."
                 )
-            run_btn = st.form_submit_button("🚀 Run benchmark", type="primary")
+            run_btn = st.form_submit_button(
+                "🚀 Run benchmark", type="primary",
+                disabled=_server_running,
+            )
+            if _server_running:
+                st.caption("⛔ Stop the inference server first (button above).")
 
         if run_btn:
             output_area = st.empty()
@@ -1481,6 +1507,17 @@ def page_benchmarks() -> None:
                     if ttft_val:
                         rc2.metric("TTFT (ms)", f"{ttft_val:.0f}")
                 st.json(result)
+            elif result.get("error") == "out_of_memory":
+                st.error(
+                    "❌ **Out of GPU memory** — Python crashed with a Metal memory error.\n\n"
+                    "**How to fix:**\n"
+                    "1. Stop the inference server (if running) before benchmarking\n"
+                    "2. Close other heavy apps (browsers, video apps, Xcode)\n"
+                    "3. Restart your Mac to clear leaked GPU memory\n"
+                    "4. Try a smaller or more heavily quantized version of this model\n"
+                    "5. On the Server page, lower **GPU memory utilisation** to 0.80 before "
+                    "starting the server, to leave more headroom for benchmarks"
+                )
             else:
                 st.error("Benchmark failed. See output above for details.")
                 if result.get("raw_output"):
