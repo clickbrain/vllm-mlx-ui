@@ -108,15 +108,27 @@ else
   fail "server_manager.py missing functions:$_sm_missing"
 fi
 
-# ── 2g. Runtime import check ─────────────────────────────────────────────
+# ── 2g. Runtime import check — all attributes used by _ui.py ─────────────
 if python3 -c "
-from vllm_mlx.dashboard import server_manager as sm
-missing = [f for f in ['start_server','stop_server','kill_stale_server','get_server_status','check_health','load_config','save_config'] if not hasattr(sm, f)]
-if missing: raise SystemExit('Missing: ' + ', '.join(missing))
+from vllm_mlx.dashboard import server_manager as sm, model_manager as mm, benchmark_runner as br
+
+sm_needed = ['start_server','stop_server','kill_stale_server','get_server_status','check_health',
+             'load_config','save_config','get_logs','get_metrics','get_cache_stats','clear_cache',
+             'get_server_url','PID_FILE','STATE_DIR','CONFIG_FILE','REASONING_PARSERS','TOOL_CALL_PARSERS',
+             '_ensure_state_dir','_load_local_config']
+mm_needed = ['delete_model','download_model','get_cache_total_size','get_cached_models',
+             'get_hf_cache_dir','get_model_presets','search_mlx_models']
+br_needed = ['clear_all_results','delete_result','load_results','RESULTS_FILE','run_benchmark']
+
+all_missing = []
+for mod, name, needed in [(sm,'sm',sm_needed),(mm,'mm',mm_needed),(br,'br',br_needed)]:
+    missing = [f'{name}.{x}' for x in needed if not hasattr(mod, x)]
+    all_missing.extend(missing)
+if all_missing: raise SystemExit('Missing: ' + ', '.join(all_missing))
 " 2>&1; then
-  ok "server_manager imports cleanly with all required attributes"
+  ok "All dashboard module attributes verified at runtime"
 else
-  fail "server_manager import failed or missing attributes — see above"
+  fail "Dashboard module import check failed — see above"
 fi
 
 # ── 3. Config consistency: max_tokens / max_request_tokens ──────────────
