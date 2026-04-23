@@ -2,6 +2,8 @@
 """CLI entry point — launches the Streamlit dashboard and management API server."""
 
 import logging
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -33,6 +35,27 @@ def _find_binary() -> list[str]:
     return [sys.executable, "-m", "vllm_mlx.dashboard.app"]
 
 
+def _kill_stale_ui(ui_pid_file: Path) -> bool:
+    """Kill a previously running vllm-mlx-ui process recorded in ui_pid_file."""
+    try:
+        old_pid = int(ui_pid_file.read_text().strip())
+        os.kill(old_pid, signal.SIGTERM)
+        import time as _t
+        _t.sleep(1.5)
+        # If still alive, escalate
+        try:
+            os.kill(old_pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        ui_pid_file.unlink(missing_ok=True)
+        return True
+    except (ValueError, ProcessLookupError, FileNotFoundError):
+        ui_pid_file.unlink(missing_ok=True)
+        return False
+    except Exception:
+        return False
+
+
 def main() -> None:
     try:
         import streamlit  # noqa: F401
@@ -46,26 +69,59 @@ def main() -> None:
 
     # Read network settings from persisted config (if present)
     try:
-        from vllm_mlx.dashboard.server_manager import _load_local_config
+        from vllm_mlx.dashboard.server_manager import _load_local_config, UI_PID_FILE, STATE_DIR
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
         cfg = _load_local_config()
         ui_host = cfg.get("ui_host", "127.0.0.1")
         ui_port = str(cfg.get("ui_port", 8501))
         mgmt_port = int(cfg.get("mgmt_port", 8502))
     except Exception:
+        from pathlib import Path as _Path
+        UI_PID_FILE = _Path.home() / ".vllm_mlx_ui" / "ui.pid"
         ui_host = "127.0.0.1"
         ui_port = "8501"
         mgmt_port = 8502
 
-    # Start the management API server in a daemon thread
+    # Write our PID so the Shutdown button and future startups can find us
+    try:
+        UI_PID_FILE.write_text(str(os.getpid()))
+    except Exception:
+        pass
+
+    # SIGTERM handler — clean exit that frees ports (daemon threads die with us)
+    def _handle_sigterm(signum, frame):
+        try:
+            UI_PID_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
+    # Start the management API server in a daemon thread.
+    # If the port is already in use, try killing a stale previous instance first.
     def _start_mgmt() -> None:
         try:
             from vllm_mlx.dashboard.mgmt_server import start_mgmt_server
             start_mgmt_server(host="0.0.0.0", port=mgmt_port)
         except OSError as exc:
+            if "address already in use" in str(exc).lower() or exc.errno == 48:
+                print(
+                    f"[vllm-mlx] Port {mgmt_port} in use — trying to clear stale process…",
+                    file=sys.stderr,
+                )
+                if _kill_stale_ui(UI_PID_FILE):
+                    import time as _t
+                    _t.sleep(1.0)
+                    try:
+                        from vllm_mlx.dashboard.mgmt_server import start_mgmt_server
+                        start_mgmt_server(host="0.0.0.0", port=mgmt_port)
+                        return
+                    except Exception:
+                        pass
             print(
                 f"[vllm-mlx] Management API failed to bind port {mgmt_port}: {exc}\n"
-                f"           Another process may already be using port {mgmt_port}. "
-                f"Try: lsof -i :{mgmt_port}",
+                f"           Try: lsof -i :{mgmt_port} | grep LISTEN",
                 file=sys.stderr,
             )
         except Exception as exc:
@@ -120,20 +176,16 @@ def main() -> None:
     try:
         streamlit_proc.wait()
     except KeyboardInterrupt:
-        # Ctrl+C goes to the whole process group — Streamlit handles its own
-        # SIGINT; just wait for it to finish.
         try:
             streamlit_proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             streamlit_proc.kill()
     finally:
-        # ── Relaunch after upgrade ────────────────────────────────────────────
-        # _ui.py writes RELAUNCH_FLAG before os._exit(0).  We pick it up here
-        # and start a fresh process.  The inference server is left running
-        # (AUTO_START_FLAG tells the new process to reconnect to it).
-        # In ALL other cases (Ctrl+C, crash, explicit Shutdown button) we do
-        # NOT touch the inference server — it runs independently and is stopped
-        # only by the explicit Shutdown button in the UI.
+        try:
+            UI_PID_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+        # Relaunch after upgrade
         try:
             from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG
             if RELAUNCH_FLAG.exists():

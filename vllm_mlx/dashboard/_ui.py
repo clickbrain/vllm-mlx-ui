@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import signal
 import time
 from datetime import datetime
 from typing import Any
@@ -2617,7 +2618,15 @@ with st.sidebar:
             st.success("Shutting down…")
             import time as _st_time
             _st_time.sleep(1)
-            os._exit(0)
+            # Send SIGTERM to the app.py parent process (which owns the ports).
+            # This triggers its signal handler which calls sys.exit(0), releasing
+            # ports 8501 and 8502 cleanly. Fall back to os._exit if PID unknown.
+            try:
+                from vllm_mlx.dashboard.server_manager import UI_PID_FILE
+                _ui_pid = int(UI_PID_FILE.read_text().strip())
+                os.kill(_ui_pid, signal.SIGTERM)
+            except Exception:
+                os._exit(0)
         if c2.button("Cancel", key="_shutdown_cancel"):
             del st.session_state["_shutdown_confirm"]
             st.rerun()
