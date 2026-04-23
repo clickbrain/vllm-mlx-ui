@@ -2271,15 +2271,13 @@ def page_settings() -> None:
                 c4.markdown("")
 
         if _any_update or st.session_state.get("_trigger_upgrade"):
-            st.divider()
-            st.markdown("### ⬆️ Upgrade now")
             _cmd = uc.upgrade_command()
             st.code(" ".join(_cmd), language="bash")
-            st.caption("Upgrades the dashboard, inference engine, and all dependencies, then relaunches automatically.")
+            st.caption("Updates the dashboard, inference engine, and all dependencies, then relaunches automatically.")
 
             # Auto-trigger if coming from sidebar button
             _auto_run = st.session_state.pop("_trigger_upgrade", False)
-            if st.button("⬆️ Upgrade & Restart", type="primary",
+            if st.button("⬆️ Update Now & Restart", type="primary",
                          width="content", key="_do_upgrade_btn") or _auto_run:
                 _out_area = st.empty()
                 _buf: list[str] = []
@@ -2297,7 +2295,7 @@ def page_settings() -> None:
                     proc.wait()
 
                 if proc.returncode == 0:
-                    st.success("✅ Upgrade complete! Relaunching in 20 seconds…")
+                    st.success("✅ Update complete! Relaunching in 20 seconds…")
                     st.markdown(
                         '<meta http-equiv="refresh" content="22">',
                         unsafe_allow_html=True,
@@ -2317,7 +2315,7 @@ def page_settings() -> None:
                     )
                     if _linkage_warn and _installed:
                         st.success(
-                            "✅ Upgrade complete (dylib relinking warning is cosmetic — "
+                            "✅ Update complete (dylib relinking warning is cosmetic — "
                             "the app is fine). Relaunching in 20 seconds…"
                         )
                         st.markdown(
@@ -2328,7 +2326,7 @@ def page_settings() -> None:
                                    "wait a moment then refresh your browser manually.")
                         uc.relaunch()
                     else:
-                        st.error(f"❌ Upgrade failed (exit {proc.returncode}). See output above.")
+                        st.error(f"❌ Update failed (exit {proc.returncode}). See output above.")
     else:
         st.info("Update check is running in the background — results will appear shortly. "
                 "Reload the page or click Re-check now.")
@@ -2481,7 +2479,7 @@ with st.sidebar:
         st.divider()
         _n = len(_upd_outdated)
         st.warning(f"⬆️ **{_n} update{'s' if _n > 1 else ''} available**")
-        if st.button("Upgrade & Restart", type="primary",
+        if st.button("Update Now & Restart", type="primary",
                      width="stretch", key="_sidebar_upgrade_btn"):
             st.session_state["_trigger_upgrade"] = True
             st.session_state.page = "⚙️ Settings"
