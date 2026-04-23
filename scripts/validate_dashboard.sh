@@ -95,6 +95,30 @@ else
   fail "start_new_session=True missing from update_checker.py relaunch() — new process will die when parent os._exit()s"
 fi
 
+# ── 2f. Critical server_manager public API must be present ───────────────
+_sm_missing=""
+for fn in start_server stop_server kill_stale_server get_server_status check_health load_config save_config; do
+  if ! grep -q "^def ${fn}(" "$DASHBOARD"/server_manager.py 2>/dev/null; then
+    _sm_missing="$_sm_missing $fn"
+  fi
+done
+if [[ -z "$_sm_missing" ]]; then
+  ok "server_manager.py public API complete"
+else
+  fail "server_manager.py missing functions:$_sm_missing"
+fi
+
+# ── 2g. Runtime import check ─────────────────────────────────────────────
+if python3 -c "
+from vllm_mlx.dashboard import server_manager as sm
+missing = [f for f in ['start_server','stop_server','kill_stale_server','get_server_status','check_health','load_config','save_config'] if not hasattr(sm, f)]
+if missing: raise SystemExit('Missing: ' + ', '.join(missing))
+" 2>&1; then
+  ok "server_manager imports cleanly with all required attributes"
+else
+  fail "server_manager import failed or missing attributes — see above"
+fi
+
 # ── 3. Config consistency: max_tokens / max_request_tokens ──────────────
 echo ""
 echo "3. Config consistency"

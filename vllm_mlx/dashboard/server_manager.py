@@ -352,6 +352,7 @@ def kill_stale_server(port: int, host: str = "127.0.0.1") -> tuple[bool, str]:
         return False, f"Could not kill stale server: {e}"
 
 
+def start_server(config: dict[str, Any]) -> tuple[bool, str]:
     """
     Start the server as a background subprocess (local) or via mgmt API (remote).
     Returns immediately — the server loads the model asynchronously.
