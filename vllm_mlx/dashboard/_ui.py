@@ -2059,14 +2059,38 @@ def page_settings() -> None:
             help="Default is 8501. Change if another app is using that port.",
         )
 
+    _net_changed = (ui_host_val != ui_host_cur) or (int(ui_port_sel) != ui_port_cur)
+
     if st.button("💾 Save & show connection info", type="primary"):
         _cfg_net["ui_host"] = ui_host_val
         _cfg_net["ui_port"] = int(ui_port_sel)
         sm.save_config(_cfg_net)
-        st.success("✅ Saved. **Restart vllm-mlx-ui** for the change to take effect.")
+        if _net_changed:
+            st.session_state["_net_restart_pending"] = True
+        else:
+            st.session_state.pop("_net_restart_pending", None)
+            st.success("✅ Saved — no restart needed, settings are already applied.")
+
+    if st.session_state.get("_net_restart_pending"):
+        st.warning(
+            "⚠️ **Settings saved.** The dashboard must restart to bind to the new "
+            "address/port. **Do you want to restart now?**"
+        )
+        _rn1, _rn2, _ = st.columns([1, 1, 3])
+        with _rn1:
+            if st.button("🔄 Restart Now", type="primary", key="_net_restart_yes"):
+                st.session_state.pop("_net_restart_pending", None)
+                from vllm_mlx.dashboard import update_checker as _uc_net
+                st.info("Restarting dashboard… your browser will reconnect shortly.")
+                _uc_net.relaunch()
+        with _rn2:
+            if st.button("Later", key="_net_restart_no"):
+                st.session_state.pop("_net_restart_pending", None)
+                st.info("Settings saved. Restart vllm-mlx-ui manually when ready.")
+                st.rerun()
 
     if ui_host_val == "0.0.0.0":
-        st.markdown("🌐 **Once restarted, the dashboard will be reachable at these addresses:**")
+        st.markdown("🌐 **The dashboard will be reachable at these addresses:**")
         _dash_addrs = _get_all_local_addresses()
         rows = [f"| `{a['label']}` | `http://{a['ip']}:{int(ui_port_sel)}` |" for a in _dash_addrs]
         st.markdown(
