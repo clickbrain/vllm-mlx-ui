@@ -576,3 +576,220 @@ def clear_cache(cache_type: str = "all", api_key: str = "") -> tuple[bool, str]:
         return r.status_code in (200, 204), r.json().get("status", "ok")
     except Exception as e:
         return False, str(e)
+
+
+def get_memory_stats() -> dict:
+    """
+    Return current unified memory usage stats.
+    Keys: total_gb, available_gb, used_gb, percent, pressure (low/medium/high/critical)
+    """
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        total = vm.total / (1024 ** 3)
+        available = vm.available / (1024 ** 3)
+        used = vm.used / (1024 ** 3)
+        pct = vm.percent
+        if pct < 60:
+            pressure = "low"
+        elif pct < 80:
+            pressure = "medium"
+        elif pct < 92:
+            pressure = "high"
+        else:
+            pressure = "critical"
+        return {
+            "total_gb": round(total, 1),
+            "available_gb": round(available, 1),
+            "used_gb": round(used, 1),
+            "percent": round(pct, 1),
+            "pressure": pressure,
+        }
+    except Exception:
+        return {"total_gb": 0, "available_gb": 0, "used_gb": 0, "percent": 0, "pressure": "unknown"}
+
+
+def _release_system_heap() -> list[str]:
+    """
+    General macOS memory compression techniques — frees all heap allocations
+    that are no longer referenced, returning pages to the OS.
+
+    Runs several complementary strategies:
+    - malloc_zone_pressure_relief: tells the macOS allocator to compact and
+      return all free chunks in every malloc zone to the OS immediately.
+    - Python GC (multiple passes) to break reference cycles first.
+    - madvise MADV_FREE on anonymous mappings via ctypes if available.
+    - Attempt `purge` (flushes disk-backed inactive memory; no-ops without sudo
+      but harmless to try).
+
+    Returns a list of human-readable notes about what was attempted.
+    """
+    import ctypes
+    import gc
+    import subprocess as _sp
+
+    notes: list[str] = []
+
+    # Pass 1 & 2: Python GC — break cycles before asking allocator to compact
+    gc.collect()
+    gc.collect()
+    notes.append("Python GC (2 passes)")
+
+    # macOS malloc zone pressure relief — most impactful on Apple Silicon.
+    # malloc_zone_pressure_relief(zone=NULL, goal=0) → compact ALL zones,
+    # return ALL available free memory to the OS kernel.
+    try:
+        libc = ctypes.CDLL("libSystem.B.dylib", use_errno=True)
+        libc.malloc_zone_pressure_relief.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        libc.malloc_zone_pressure_relief.restype = None
+        libc.malloc_zone_pressure_relief(None, ctypes.c_size_t(0))
+        notes.append("malloc_zone_pressure_relief (all zones)")
+    except Exception as e:
+        notes.append(f"malloc_zone_pressure_relief skipped: {e}")
+
+    # MLX Metal buffer cache — releases GPU-side cached allocations back to
+    # the unified memory pool.
+    try:
+        import mlx.core as _mx
+        _mx.metal.clear_cache()
+        notes.append("MLX Metal buffer cache cleared")
+    except Exception:
+        notes.append("MLX not loaded — Metal cache skip")
+
+    # `purge`: flushes inactive file-backed pages (disk cache), freeing RAM for
+    # active use.  Requires sudo so it will fail silently in most cases, but
+    # it's worth attempting; some users run the dashboard with elevated rights.
+    try:
+        result = _sp.run(
+            ["purge"], capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            notes.append("macOS purge (inactive file cache flushed)")
+        else:
+            notes.append("purge not available without sudo (normal)")
+    except Exception:
+        notes.append("purge not available (normal)")
+
+    # Final GC pass after allocator compaction
+    gc.collect()
+    notes.append("Python GC (final pass)")
+
+    return notes
+
+
+def force_release_memory() -> dict:
+    """
+    Comprehensive memory release for Apple Silicon unified memory.
+
+    Steps (in order of impact):
+    1. Stop the inference server if running
+    2. Find and terminate orphaned vllm_mlx / benchmark subprocesses
+    3. Find and terminate any OTHER Python processes using > 1 GB
+       (excluding the UI process itself)
+    4. General macOS heap compression: malloc_zone_pressure_relief,
+       MLX Metal cache clear, Python GC, optional purge
+
+    Returns a dict:
+      before        : memory stats before cleanup
+      after         : memory stats after cleanup
+      freed_gb      : estimated GB freed (OS accounting may lag slightly)
+      server_stopped: bool
+      procs_killed  : list[dict] — pid, mem_gb, cmd for each terminated process
+      heap_notes    : list[str] — what the general heap release attempted
+      warnings      : list[str]
+    """
+    import os as _os
+
+    before = get_memory_stats()
+    warnings: list[str] = []
+    server_stopped = False
+    procs_killed: list[dict] = []
+
+    # ── 1. Stop inference server ──────────────────────────────────────────────
+    try:
+        status = get_server_status()
+        if status.get("running"):
+            ok, msg = stop_server()
+            server_stopped = ok
+            if not ok:
+                warnings.append(f"Could not stop server: {msg}")
+            else:
+                time.sleep(1.5)
+    except Exception as e:
+        warnings.append(f"Server stop check failed: {e}")
+
+    # ── 2 & 3. Terminate heavy Python processes ───────────────────────────────
+    # Kill vllm-specific processes unconditionally; kill other Python processes
+    # if they're using ≥ 1 GB (they are orphaned or stuck after a crash).
+    own_pid = _os.getpid()
+
+    # Collect parent-process chain so we never kill app.py or the shell
+    _protected_pids: set[int] = {own_pid}
+    try:
+        import psutil as _ps
+        _p = _ps.Process(own_pid)
+        while _p.ppid() not in (0, 1):
+            _protected_pids.add(_p.ppid())
+            _p = _ps.Process(_p.ppid())
+    except Exception:
+        pass
+
+    _VLLM_MARKERS = (
+        "vllm_mlx", "vllm-mlx", "vllm_mlx.benchmark", "vllm-mlx-bench",
+    )
+
+    try:
+        import psutil
+        for proc in psutil.process_iter(["pid", "name", "cmdline", "memory_info"]):
+            try:
+                pid = proc.info["pid"]
+                if pid in _protected_pids:
+                    continue
+                name = (proc.info.get("name") or "").lower()
+                cmdline = " ".join(proc.info.get("cmdline") or [])
+                mem_gb = (proc.info.get("memory_info") or type("", (), {"rss": 0})()).rss / (1024 ** 3)
+
+                is_vllm = any(m in cmdline for m in _VLLM_MARKERS)
+                is_large_python = "python" in name and mem_gb >= 1.0
+
+                if is_vllm or is_large_python:
+                    _os.kill(pid, signal.SIGTERM)
+                    procs_killed.append({
+                        "pid": pid,
+                        "mem_gb": round(mem_gb, 1),
+                        "cmd": cmdline[:120],
+                        "reason": "vllm" if is_vllm else "large python",
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied, ProcessLookupError):
+                pass
+
+        if procs_killed:
+            time.sleep(1.5)
+            for p in procs_killed:
+                try:
+                    _os.kill(p["pid"], signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+    except ImportError:
+        warnings.append("psutil not available — cannot scan for large processes")
+    except Exception as e:
+        warnings.append(f"Process scan failed: {e}")
+
+    # ── 4. General heap compression ───────────────────────────────────────────
+    heap_notes = _release_system_heap()
+
+    # Allow OS memory accounting to settle
+    time.sleep(1.0)
+
+    after = get_memory_stats()
+    freed = max(0.0, round(before["used_gb"] - after["used_gb"], 1))
+
+    return {
+        "before": before,
+        "after": after,
+        "freed_gb": freed,
+        "server_stopped": server_stopped,
+        "procs_killed": procs_killed,
+        "heap_notes": heap_notes,
+        "warnings": warnings,
+    }

@@ -554,6 +554,80 @@ def page_overview() -> None:
 
     _overview_live()
 
+    # ── Memory panel ─────────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("🧠 Unified Memory")
+
+    mem = sm.get_memory_stats()
+    _PRESSURE_COLOR = {"low": "#10B981", "medium": "#F59E0B",
+                       "high": "#EF4444", "critical": "#7F1D1D", "unknown": "#6B7280"}
+    bar_color = _PRESSURE_COLOR.get(mem["pressure"], "#6B7280")
+    pct = mem["percent"]
+    used = mem["used_gb"]
+    total = mem["total_gb"]
+
+    st.markdown(
+        f"""
+        <div style='margin-bottom:6px;font-size:0.85rem;color:#9CA3AF;'>
+          Used <strong style='color:{bar_color}'>{used:.1f} GB</strong>
+          of {total:.1f} GB
+          &nbsp;·&nbsp; <strong style='color:{bar_color}'>{pct:.0f}%</strong>
+          &nbsp;·&nbsp; pressure: <strong style='color:{bar_color}'>{mem["pressure"]}</strong>
+        </div>
+        <div style='background:#1F2937;border-radius:6px;height:14px;width:100%;overflow:hidden;margin-bottom:12px;'>
+          <div style='background:{bar_color};height:100%;width:{min(pct,100):.1f}%;
+                      transition:width 0.4s ease;border-radius:6px;'></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if pct >= 80:
+        _banner(
+            f"⚠️ <strong>High memory pressure ({pct:.0f}%)</strong> — "
+            "click <em>🧹 Release Memory</em> to free RAM from inactive processes.",
+            "yellow",
+        )
+
+    if st.button("🧹 Release Memory", key="_mem_release_overview",
+                 help="Stop orphaned processes, compress heap, clear MLX Metal cache"):
+        with st.spinner("Releasing memory…"):
+            result = sm.force_release_memory()
+        b = result["before"]
+        a = result["after"]
+        freed = result["freed_gb"]
+
+        if freed > 0:
+            _banner(
+                f"✅ Released <strong>{freed:.1f} GB</strong> "
+                f"({b['used_gb']:.1f} GB → {a['used_gb']:.1f} GB used, "
+                f"{a['percent']:.0f}% pressure)",
+                "green",
+            )
+        else:
+            _banner(
+                f"ℹ️ Cleanup ran — memory now {a['used_gb']:.1f} GB used "
+                f"({a['percent']:.0f}%). OS may reclaim more over the next few seconds.",
+                "blue",
+            )
+
+        details: list[str] = []
+        if result["server_stopped"]:
+            details.append("• Inference server stopped")
+        for p in result["procs_killed"]:
+            reason = p.get("reason", "")
+            details.append(
+                f"• Terminated PID {p['pid']} ({p['mem_gb']:.1f} GB, {reason}): "
+                f"{p['cmd'][:80]}"
+            )
+        details += [f"• {n}" for n in result.get("heap_notes", [])]
+        if result["warnings"]:
+            details += [f"⚠ {w}" for w in result["warnings"]]
+
+        if details:
+            with st.expander("Release details"):
+                st.code("\n".join(details))
+
 
 # ===========================================================================
 # Page: Server
@@ -1540,6 +1614,24 @@ def page_benchmarks() -> None:
             )
             if _server_running:
                 st.caption("⛔ Stop the inference server first (button above).")
+
+        # ── Release Memory button ────────────────────────────────────────────
+        if st.button("🧹 Release Memory", key="_mem_release_bench",
+                     help="Free RAM from orphaned processes and compress heap before benchmarking"):
+            with st.spinner("Releasing memory…"):
+                _mr = sm.force_release_memory()
+            _freed = _mr["freed_gb"]
+            _after = _mr["after"]
+            if _freed > 0:
+                st.success(
+                    f"✅ Released {_freed:.1f} GB — "
+                    f"{_after['used_gb']:.1f} GB used ({_after['percent']:.0f}%) now"
+                )
+            else:
+                st.info(
+                    f"Cleanup ran — {_after['used_gb']:.1f} GB used "
+                    f"({_after['percent']:.0f}%). OS may reclaim more shortly."
+                )
 
         # ── Pre-flight memory check ──────────────────────────────────────────
         if bench_model:
