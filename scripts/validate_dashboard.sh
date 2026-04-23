@@ -89,10 +89,11 @@ else
 fi
 
 # ── 2e. Relaunch subprocess must have start_new_session=True ────────────
-if grep -q "start_new_session=True" "$DASHBOARD"/update_checker.py 2>/dev/null; then
-  ok "Relaunch subprocess has start_new_session=True"
+# New process is now launched from app.py's finally block, not update_checker.py
+if grep -q "start_new_session=True" "$DASHBOARD"/app.py 2>/dev/null; then
+  ok "Relaunch subprocess has start_new_session=True (in app.py)"
 else
-  fail "start_new_session=True missing from update_checker.py relaunch() — new process will die when parent os._exit()s"
+  fail "start_new_session=True missing from app.py relaunch block — new process may be killed with parent"
 fi
 
 # ── 2f. Critical server_manager public API must be present ───────────────

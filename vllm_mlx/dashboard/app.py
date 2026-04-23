@@ -1,44 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 """CLI entry point — launches the Streamlit dashboard and management API server."""
 
-import atexit
 import logging
-import os
-import signal
 import subprocess
 import sys
 import threading
 from pathlib import Path
 
-# Suppress the noisy "missing ScriptRunContext" warnings that fire on every
-# AnyIO worker thread request to the management API (FastAPI/uvicorn runs in
-# the same process as Streamlit and uses AnyIO threads that have no Streamlit
-# context). These warnings are harmless — the management API doesn't use
-# Streamlit session state.
+# Suppress the noisy "missing ScriptRunContext" warnings that fire on AnyIO
+# worker threads (FastAPI/uvicorn runs in the same process as Streamlit).
 logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(
     logging.ERROR
 )
 
 
-def _stop_inference_server() -> None:
+def _find_binary() -> list[str]:
     """
-    Terminate the inference server subprocess on UI exit.
-    Skipped when relaunching after an upgrade (AUTO_START_FLAG is set —
-    the new process will restart the server itself).
+    Return the command to launch vllm-mlx-ui as a list.
+    Tries multiple strategies so the binary is found even with a stripped PATH.
     """
-    try:
-        from vllm_mlx.dashboard.server_manager import (
-            AUTO_START_FLAG, PID_FILE, _get_pid, _is_process_alive, stop_server,
-        )
-        # If upgrading, the new process will restart the server — leave it running.
-        if AUTO_START_FLAG.exists():
-            return
-        pid = _get_pid()
-        if pid and _is_process_alive(pid):
-            print("[vllm-mlx] 🛑 Stopping inference server…", flush=True)
-            stop_server()
-    except Exception:
-        pass
+    import shutil
+    found = shutil.which("vllm-mlx-ui")
+    if found:
+        return [found]
+    for candidate in ["/opt/homebrew/bin/vllm-mlx-ui", "/usr/local/bin/vllm-mlx-ui"]:
+        p = Path(candidate)
+        if p.exists() and p.stat().st_mode & 0o111:
+            return [str(p)]
+    sibling = Path(sys.executable).parent / "vllm-mlx-ui"
+    if sibling.exists():
+        return [str(sibling)]
+    return [sys.executable, "-m", "vllm_mlx.dashboard.app"]
 
 
 def main() -> None:
@@ -64,12 +56,10 @@ def main() -> None:
         ui_port = "8501"
         mgmt_port = 8502
 
-    # Start the management API server in a daemon thread so remote dashboards
-    # can start/stop the inference server, manage models, etc.
+    # Start the management API server in a daemon thread
     def _start_mgmt() -> None:
         try:
             from vllm_mlx.dashboard.mgmt_server import start_mgmt_server
-            # Always bind on all interfaces so remote dashboards can reach it.
             start_mgmt_server(host="0.0.0.0", port=mgmt_port)
         except OSError as exc:
             print(
@@ -84,15 +74,15 @@ def main() -> None:
     mgmt_thread = threading.Thread(target=_start_mgmt, daemon=True)
     mgmt_thread.start()
 
-    # Give the server a moment to bind before announcing it's ready
     import time as _time
     _time.sleep(1.0)
     if mgmt_thread.is_alive():
         print(f"[vllm-mlx] ✅ Management API listening on 0.0.0.0:{mgmt_port}")
     else:
-        print(f"[vllm-mlx] ⚠️  Management API did NOT start — check stderr for details", file=sys.stderr)
+        print(f"[vllm-mlx] ⚠️  Management API did NOT start — check stderr for details",
+              file=sys.stderr)
 
-    # Auto-start inference server if a post-upgrade relaunch flag is present
+    # Auto-start inference server after a post-upgrade relaunch
     try:
         from vllm_mlx.dashboard.server_manager import (
             AUTO_START_FLAG, load_config, start_server, get_server_status,
@@ -101,24 +91,19 @@ def main() -> None:
             AUTO_START_FLAG.unlink(missing_ok=True)
             _cfg = load_config()
             if _cfg.get("model"):
-                print(f"[vllm-mlx] 🔄 Auto-starting inference server with model: {_cfg['model']}")
-                # Wait for mgmt API to be fully ready
+                print(f"[vllm-mlx] 🔄 Auto-starting inference server: {_cfg['model']}")
                 _time.sleep(1.0)
                 _ok, _msg = start_server(_cfg)
                 print(f"[vllm-mlx] {'✅' if _ok else '⚠️ '} {_msg}")
             else:
-                print("[vllm-mlx] ℹ️  Post-upgrade relaunch: no model configured, skipping auto-start.")
+                print("[vllm-mlx] ℹ️  Post-upgrade relaunch: no model configured.")
     except Exception as _exc:
         print(f"[vllm-mlx] ⚠️  Auto-start check failed: {_exc}", file=sys.stderr)
 
     ui_file = Path(__file__).parent / "_ui.py"
     streamlit_proc = subprocess.Popen(
         [
-            sys.executable,
-            "-m",
-            "streamlit",
-            "run",
-            str(ui_file),
+            sys.executable, "-m", "streamlit", "run", str(ui_file),
             "--server.headless=false",
             f"--server.address={ui_host}",
             f"--server.port={ui_port}",
@@ -132,16 +117,37 @@ def main() -> None:
         + sys.argv[1:],
     )
 
-    def _handle_signal(signum, frame):
-        streamlit_proc.terminate()
-
-    signal.signal(signal.SIGTERM, _handle_signal)
-    signal.signal(signal.SIGINT, _handle_signal)
-
     try:
         streamlit_proc.wait()
+    except KeyboardInterrupt:
+        # Ctrl+C goes to the whole process group — Streamlit handles its own
+        # SIGINT; just wait for it to finish.
+        try:
+            streamlit_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            streamlit_proc.kill()
     finally:
-        _stop_inference_server()
+        # ── Relaunch after upgrade ────────────────────────────────────────────
+        # _ui.py writes RELAUNCH_FLAG before os._exit(0).  We pick it up here
+        # and start a fresh process.  The inference server is left running
+        # (AUTO_START_FLAG tells the new process to reconnect to it).
+        # In ALL other cases (Ctrl+C, crash, explicit Shutdown button) we do
+        # NOT touch the inference server — it runs independently and is stopped
+        # only by the explicit Shutdown button in the UI.
+        try:
+            from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG
+            if RELAUNCH_FLAG.exists():
+                RELAUNCH_FLAG.unlink(missing_ok=True)
+                cmd = _find_binary()
+                subprocess.Popen(
+                    cmd,
+                    start_new_session=True,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+        except Exception:
+            pass
 
-    sys.exit(streamlit_proc.returncode)
+    sys.exit(0)
 

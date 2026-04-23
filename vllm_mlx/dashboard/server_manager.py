@@ -24,6 +24,7 @@ PID_FILE = STATE_DIR / "server.pid"
 CONFIG_FILE = STATE_DIR / "server_config.json"
 LOG_FILE = STATE_DIR / "server.log"
 AUTO_START_FLAG = STATE_DIR / "auto_start_after_relaunch.flag"
+RELAUNCH_FLAG   = STATE_DIR / "relaunch_pending.flag"
 
 TOOL_CALL_PARSERS = [
     "",

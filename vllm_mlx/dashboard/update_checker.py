@@ -260,36 +260,32 @@ def _find_binary() -> list[str]:
 
 def relaunch() -> None:
     """
-    Start a fresh vllm-mlx-ui process and terminate the current one.
-    Called after a successful upgrade.  If the inference server is currently
-    running, writes a flag file so the new process auto-starts it.
+    Signal app.py to start a fresh vllm-mlx-ui process, then exit.
+
+    Writes RELAUNCH_FLAG so app.py's finally block starts a new process.
+    Writes AUTO_START_FLAG if the inference server is running so the new
+    process reconnects to it automatically.
+
+    Does NOT start the new process here — that way app.py starts it only
+    after the old Streamlit is fully gone, avoiding port 8501 conflicts.
     """
     import os
 
-    # Write auto-start flag if the inference server is running right now
     try:
-        from vllm_mlx.dashboard.server_manager import get_server_status, AUTO_START_FLAG, STATE_DIR
-        status = get_server_status()
+        from vllm_mlx.dashboard.server_manager import (
+            get_server_status, AUTO_START_FLAG, RELAUNCH_FLAG, STATE_DIR,
+        )
         STATE_DIR.mkdir(parents=True, exist_ok=True)
+        status = get_server_status()
         if status.get("running"):
             AUTO_START_FLAG.write_text("1")
         else:
             AUTO_START_FLAG.unlink(missing_ok=True)
+        RELAUNCH_FLAG.write_text("1")
     except Exception:
         pass
 
-    cmd = _find_binary()
-
-    # IMPORTANT: start_new_session=True puts the new process in its own
-    # process group so it is NOT killed when we os._exit() the current one.
-    # Redirect stdio so it has no inherited file descriptors.
-    subprocess.Popen(
-        cmd,
-        start_new_session=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    time.sleep(8)   # give the new process time to bind its ports
-    os._exit(0)     # hard-exit the current Streamlit process only
+    # Hard-exit this Streamlit subprocess immediately.
+    # app.py's finally block detects RELAUNCH_FLAG and starts the new process
+    # only after this process is fully gone — no port conflicts.
+    os._exit(0)
