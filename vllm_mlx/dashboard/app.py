@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """CLI entry point — launches the Streamlit dashboard and management API server."""
 
+import atexit
 import logging
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -15,6 +18,27 @@ from pathlib import Path
 logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(
     logging.ERROR
 )
+
+
+def _stop_inference_server() -> None:
+    """
+    Terminate the inference server subprocess on UI exit.
+    Skipped when relaunching after an upgrade (AUTO_START_FLAG is set —
+    the new process will restart the server itself).
+    """
+    try:
+        from vllm_mlx.dashboard.server_manager import (
+            AUTO_START_FLAG, PID_FILE, _get_pid, _is_process_alive, stop_server,
+        )
+        # If upgrading, the new process will restart the server — leave it running.
+        if AUTO_START_FLAG.exists():
+            return
+        pid = _get_pid()
+        if pid and _is_process_alive(pid):
+            print("[vllm-mlx] 🛑 Stopping inference server…", flush=True)
+            stop_server()
+    except Exception:
+        pass
 
 
 def main() -> None:
@@ -88,7 +112,7 @@ def main() -> None:
         print(f"[vllm-mlx] ⚠️  Auto-start check failed: {_exc}", file=sys.stderr)
 
     ui_file = Path(__file__).parent / "_ui.py"
-    result = subprocess.run(
+    streamlit_proc = subprocess.Popen(
         [
             sys.executable,
             "-m",
@@ -107,4 +131,17 @@ def main() -> None:
         ]
         + sys.argv[1:],
     )
-    sys.exit(result.returncode)
+
+    def _handle_signal(signum, frame):
+        streamlit_proc.terminate()
+
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
+    try:
+        streamlit_proc.wait()
+    finally:
+        _stop_inference_server()
+
+    sys.exit(streamlit_proc.returncode)
+

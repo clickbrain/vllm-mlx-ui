@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import time
 from datetime import datetime
 from typing import Any
@@ -2451,6 +2452,31 @@ with st.sidebar:
                      width="stretch", key="_sidebar_upgrade_btn"):
             st.session_state["_trigger_upgrade"] = True
             st.session_state.page = "⚙️ Settings"
+            st.rerun()
+
+    # ── Shutdown button (always at bottom of sidebar) ─────────────────────────
+    st.divider()
+    if st.button("⏹ Shutdown", width="stretch", key="_sidebar_shutdown_btn",
+                 help="Stop the inference server and exit the dashboard"):
+        st.session_state["_shutdown_confirm"] = True
+        st.rerun()
+
+    if st.session_state.get("_shutdown_confirm"):
+        st.warning("Stop inference server and exit?")
+        c1, c2 = st.columns(2)
+        if c1.button("Yes, shutdown", type="primary", key="_shutdown_yes"):
+            try:
+                _srv_st = sm.get_server_status()
+                if _srv_st.get("running"):
+                    sm.stop_server()
+            except Exception:
+                pass
+            st.success("Shutting down…")
+            import time as _st_time
+            _st_time.sleep(1)
+            os._exit(0)
+        if c2.button("Cancel", key="_shutdown_cancel"):
+            del st.session_state["_shutdown_confirm"]
             st.rerun()
 
 # Render the selected page
