@@ -1452,12 +1452,15 @@ def page_benchmarks() -> None:
                 st.success("✅ Benchmark complete!")
                 tps = result.get("tokens_per_second") or result.get("tps")
                 ttft = result.get("ttft_ms") or result.get("time_to_first_token_ms")
-                if tps or ttft:
+                # tps and ttft may be dicts with mean/min/max — extract the mean value
+                tps_val = tps.get("mean") if isinstance(tps, dict) else tps
+                ttft_val = ttft.get("mean") if isinstance(ttft, dict) else ttft
+                if tps_val or ttft_val:
                     rc1, rc2, _ = st.columns(3)
-                    if tps:
-                        rc1.metric("Tokens / sec", f"{tps:.1f}")
-                    if ttft:
-                        rc2.metric("TTFT (ms)", f"{ttft:.0f}")
+                    if tps_val:
+                        rc1.metric("Tokens / sec", f"{tps_val:.1f}")
+                    if ttft_val:
+                        rc2.metric("TTFT (ms)", f"{ttft_val:.0f}")
                 st.json(result)
             else:
                 st.error("Benchmark failed. See output above for details.")
@@ -1497,7 +1500,10 @@ def page_benchmarks() -> None:
                 ("tpot_ms", "TPOT (ms)"),
             ]:
                 if key in r and label not in row:
-                    row[label] = round(r[key], 1) if isinstance(r[key], float) else r[key]
+                    val = r[key]
+                    if isinstance(val, dict):
+                        val = val.get("mean", 0)
+                    row[label] = round(val, 1) if isinstance(val, float) else val
             rows.append(row)
 
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
@@ -1505,7 +1511,8 @@ def page_benchmarks() -> None:
         tps_data = [
             {
                 "Model": (r.get("model") or "?").split("/")[-1],
-                "tok/s": r.get("tokens_per_second") or r.get("tps") or 0,
+                "tok/s": (lambda v: v.get("mean", 0) if isinstance(v, dict) else v)(
+                    r.get("tokens_per_second") or r.get("tps") or 0),
             }
             for r in results_all
             if r.get("tokens_per_second") or r.get("tps")
@@ -1522,7 +1529,8 @@ def page_benchmarks() -> None:
         ttft_data = [
             {
                 "Model": (r.get("model") or "?").split("/")[-1],
-                "TTFT (ms)": r.get("ttft_ms") or r.get("time_to_first_token_ms") or 0,
+                "TTFT (ms)": (lambda v: v.get("mean", 0) if isinstance(v, dict) else v)(
+                    r.get("ttft_ms") or r.get("time_to_first_token_ms") or 0),
             }
             for r in results_all
             if r.get("ttft_ms") or r.get("time_to_first_token_ms")
