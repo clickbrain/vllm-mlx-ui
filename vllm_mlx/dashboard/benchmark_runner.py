@@ -7,7 +7,6 @@ and persists results history to ~/.vllm_mlx_ui/benchmark_results.json.
 """
 
 import json
-import shutil
 import subprocess
 import sys
 import time
@@ -55,22 +54,130 @@ def clear_all_results() -> None:
         RESULTS_FILE.unlink()
 
 
+def estimate_model_memory(model_id: str) -> float | None:
+    """Return estimated model memory requirement in GB, or None if unknown."""
+    try:
+        from huggingface_hub import scan_cache_dir
+        cache_info = scan_cache_dir()
+        for repo in cache_info.repos:
+            if repo.repo_id == model_id and repo.repo_type == "model":
+                return repo.size_on_disk / (1024 ** 3)
+    except Exception:
+        pass
+    return None
+
+
+def get_available_memory_gb() -> tuple[float, float]:
+    """Return (available_gb, total_gb) of system unified memory."""
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        return vm.available / (1024 ** 3), vm.total / (1024 ** 3)
+    except Exception:
+        return 0.0, 0.0
+
+
+def pre_flight_check(
+    model_id: str,
+    safety_margin: float = 0.80,
+) -> dict:
+    """
+    Check if the model is likely to fit in memory before running.
+
+    Returns a dict with keys:
+      - will_fit: bool | None (None = unknown)
+      - model_gb: float | None
+      - available_gb: float
+      - total_gb: float
+      - warning: str | None   (human-readable warning message, or None)
+    """
+    model_gb = estimate_model_memory(model_id)
+    available_gb, total_gb = get_available_memory_gb()
+
+    if model_gb is None or available_gb == 0.0:
+        return {
+            "will_fit": None,
+            "model_gb": model_gb,
+            "available_gb": available_gb,
+            "total_gb": total_gb,
+            "warning": None,
+        }
+
+    # Rough heuristic: model weights + ~25% for KV cache / overhead
+    required_gb = model_gb * 1.25
+    will_fit = required_gb <= available_gb * safety_margin
+    warning = None
+    if not will_fit:
+        warning = (
+            f"This model needs ~{required_gb:.1f} GB but only {available_gb:.1f} GB "
+            f"of {total_gb:.0f} GB unified memory is available. "
+            f"The benchmark will likely crash with an out-of-memory error."
+        )
+    elif required_gb > available_gb * 0.60:
+        warning = (
+            f"This model needs ~{required_gb:.1f} GB and {available_gb:.1f} GB is "
+            f"available — it will fit but memory is tight. "
+            f"Use fewer prompts or lower max tokens to reduce peak usage."
+        )
+
+    return {
+        "will_fit": will_fit,
+        "model_gb": model_gb,
+        "available_gb": available_gb,
+        "total_gb": total_gb,
+        "warning": warning,
+    }
+
+
+def _clear_memory(callback: "Callable[[str], None] | None" = None) -> None:
+    """
+    Best-effort memory clearing before a benchmark run.
+    - Runs Python GC in this process
+    - Clears the MLX Metal buffer cache (if MLX is available in this process)
+    - Pauses briefly to give macOS time to reclaim memory from recently-stopped processes
+    """
+    import gc as _gc
+    _gc.collect()
+    try:
+        import mlx.core as _mx
+        _mx.metal.clear_cache()
+    except Exception:
+        pass
+    if callback:
+        callback("🧹 Clearing memory before benchmark…\n")
+    time.sleep(1.5)
+
+
+# Inline preamble run inside the benchmark subprocess — clears MLX cache before
+# the model is loaded, then hands off to the real benchmark module.
+_BENCH_PREAMBLE = (
+    "import gc; gc.collect();"
+    "\ntry:\n import mlx.core as _mx; _mx.metal.clear_cache()\nexcept Exception: pass"
+    "\nimport runpy, sys; runpy.run_module('vllm_mlx.benchmark', run_name='__main__', alter_sys=True)"
+)
+
+
 def run_benchmark(
     model: str,
-    prompts: int = 5,
-    max_tokens: int = 256,
+    prompts: int = 3,
+    max_tokens: int = 128,
     is_mllm: bool = False,
     video: bool = False,
     output_callback: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """
     Run vllm-mlx-bench and return a result dict.
-    Streams each output line through output_callback if provided.
+    Clears memory (GC + MLX cache) before launching. Streams each output line
+    through output_callback if provided.
     """
     _ensure_state_dir()
 
-    binary = shutil.which("vllm-mlx-bench")
-    cmd = [binary] if binary else [sys.executable, "-m", "vllm_mlx.benchmark"]
+    # Clear memory in the parent process and pause before launching
+    _clear_memory(output_callback)
+
+    # Always use sys.executable with the preamble so we can clear the MLX
+    # Metal cache inside the subprocess before any model weights are loaded.
+    cmd = [sys.executable, "-c", _BENCH_PREAMBLE]
 
     output_file = STATE_DIR / f"bench_{int(time.time())}.json"
     cmd += [

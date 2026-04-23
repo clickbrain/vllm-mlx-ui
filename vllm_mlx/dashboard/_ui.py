@@ -1440,6 +1440,8 @@ def page_benchmarks() -> None:
 
         cached = mm.get_cached_models()
         model_ids = [m["id"] for m in cached]
+        # Build size lookup from cached models
+        _model_sizes: dict[str, float] = {m["id"]: m.get("size_gb", 0.0) for m in cached}
         config = sm.load_config()
 
         with st.form("bench_form"):
@@ -1458,11 +1460,16 @@ def page_benchmarks() -> None:
                         value=config.get("model", ""),
                         placeholder="mlx-community/Llama-3.2-3B-Instruct-4bit",
                     )
-                n_prompts = st.slider("Prompts", 1, 20, 5, help="More = more accurate average.")
-                max_tok = st.slider("Max tokens per response", 64, 1024, 256, step=64)
+                n_prompts = st.slider("Prompts", 1, 20, 3, help="More = more accurate average. Start low to avoid memory pressure.")
+                max_tok = st.slider("Max tokens per response", 64, 1024, 128, step=64,
+                                    help="Lower = less KV cache memory. Reduce if you get crashes.")
             with bc2:
                 is_mllm = st.checkbox("Vision / multimodal model (MLLM)")
                 is_video = st.checkbox("Video benchmark (MLLM only)")
+                mem_safe = st.checkbox(
+                    "🛡 Memory safe mode",
+                    help="Uses 1 prompt and 64 max tokens to minimise memory pressure on large models.",
+                )
                 st.info(
                     "💡 Stop the inference server and close other heavy apps "
                     "before benchmarking to free GPU memory.\n\n"
@@ -1475,6 +1482,32 @@ def page_benchmarks() -> None:
             if _server_running:
                 st.caption("⛔ Stop the inference server first (button above).")
 
+        # ── Pre-flight memory check ──────────────────────────────────────────
+        if bench_model:
+            _pf = br.pre_flight_check(bench_model)
+            if _pf["total_gb"] > 0:
+                _mem_col1, _mem_col2, _mem_col3 = st.columns(3)
+                _mem_col1.metric("Total RAM", f"{_pf['total_gb']:.0f} GB")
+                _mem_col2.metric("Available RAM", f"{_pf['available_gb']:.1f} GB")
+                if _pf["model_gb"]:
+                    _est = _pf["model_gb"] * 1.25
+                    _mem_col3.metric(
+                        "Est. model memory",
+                        f"{_est:.1f} GB",
+                        delta=f"{'✅ fits' if _pf['will_fit'] else '❌ too large'}",
+                        delta_color="normal" if _pf["will_fit"] else "inverse",
+                    )
+            if _pf["warning"]:
+                if _pf["will_fit"] is False:
+                    st.error(
+                        f"❌ **Memory warning:** {_pf['warning']}\n\n"
+                        "Running the benchmark will likely crash Python with a Metal OOM error. "
+                        "**Restart your Mac** to reclaim leaked GPU memory, then try again — "
+                        "or choose a smaller/more-quantized model."
+                    )
+                else:
+                    st.warning(f"⚠️ {_pf['warning']}")
+
         if run_btn:
             output_area = st.empty()
             output_buf: list[str] = []
@@ -1483,11 +1516,14 @@ def page_benchmarks() -> None:
                 output_buf.append(line)
                 output_area.code("".join(output_buf[-40:]), language=None)
 
+            _run_prompts = 1 if mem_safe else n_prompts
+            _run_tokens = 64 if mem_safe else max_tok
+
             with st.spinner(f"Benchmarking **{bench_model}**…"):
                 result = br.run_benchmark(
                     model=bench_model,
-                    prompts=n_prompts,
-                    max_tokens=max_tok,
+                    prompts=_run_prompts,
+                    max_tokens=_run_tokens,
                     is_mllm=is_mllm,
                     video=is_video,
                     output_callback=on_line,
