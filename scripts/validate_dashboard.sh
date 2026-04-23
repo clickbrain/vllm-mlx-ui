@@ -41,33 +41,38 @@ else
   ok "No deprecated use_container_width"
 fi
 
-# ── 2b. st.fragment with run_every on LARGE sections ─────────────────────
-# Acceptable: fragment covers only a small status banner (loading state).
-# NOT acceptable: fragment covers an entire page or large content area.
-# Check that no fragment with run_every wraps more than ~10 lines of content.
-# Simple heuristic: flag if run_every fragment appears outside an if-block
-# that guards a loading/starting state.
-# For now, only flag if it appears at top-level page scope (not inside an if).
-_frag_raw=$(grep -n "fragment.*run_every\|run_every.*fragment" "$DASHBOARD"/_ui.py 2>/dev/null || true)
-if [[ -n "$_frag_raw" ]]; then
-  # Verify each occurrence is inside a conditional loading guard
-  _bad=0
-  while IFS= read -r line; do
-    lineno=$(echo "$line" | cut -d: -f1)
-    # Check the 3 lines before this one for a guard like 'if status["running"] and not status["healthy"]'
-    context=$(sed -n "$((lineno-4)),$((lineno-1))p" "$DASHBOARD"/_ui.py 2>/dev/null)
-    if ! echo "$context" | grep -q "not.*healthy\|loading\|starting"; then
-      echo "  ⚠️  Unguarded @st.fragment(run_every=...) at line $lineno — verify it only covers a small area"
-      _bad=1
-    fi
-  done <<< "$_frag_raw"
-  if [[ $_bad -eq 0 ]]; then
-    ok "@st.fragment(run_every=...) present but guarded to loading state only (OK)"
-  else
-    fail "@st.fragment(run_every=...) found outside a loading guard — may cause large-area grey-fade"
-  fi
+# ── 2b. st.fragment misuse — check for time.sleep + st.rerun() polling loops ─
+# @st.fragment(run_every=N) is the CORRECT way to do live updates — it refreshes
+# only its own area without a full-page grey fade.
+# What IS bad: a bare time.sleep() at the END of a page function that acts as a
+# polling loop (the old "sleep then rerun the whole page" anti-pattern).
+# One-time action handlers (sleep 0.5 after a button click) are fine.
+# Heuristic: flag only if time.sleep appears at top indentation level of a page
+# function (i.e., 8-space indent = top of page body), NOT inside an if/with block.
+if python3 -c "
+import sys
+lines = open('$DASHBOARD/_ui.py').read().splitlines()
+for i, ln in enumerate(lines):
+    # Only flag sleep at page-function top level (8 spaces = top of def body)
+    stripped = ln.lstrip()
+    indent = len(ln) - len(stripped)
+    if ('time.sleep' in ln or '_time.sleep' in ln) and indent == 8:
+        # Only flag sleep values >= 2s (polling intervals, not action-feedback delays)
+        import re
+        m = re.search(r'sleep\((\d+(?:\.\d+)?)\)', ln)
+        if m and float(m.group(1)) < 2:
+            continue
+        next3 = ' '.join(lines[i:i+4])
+        if 'st.rerun()' in next3:
+            print(f'Line {i+1}: top-level time.sleep+rerun polling loop')
+            sys.exit(1)
+" 2>/dev/null; then
+  ok "No top-level time.sleep+st.rerun() polling loops (good)"
 else
-  ok "No @st.fragment(run_every=...) polling"
+  fail "time.sleep(N≥2) + st.rerun() at page top-level — use @st.fragment(run_every=N) instead to avoid grey-fade"
+fi
+if grep -qn "fragment.*run_every\|run_every.*fragment" "$DASHBOARD"/_ui.py 2>/dev/null; then
+  ok "@st.fragment(run_every=...) used for live updates (correct pattern — no full-page fade)"
 fi
 
 # ── 2c. Wrong brew command in UI text ────────────────────────────────────

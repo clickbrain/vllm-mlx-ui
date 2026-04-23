@@ -211,6 +211,30 @@ def _banner(text: str, kind: str = "green") -> None:
     )
 
 
+def _extract_tps(val) -> float | None:
+    """Extract a usable tokens/sec number from a scalar or dict result."""
+    if val is None:
+        return None
+    if isinstance(val, dict):
+        # Prefer generation_mean (excludes prompt-processing overhead),
+        # fall back to mean or total_throughput.
+        return (
+            val.get("generation_mean")
+            or val.get("mean")
+            or val.get("total_throughput")
+        )
+    return float(val) if val else None
+
+
+def _extract_ttft(val) -> float | None:
+    """Extract mean TTFT (ms) from a scalar or dict result."""
+    if val is None:
+        return None
+    if isinstance(val, dict):
+        return val.get("mean")
+    return float(val) if val else None
+
+
 def _plotly_defaults(fig: go.Figure, height: int = 260) -> go.Figure:
     fig.update_layout(
         plot_bgcolor="rgba(0,0,0,0)",
@@ -403,140 +427,131 @@ def _swap_model(new_model_id: str) -> None:
 # ===========================================================================
 def page_overview() -> None:
     st.title("📊 Overview")
-    config = sm.load_config()
-    status = sm.get_server_status()
 
-    # While model is loading, poll only the banner via a fragment so the rest
-    # of the page stays stable (no whole-page grey-fade every 2 seconds).
-    if status["running"] and not status["healthy"]:
-        @st.fragment(run_every=2)
-        def _overview_loading_banner():
-            s = sm.get_server_status()
-            if s["running"] and not s["healthy"]:
-                _banner("🟡 <strong>Server starting</strong> — waiting for model to load…", "yellow")
-                st.caption("Model is loading into memory. This can take up to 60 seconds.")
-            else:
-                st.rerun()  # Healthy or stopped — full page rerun
-        _overview_loading_banner()
+    @st.fragment(run_every=st.session_state.get("refresh_rate", 5))
+    def _overview_live() -> None:
+        config = sm.load_config()
+        status = sm.get_server_status()
+
+        # Loading state — server running but model not yet ready
+        if status["running"] and not status["healthy"]:
+            _banner("🟡 <strong>Server starting</strong> — waiting for model to load…", "yellow")
+            st.caption("Model is loading into memory. This can take up to 60 seconds.")
+            col1, col2, col3, col4 = st.columns(4)
+            for col, label in zip(
+                [col1, col2, col3, col4],
+                ["⏱ Uptime", "📨 Active", "⏳ Queued", "✅ Completed"],
+            ):
+                col.metric(label, "—")
+            return
+
+        if status["running"] and status["healthy"]:
+            h = status["health"]
+            model_display = h.get("model_name", config.get("model", "—"))
+            if "/" not in model_display and config.get("model"):
+                model_display = config["model"]
+            _banner(
+                f"🟢 <strong>Server running</strong> &nbsp;·&nbsp; "
+                f"Model: <strong>{model_display}</strong> &nbsp;·&nbsp; "
+                f"Type: {h.get('model_type', 'llm')} &nbsp;·&nbsp; "
+                f"PID: {status['pid']}",
+                "green",
+            )
+        else:
+            _banner("🔴 <strong>Server stopped</strong> — go to <em>Server</em> to start it.", "red")
+
+        metrics = None
+        if status["running"] and status["healthy"]:
+            metrics = sm.get_metrics(config.get("api_key", ""))
+
         col1, col2, col3, col4 = st.columns(4)
-        for col, label in zip(
-            [col1, col2, col3, col4],
-            ["⏱ Uptime", "📨 Active", "⏳ Queued", "✅ Completed"],
-        ):
-            col.metric(label, "—")
-        return
 
-    if status["running"] and status["healthy"]:
-        h = status["health"]
-        # Prefer full model ID from config — health endpoint may return short name
-        model_display = h.get("model_name", config.get("model", "—"))
-        if "/" not in model_display and config.get("model"):
-            model_display = config["model"]
-        _banner(
-            f"🟢 <strong>Server running</strong> &nbsp;·&nbsp; "
-            f"Model: <strong>{model_display}</strong> &nbsp;·&nbsp; "
-            f"Type: {h.get('model_type', 'llm')} &nbsp;·&nbsp; "
-            f"PID: {status['pid']}",
-            "green",
-        )
-    else:
-        _banner("🔴 <strong>Server stopped</strong> — go to <em>Server</em> to start it.", "red")
+        if metrics:
+            uptime = int(metrics.get("uptime_s", 0))
+            h_val, rem = divmod(uptime, 3600)
+            m_val, s_val = divmod(rem, 60)
+            col1.metric("⏱ Uptime", f"{h_val:02d}:{m_val:02d}:{s_val:02d}")
+            col2.metric("📨 Active", metrics.get("num_running", 0))
+            col3.metric("⏳ Queued", metrics.get("num_waiting", 0))
+            col4.metric("✅ Completed", f"{metrics.get('total_requests_processed', 0):,}")
 
-    metrics = None
-    if status["running"] and status["healthy"]:
-        metrics = sm.get_metrics(config.get("api_key", ""))
+            col5, col6, col7, col8 = st.columns(4)
+            col5.metric("📝 Prompt tokens", f"{metrics.get('total_prompt_tokens', 0):,}")
+            col6.metric("💬 Output tokens", f"{metrics.get('total_completion_tokens', 0):,}")
+            metal = metrics.get("metal") or {}
+            active_gb = metal.get("active_memory_gb")
+            peak_gb = metal.get("peak_memory_gb")
+            col7.metric("🔧 Metal memory", f"{active_gb:.2f} GB" if active_gb is not None else "—")
+            col8.metric("📈 Peak memory", f"{peak_gb:.2f} GB" if peak_gb is not None else "—")
 
-    col1, col2, col3, col4 = st.columns(4)
-
-    if metrics:
-        uptime = int(metrics.get("uptime_s", 0))
-        h_val, rem = divmod(uptime, 3600)
-        m_val, s_val = divmod(rem, 60)
-        col1.metric("⏱ Uptime", f"{h_val:02d}:{m_val:02d}:{s_val:02d}")
-        col2.metric("📨 Active", metrics.get("num_running", 0))
-        col3.metric("⏳ Queued", metrics.get("num_waiting", 0))
-        col4.metric("✅ Completed", f"{metrics.get('total_requests_processed', 0):,}")
-
-        col5, col6, col7, col8 = st.columns(4)
-        col5.metric("📝 Prompt tokens", f"{metrics.get('total_prompt_tokens', 0):,}")
-        col6.metric("💬 Output tokens", f"{metrics.get('total_completion_tokens', 0):,}")
-        metal = metrics.get("metal") or {}
-        active_gb = metal.get("active_memory_gb")
-        peak_gb = metal.get("peak_memory_gb")
-        col7.metric("🔧 Metal memory", f"{active_gb:.2f} GB" if active_gb is not None else "—")
-        col8.metric("📈 Peak memory", f"{peak_gb:.2f} GB" if peak_gb is not None else "—")
-
-        st.session_state.metrics_history.append(
-            {
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "active": metrics.get("num_running", 0),
-                "queued": metrics.get("num_waiting", 0),
-                "total": metrics.get("total_requests_processed", 0),
-                "memory_gb": active_gb or 0,
-            }
-        )
-        if len(st.session_state.metrics_history) > 120:
-            st.session_state.metrics_history = st.session_state.metrics_history[-120:]
-    else:
-        for col, label in zip(
-            [col1, col2, col3, col4],
-            ["⏱ Uptime", "📨 Active", "⏳ Queued", "✅ Completed"],
-        ):
-            col.metric(label, "—")
-
-    history = st.session_state.metrics_history
-    if history:
-        df = pd.DataFrame(history)
-        left, right = st.columns(2)
-
-        with left:
-            st.subheader("Requests over time")
-            fig = go.Figure()
-            fig.add_trace(
-                go.Scatter(
-                    x=df["time"], y=df["active"], name="Active",
-                    fill="tozeroy", line=dict(color="#7C3AED", width=2),
-                    fillcolor="rgba(124,58,237,0.15)",
-                )
+            st.session_state.metrics_history.append(
+                {
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "active": metrics.get("num_running", 0),
+                    "queued": metrics.get("num_waiting", 0),
+                    "total": metrics.get("total_requests_processed", 0),
+                    "memory_gb": active_gb or 0,
+                }
             )
-            fig.add_trace(
-                go.Scatter(
-                    x=df["time"], y=df["queued"], name="Queued",
-                    fill="tozeroy", line=dict(color="#F59E0B", width=2),
-                    fillcolor="rgba(245,158,11,0.1)",
+            if len(st.session_state.metrics_history) > 120:
+                st.session_state.metrics_history = st.session_state.metrics_history[-120:]
+        else:
+            for col, label in zip(
+                [col1, col2, col3, col4],
+                ["⏱ Uptime", "📨 Active", "⏳ Queued", "✅ Completed"],
+            ):
+                col.metric(label, "—")
+
+        history = st.session_state.metrics_history
+        if history:
+            df = pd.DataFrame(history)
+            left, right = st.columns(2)
+
+            with left:
+                st.subheader("Requests over time")
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=df["time"], y=df["active"], name="Active",
+                        fill="tozeroy", line=dict(color="#7C3AED", width=2),
+                        fillcolor="rgba(124,58,237,0.15)",
+                    )
                 )
-            )
-            st.plotly_chart(_plotly_defaults(fig), width="stretch")
-
-        with right:
-            st.subheader("Metal GPU memory (GB)")
-            fig2 = go.Figure()
-            fig2.add_trace(
-                go.Scatter(
-                    x=df["time"], y=df["memory_gb"], name="Memory GB",
-                    fill="tozeroy", line=dict(color="#10B981", width=2),
-                    fillcolor="rgba(16,185,129,0.15)",
+                fig.add_trace(
+                    go.Scatter(
+                        x=df["time"], y=df["queued"], name="Queued",
+                        fill="tozeroy", line=dict(color="#F59E0B", width=2),
+                        fillcolor="rgba(245,158,11,0.1)",
+                    )
                 )
-            )
-            st.plotly_chart(_plotly_defaults(fig2), width="stretch")
+                st.plotly_chart(_plotly_defaults(fig), width="stretch")
 
-    if metrics and metrics.get("requests"):
-        st.subheader("Active requests")
-        st.dataframe(pd.DataFrame(metrics["requests"]), width="stretch", hide_index=True)
+            with right:
+                st.subheader("Metal GPU memory (GB)")
+                fig2 = go.Figure()
+                fig2.add_trace(
+                    go.Scatter(
+                        x=df["time"], y=df["memory_gb"], name="Memory GB",
+                        fill="tozeroy", line=dict(color="#10B981", width=2),
+                        fillcolor="rgba(16,185,129,0.15)",
+                    )
+                )
+                st.plotly_chart(_plotly_defaults(fig2), width="stretch")
 
-    if status["running"] and status["healthy"]:
-        try:
-            cache_data = sm.get_cache_stats(config.get("api_key", ""))
-            if cache_data and not cache_data.get("error"):
-                with st.expander("🗄 Cache statistics"):
-                    st.json(cache_data)
-        except Exception:
-            pass
+        if metrics and metrics.get("requests"):
+            st.subheader("Active requests")
+            st.dataframe(pd.DataFrame(metrics["requests"]), width="stretch", hide_index=True)
 
-    if status["running"] and status["healthy"]:
-        # Live metrics dashboard — full page refresh at configured interval
-        time.sleep(st.session_state.get("refresh_rate", 5))
-        st.rerun()
+        if status["running"] and status["healthy"]:
+            try:
+                cache_data = sm.get_cache_stats(config.get("api_key", ""))
+                if cache_data and not cache_data.get("error"):
+                    with st.expander("🗄 Cache statistics"):
+                        st.json(cache_data)
+            except Exception:
+                pass
+
+    _overview_live()
 
 
 # ===========================================================================
@@ -1450,11 +1465,12 @@ def page_benchmarks() -> None:
 
             if result.get("success", True):
                 st.success("✅ Benchmark complete!")
-                tps = result.get("tokens_per_second") or result.get("tps")
-                ttft = result.get("ttft_ms") or result.get("time_to_first_token_ms")
-                # tps and ttft may be dicts with mean/min/max — extract the mean value
-                tps_val = tps.get("mean") if isinstance(tps, dict) else tps
-                ttft_val = ttft.get("mean") if isinstance(ttft, dict) else ttft
+                tps_val = _extract_tps(
+                    result.get("tokens_per_second") or result.get("tps")
+                )
+                ttft_val = _extract_ttft(
+                    result.get("ttft_ms") or result.get("time_to_first_token_ms")
+                )
                 if tps_val or ttft_val:
                     rc1, rc2, _ = st.columns(3)
                     if tps_val:
@@ -1492,18 +1508,17 @@ def page_benchmarks() -> None:
                 "Prompts": r.get("prompts", "—"),
                 "Max tokens": r.get("max_tokens", "—"),
             }
-            for key, label in [
-                ("tokens_per_second", "tok/s"),
-                ("tps", "tok/s"),
-                ("ttft_ms", "TTFT (ms)"),
-                ("time_to_first_token_ms", "TTFT (ms)"),
-                ("tpot_ms", "TPOT (ms)"),
-            ]:
-                if key in r and label not in row:
-                    val = r[key]
-                    if isinstance(val, dict):
-                        val = val.get("mean", 0)
-                    row[label] = round(val, 1) if isinstance(val, float) else val
+            tps_v = _extract_tps(r.get("tokens_per_second") or r.get("tps"))
+            if tps_v is not None:
+                row["tok/s"] = round(tps_v, 1)
+            ttft_v = _extract_ttft(r.get("ttft_ms") or r.get("time_to_first_token_ms"))
+            if ttft_v is not None:
+                row["TTFT (ms)"] = round(ttft_v, 1)
+            tpot = r.get("tpot_ms")
+            if tpot is not None:
+                tpot_v = tpot.get("mean") if isinstance(tpot, dict) else tpot
+                if tpot_v is not None:
+                    row["TPOT (ms)"] = round(float(tpot_v), 1)
             rows.append(row)
 
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
@@ -1511,11 +1526,10 @@ def page_benchmarks() -> None:
         tps_data = [
             {
                 "Model": (r.get("model") or "?").split("/")[-1],
-                "tok/s": (lambda v: v.get("mean", 0) if isinstance(v, dict) else v)(
-                    r.get("tokens_per_second") or r.get("tps") or 0),
+                "tok/s": _extract_tps(r.get("tokens_per_second") or r.get("tps")) or 0,
             }
             for r in results_all
-            if r.get("tokens_per_second") or r.get("tps")
+            if _extract_tps(r.get("tokens_per_second") or r.get("tps"))
         ]
         if tps_data:
             st.subheader("Throughput comparison (tokens / second)")
@@ -1529,11 +1543,10 @@ def page_benchmarks() -> None:
         ttft_data = [
             {
                 "Model": (r.get("model") or "?").split("/")[-1],
-                "TTFT (ms)": (lambda v: v.get("mean", 0) if isinstance(v, dict) else v)(
-                    r.get("ttft_ms") or r.get("time_to_first_token_ms") or 0),
+                "TTFT (ms)": _extract_ttft(r.get("ttft_ms") or r.get("time_to_first_token_ms")) or 0,
             }
             for r in results_all
-            if r.get("ttft_ms") or r.get("time_to_first_token_ms")
+            if _extract_ttft(r.get("ttft_ms") or r.get("time_to_first_token_ms"))
         ]
         if ttft_data:
             st.subheader("Time to first token — lower is better")
