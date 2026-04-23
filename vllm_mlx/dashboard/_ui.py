@@ -62,6 +62,20 @@ section[data-testid="stSidebar"] button { width:100%; }
 div[data-testid="stChatMessage"] { padding:.5rem 0; }
 pre { max-height:420px; overflow-y:auto; }
 
+/* Quick Switch dropdown — taller scrollable list */
+section[data-testid="stSidebar"] [data-baseweb="select"] [role="listbox"],
+section[data-testid="stSidebar"] [data-baseweb="popover"] [role="listbox"] {
+    max-height: 60vh !important;
+}
+/* Prevent long model names from being clipped in the closed selector */
+section[data-testid="stSidebar"] [data-baseweb="select"] [data-testid="stMarkdownContainer"],
+section[data-testid="stSidebar"] [data-baseweb="select"] span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
 /* Mode badge styles */
 .mode-badge {
     display:inline-block;
@@ -2418,6 +2432,7 @@ with st.sidebar:
             index=_sb_cur_idx,
             key="_sidebar_model",
             label_visibility="visible",
+            format_func=lambda x: x.split("/")[-1] if "/" in x else x,
         )
         if _sb_sel != _sb_active:
             if st.button("Switch now", key="_sidebar_swap_btn", type="primary",
