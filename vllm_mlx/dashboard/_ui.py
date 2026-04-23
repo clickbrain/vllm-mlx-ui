@@ -2453,12 +2453,17 @@ with st.sidebar:
             st.rerun()
 
     # ── Update available banner (shown at bottom of sidebar) ─────────────────
+    # Only flag updates that 'brew upgrade --fetch-HEAD vllm-mlx-ui' can fix.
+    # pip-level dependency updates (mlx-lm, huggingface-hub) are shown in
+    # Settings detail only — brew doesn't upgrade them so the banner would
+    # show "update available" permanently after every brew upgrade.
+    _BREW_PACKAGES = {"vllm-mlx-ui (dashboard)", "vllm-mlx (inference engine)"}
     try:
         from vllm_mlx.dashboard import update_checker as _uc_mod
         _upd_results = _uc_mod._cache.get("results", [])
     except Exception:
         _upd_results = []
-    _upd_outdated = [p for p in _upd_results if p.update_available]
+    _upd_outdated = [p for p in _upd_results if p.update_available and p.name in _BREW_PACKAGES]
     if _upd_outdated:
         st.divider()
         _n = len(_upd_outdated)
