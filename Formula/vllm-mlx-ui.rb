@@ -37,6 +37,12 @@ class VllmMlxUi < Formula
     # Install the package with the [ui] extra (streamlit, plotly, pandas, httpx).
     system venv/"bin/pip", "install", ".[ui]"
 
+    # Explicitly upgrade key dependencies to their latest compatible versions.
+    # pip install . above satisfies minimum version constraints but won't
+    # necessarily pick the newest release.  Upgrading explicitly ensures the
+    # inference library and model-download tooling are always current.
+    system venv/"bin/pip", "install", "--upgrade", "mlx-lm", "huggingface-hub"
+
     # Symlink all entry-point scripts into Homebrew's bin so they are on PATH
     %w[vllm-mlx vllm-mlx-ui vllm-mlx-chat vllm-mlx-bench].each do |cmd|
       script = venv/"bin"/cmd

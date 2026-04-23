@@ -166,11 +166,16 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
     def _check_vllm():
         vllm_installed = _installed_version("vllm-mlx")
         vllm_latest = _github_latest_tag("waybarrios", "vllm-mlx")
+        # The engine is bundled inside the vllm-mlx-ui package — it cannot be
+        # upgraded independently.  Show the installed and upstream versions for
+        # information but never flag this row as an actionable update (doing so
+        # would show "update available" permanently even after updating, because
+        # the brew install command can't pull a newer engine on its own).
         return PackageInfo(
             name="vllm-mlx (inference engine)",
             installed=vllm_installed,
-            latest=vllm_latest,
-            update_available=_version_gt(vllm_latest, vllm_installed),
+            latest=vllm_latest if vllm_latest != "unknown" else vllm_installed,
+            update_available=False,
             url="https://github.com/waybarrios/vllm-mlx/releases",
         )
 
@@ -218,11 +223,13 @@ def upgrade_command() -> list[str]:
     method = _detect_install_method()
     if method == "homebrew":
         return ["brew", "upgrade", "--fetch-HEAD", "vllm-mlx-ui"]
-    # pip / install.sh path
+    # pip / install.sh path — upgrade the dashboard and all key dependencies
+    pip = shutil.which("pip3") or "pip3"
     return [
-        shutil.which("pip3") or "pip3",
-        "install", "--upgrade",
-        "git+https://github.com/clickbrain/vllm-mlx-ui.git#egg=vllm-mlx[ui]",
+        "sh", "-c",
+        f"{pip} install --upgrade "
+        f"git+https://github.com/clickbrain/vllm-mlx-ui.git#egg=vllm-mlx[ui] "
+        f"&& {pip} install --upgrade mlx-lm huggingface-hub",
     ]
 
 
