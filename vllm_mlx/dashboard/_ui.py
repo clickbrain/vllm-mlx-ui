@@ -575,7 +575,10 @@ def _model_selectbox(
         options.insert(0, saved)
     options_with_manual = options + ["✏️ Enter manually…"]
     cur_idx = options_with_manual.index(saved) if saved in options_with_manual else 0
-    choice = st.selectbox(label, options_with_manual, index=cur_idx, key=key, help=help)
+    # Pre-populate to avoid default-value/session-state conflict
+    if key not in st.session_state or st.session_state[key] not in options_with_manual:
+        st.session_state[key] = options_with_manual[cur_idx]
+    choice = st.selectbox(label, options_with_manual, key=key, help=help)
     if choice == "✏️ Enter manually…":
         return st.text_input(f"{label} (ID)", value=saved, key=f"{key}_manual",
                              placeholder="mlx-community/…")
@@ -2504,10 +2507,12 @@ with st.sidebar:
             _sb_active = _status["health"].get("model_name", _sb_active)
         _sb_options = _sb_model_ids
         _sb_cur_idx = _sb_options.index(_sb_active) if _sb_active in _sb_options else 0
+        # Pre-populate session state to avoid default-value/session-state conflict warning
+        if "_sidebar_model" not in st.session_state or st.session_state["_sidebar_model"] not in _sb_options:
+            st.session_state["_sidebar_model"] = _sb_options[_sb_cur_idx]
         _sb_sel = st.selectbox(
             "⚡ Quick switch model",
             _sb_options,
-            index=_sb_cur_idx,
             key="_sidebar_model",
             label_visibility="visible",
             format_func=lambda x: x.split("/")[-1] if "/" in x else x,
