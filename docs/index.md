@@ -25,6 +25,9 @@ vllm-mlx brings native Apple Silicon GPU acceleration to vLLM by integrating:
 
 ## Quick Links
 
+### Dashboard UI (No-Code Interface)
+- [**Dashboard User Guide**](dashboard/user-guide.md) — Complete guide to the web dashboard: installation, all 6 pages, remote access, security, troubleshooting
+
 ### Getting Started
 - [Installation](getting-started/installation.md)
 - [Quick Start](getting-started/quickstart.md)

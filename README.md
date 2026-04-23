@@ -10,6 +10,8 @@ A comprehensive macOS web dashboard for [vllm-mlx](https://github.com/waybarrios
 
 The vllm-mlx Dashboard gives you a beautiful, zero-configuration web UI to control every aspect of your local AI server — no terminal knowledge required.
 
+📖 **[→ Full User Guide](docs/dashboard/user-guide.md)** — complete documentation for every feature, page, and setting.
+
 | Feature | Description |
 |---------|-------------|
 | 📊 **Overview** | Live metrics (tokens/sec, GPU memory, latency), server health at a glance |
