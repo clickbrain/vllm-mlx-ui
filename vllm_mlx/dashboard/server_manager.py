@@ -202,6 +202,10 @@ def get_server_url(config: dict[str, Any] | None = None) -> str:
         return remote.rstrip("/")
     host = config.get("host", "127.0.0.1")
     port = config.get("port", 8000)
+    # 0.0.0.0 is a valid bind address but not a valid client-side host.
+    # When the UI is on the same machine as the server, use 127.0.0.1 to connect.
+    if host == "0.0.0.0":
+        host = "127.0.0.1"
     return f"http://{host}:{port}"
 
 
