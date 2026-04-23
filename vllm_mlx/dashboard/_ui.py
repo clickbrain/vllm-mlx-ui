@@ -2084,7 +2084,8 @@ def page_settings() -> None:
             "Inference server URL",
             value=_cfg_rs.get("remote_server_url", ""),
             placeholder="http://192.168.1.42:8000",
-            help="The URL of the vllm-mlx inference server (port 8000 by default).",
+            help="Base URL of the vllm-mlx inference server — do NOT include /v1. "
+                 "Example: http://BradStudio.local:8000",
         )
         remote_mgmt_url = st.text_input(
             "Management API URL",
@@ -2102,7 +2103,8 @@ def page_settings() -> None:
         rs_saved = st.form_submit_button("💾 Save remote connection", type="primary")
 
     if rs_saved:
-        _cfg_rs["remote_server_url"] = remote_server_url.strip()
+        _raw_rs = remote_server_url.strip().rstrip("/")
+        _cfg_rs["remote_server_url"] = _raw_rs[:-3] if _raw_rs.endswith("/v1") else _raw_rs
         _cfg_rs["remote_mgmt_url"] = remote_mgmt_url.strip()
         _cfg_rs["mgmt_api_key"] = mgmt_api_key.strip()
         # Save locally only — don't sync connectivity settings to remote
@@ -2457,7 +2459,10 @@ with st.sidebar:
     # pip-level dependency updates (mlx-lm, huggingface-hub) are shown in
     # Settings detail only — brew doesn't upgrade them so the banner would
     # show "update available" permanently after every brew upgrade.
-    _BREW_PACKAGES = {"vllm-mlx-ui (dashboard)", "vllm-mlx (inference engine)"}
+    # Only the dashboard SHA check is meaningful here — vllm-mlx is part of the
+    # same formula and its version tag tracks upstream (waybarrios), not our fork,
+    # so it would always appear outdated even after a brew upgrade.
+    _BREW_PACKAGES = {"vllm-mlx-ui (dashboard)"}
     try:
         from vllm_mlx.dashboard import update_checker as _uc_mod
         _upd_results = _uc_mod._cache.get("results", [])

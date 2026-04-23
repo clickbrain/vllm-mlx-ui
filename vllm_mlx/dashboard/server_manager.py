@@ -195,15 +195,39 @@ def _is_process_alive(pid: int) -> bool:
 
 
 def get_server_url(config: dict[str, Any] | None = None) -> str:
+    """Return the bare base URL of the inference server — no trailing slash, no /v1.
+
+    All callers append their own path (e.g. /health, /v1/chat/completions).
+
+    In local mode the remote_server_url saved in config is intentionally
+    ignored so that a leftover remote config never hijacks the local health
+    check.  This mirrors the logic in _mgmt_base().
+    """
     if config is None:
         config = load_config()
-    remote = config.get("remote_server_url", "").strip()
-    if remote:
-        return remote.rstrip("/")
+
+    # Only use remote_server_url when the UI is explicitly in remote mode.
+    _use_remote = True
+    try:
+        import streamlit as _st
+        _use_remote = _st.session_state.get("connection_mode", "local") == "remote"
+    except Exception:
+        pass  # Not running inside Streamlit (e.g. mgmt API) — honour remote_server_url.
+
+    if _use_remote:
+        remote = config.get("remote_server_url", "").strip()
+        if remote:
+            # Strip trailing /v1 (or /v1/) — users often paste the OpenAI base URL
+            # which includes /v1, but all our callers append /v1/... themselves.
+            url = remote.rstrip("/")
+            if url.endswith("/v1"):
+                url = url[:-3]
+            return url
+
+    # Local mode: connect to the server on this machine.
     host = config.get("host", "127.0.0.1")
     port = config.get("port", 8000)
-    # 0.0.0.0 is a valid bind address but not a valid client-side host.
-    # When the UI is on the same machine as the server, use 127.0.0.1 to connect.
+    # 0.0.0.0 is a valid bind address but not a valid outbound host on macOS.
     if host == "0.0.0.0":
         host = "127.0.0.1"
     return f"http://{host}:{port}"
