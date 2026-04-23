@@ -428,7 +428,7 @@ def _swap_model(new_model_id: str) -> None:
 def page_overview() -> None:
     st.title("📊 Overview")
 
-    @st.fragment(run_every=st.session_state.get("refresh_rate", 5))
+    @st.fragment(run_every=5)
     def _overview_live() -> None:
         config = sm.load_config()
         status = sm.get_server_status()
@@ -1983,6 +1983,103 @@ def page_chat() -> None:
 def page_settings() -> None:
     st.title("⚙️ Settings")
 
+    # ── Updates (top — most important action) ────────────────────────────────
+    from vllm_mlx.dashboard import update_checker as uc
+
+    _method = uc._detect_install_method()
+    _method_label = {"homebrew": "Homebrew", "pip": "pip"}.get(_method, "unknown")
+    st.subheader("🔄 Updates")
+    st.caption(f"Install method: **{_method_label}** · Updates checked automatically on startup (hourly)")
+
+    col_force, _ = st.columns([1, 3])
+    with col_force:
+        if st.button("↺ Re-check now", width="stretch",
+                     help="Bypass 1-hour cache and check for updates now"):
+            with st.spinner("Checking…"):
+                _pkgs = uc.check_updates(force=True)
+            st.rerun()
+
+    _pkgs = uc._cache.get("results", [])
+    if _pkgs:
+        _any_update = any(p.update_available for p in _pkgs)
+        if _any_update:
+            st.warning(f"🔔 **{sum(p.update_available for p in _pkgs)} update(s) available**")
+        else:
+            st.success("✅ Everything is up to date")
+
+        for pkg in _pkgs:
+            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+            c1.markdown(f"**{pkg.name}**")
+            c2.markdown(f"`{pkg.installed}`")
+            if pkg.update_available:
+                c3.markdown(f"⬆️ `{pkg.latest}`")
+                c4.markdown(f"[Notes]({pkg.url})")
+            elif pkg.latest not in ("unknown", ""):
+                c3.markdown(f"✓ `{pkg.latest}`")
+                c4.markdown(f"[Notes]({pkg.url})")
+            else:
+                c3.markdown("—")
+                c4.markdown("")
+
+        if _any_update or st.session_state.get("_trigger_upgrade"):
+            _cmd = uc.upgrade_command()
+            st.code(" ".join(_cmd), language="bash")
+            st.caption("Updates the dashboard, inference engine, and all dependencies, then relaunches automatically.")
+
+            # Auto-trigger if coming from sidebar button
+            _auto_run = st.session_state.pop("_trigger_upgrade", False)
+            if st.button("⬆️ Update Now & Restart", type="primary",
+                         width="content", key="_do_upgrade_btn") or _auto_run:
+                _out_area = st.empty()
+                _buf: list[str] = []
+                with st.spinner("Upgrading — this takes 1–3 minutes…"):
+                    proc = uc.subprocess.Popen(
+                        _cmd,
+                        stdout=uc.subprocess.PIPE,
+                        stderr=uc.subprocess.STDOUT,
+                        text=True,
+                    )
+                    assert proc.stdout
+                    for line in proc.stdout:
+                        _buf.append(line)
+                        _out_area.code("".join(_buf[-30:]), language=None)
+                    proc.wait()
+
+                if proc.returncode == 0:
+                    st.success("✅ Update complete! Relaunching in 20 seconds…")
+                    st.markdown(
+                        '<meta http-equiv="refresh" content="22">',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption("If the page doesn't reload automatically, "
+                               "wait a moment then refresh your browser manually.")
+                    uc.relaunch()
+                else:
+                    full_output = "".join(_buf)
+                    _linkage_warn = "Failed to fix install linkage" in full_output
+                    _installed = any(
+                        ("🍺" in ln or "HEAD-" in ln) and "built in" in ln
+                        for ln in _buf
+                    )
+                    if _linkage_warn and _installed:
+                        st.success(
+                            "✅ Update complete (dylib relinking warning is cosmetic — "
+                            "the app is fine). Relaunching in 20 seconds…"
+                        )
+                        st.markdown(
+                            '<meta http-equiv="refresh" content="22">',
+                            unsafe_allow_html=True,
+                        )
+                        st.caption("If the page doesn't reload automatically, "
+                                   "wait a moment then refresh your browser manually.")
+                        uc.relaunch()
+                    else:
+                        st.error(f"❌ Update failed (exit {proc.returncode}). See output above.")
+    else:
+        st.info("Update check is running in the background — results will appear shortly. "
+                "Reload the page or click Re-check now.")
+
+    st.divider()
     st.subheader("🔑 HuggingFace")
     hf_token = st.text_input(
         "HuggingFace token",
@@ -2007,6 +2104,27 @@ def page_settings() -> None:
     if new_rate != st.session_state.get("refresh_rate", 5):
         st.session_state["refresh_rate"] = new_rate
         st.success(f"Refresh interval set to {new_rate}s.")
+
+    st.divider()
+    st.subheader("🖥️ Server Startup")
+    _startup_cfg = sm.load_config()
+    _startup_behavior_options = {
+        "auto": "🔄 Auto-load last model (start server immediately with last used model)",
+        "ask": "❓ Ask me each time (show a model picker before starting the server)",
+        "none": "⏸ Manual (don't auto-start — I'll start the server when ready)",
+    }
+    _current_behavior = _startup_cfg.get("startup_model_behavior", "auto")
+    _behavior_sel = st.radio(
+        "When the app restarts, what should happen?",
+        list(_startup_behavior_options.keys()),
+        index=list(_startup_behavior_options.keys()).index(_current_behavior),
+        format_func=lambda k: _startup_behavior_options[k],
+        key="_startup_behavior_radio",
+    )
+    if _behavior_sel != _current_behavior:
+        _startup_cfg["startup_model_behavior"] = _behavior_sel
+        sm.save_config(_startup_cfg)
+        st.success("Startup behavior saved. Takes effect on next restart.")
 
     st.divider()
     st.subheader("📁 Storage")
@@ -2269,106 +2387,6 @@ def page_settings() -> None:
     )
 
     st.divider()
-    st.subheader("🔄 Updates")
-
-    from vllm_mlx.dashboard import update_checker as uc
-
-    _method = uc._detect_install_method()
-    _method_label = {"homebrew": "Homebrew", "pip": "pip"}.get(_method, "unknown")
-    st.caption(f"Install method: **{_method_label}** · Updates checked automatically on startup (hourly)")
-
-    col_force, _ = st.columns([1, 3])
-    with col_force:
-        if st.button("↺ Re-check now", width="stretch",
-                     help="Bypass 1-hour cache and check for updates now"):
-            with st.spinner("Checking…"):
-                _pkgs = uc.check_updates(force=True)
-            st.rerun()
-
-    _pkgs = uc._cache.get("results", [])
-    if _pkgs:
-        _any_update = any(p.update_available for p in _pkgs)
-        if _any_update:
-            st.warning(f"🔔 **{sum(p.update_available for p in _pkgs)} update(s) available**")
-        else:
-            st.success("✅ Everything is up to date")
-
-        for pkg in _pkgs:
-            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
-            c1.markdown(f"**{pkg.name}**")
-            c2.markdown(f"`{pkg.installed}`")
-            if pkg.update_available:
-                c3.markdown(f"⬆️ `{pkg.latest}`")
-                c4.markdown(f"[Notes]({pkg.url})")
-            elif pkg.latest not in ("unknown", ""):
-                c3.markdown(f"✓ `{pkg.latest}`")
-                c4.markdown(f"[Notes]({pkg.url})")
-            else:
-                c3.markdown("—")
-                c4.markdown("")
-
-        if _any_update or st.session_state.get("_trigger_upgrade"):
-            _cmd = uc.upgrade_command()
-            st.code(" ".join(_cmd), language="bash")
-            st.caption("Updates the dashboard, inference engine, and all dependencies, then relaunches automatically.")
-
-            # Auto-trigger if coming from sidebar button
-            _auto_run = st.session_state.pop("_trigger_upgrade", False)
-            if st.button("⬆️ Update Now & Restart", type="primary",
-                         width="content", key="_do_upgrade_btn") or _auto_run:
-                _out_area = st.empty()
-                _buf: list[str] = []
-                with st.spinner("Upgrading — this takes 1–3 minutes…"):
-                    proc = uc.subprocess.Popen(
-                        _cmd,
-                        stdout=uc.subprocess.PIPE,
-                        stderr=uc.subprocess.STDOUT,
-                        text=True,
-                    )
-                    assert proc.stdout
-                    for line in proc.stdout:
-                        _buf.append(line)
-                        _out_area.code("".join(_buf[-30:]), language=None)
-                    proc.wait()
-
-                if proc.returncode == 0:
-                    st.success("✅ Update complete! Relaunching in 20 seconds…")
-                    st.markdown(
-                        '<meta http-equiv="refresh" content="22">',
-                        unsafe_allow_html=True,
-                    )
-                    st.caption("If the page doesn't reload automatically, "
-                               "wait a moment then refresh your browser manually.")
-                    uc.relaunch()
-                else:
-                    # Brew exits 1 for dylib relinking warnings even when the
-                    # install succeeded. Treat it as success if the output
-                    # contains the installed-cellar summary line (🍺 …HEAD-…).
-                    full_output = "".join(_buf)
-                    _linkage_warn = "Failed to fix install linkage" in full_output
-                    _installed = any(
-                        ("🍺" in ln or "HEAD-" in ln) and "built in" in ln
-                        for ln in _buf
-                    )
-                    if _linkage_warn and _installed:
-                        st.success(
-                            "✅ Update complete (dylib relinking warning is cosmetic — "
-                            "the app is fine). Relaunching in 20 seconds…"
-                        )
-                        st.markdown(
-                            '<meta http-equiv="refresh" content="22">',
-                            unsafe_allow_html=True,
-                        )
-                        st.caption("If the page doesn't reload automatically, "
-                                   "wait a moment then refresh your browser manually.")
-                        uc.relaunch()
-                    else:
-                        st.error(f"❌ Update failed (exit {proc.returncode}). See output above.")
-    else:
-        st.info("Update check is running in the background — results will appear shortly. "
-                "Reload the page or click Re-check now.")
-
-    st.divider()
     st.subheader("ℹ️ About")
     import platform
     from vllm_mlx.dashboard import __version__ as _ui_ver
@@ -2451,14 +2469,29 @@ with st.sidebar:
 
     st.divider()
 
-    # ── Live server status pill ───────────────────────────────────────────────
+    # ── Live server status pill + quick start/stop ────────────────────────────
     _status = sm.get_server_status()
     if _status["running"] and _status["healthy"]:
         st.success("● Server running")
+        if st.button("⏹ Stop Server", width="stretch", key="_sb_stop_btn"):
+            with st.spinner("Stopping…"):
+                sm.stop_server()
+            st.rerun()
     elif _status["running"]:
         st.warning("● Starting…")
     else:
         st.error("● Server stopped")
+        _sb_cfg = sm.load_config()
+        if _sb_cfg.get("model", "").strip():
+            if st.button("▶ Start Server", width="stretch",
+                         type="primary", key="_sb_start_btn"):
+                with st.spinner("Starting…"):
+                    ok, msg = sm.start_server(_sb_cfg)
+                if not ok:
+                    st.error(msg)
+                st.rerun()
+        else:
+            st.caption("Select a model on the Server page to start.")
 
     # Quick model switcher
     _sb_cached = mm.get_cached_models()

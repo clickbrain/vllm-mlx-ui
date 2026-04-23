@@ -87,6 +87,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "remote_server_url": "",   # inference API  e.g. http://192.168.1.42:8000
     "remote_mgmt_url": "",     # management API e.g. http://192.168.1.42:8502
     "mgmt_api_key": "",        # optional shared secret for the management API
+    # Startup behavior: "auto" = load last model, "ask" = show picker, "none" = manual
+    "startup_model_behavior": "auto",
 }
 
 
