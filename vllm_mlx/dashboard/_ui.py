@@ -1330,13 +1330,13 @@ def page_models() -> None:
                 else:
                     st.error(f"❌ Download failed for **{short_name}**: {_dl_msg}")
 
-            hdr = st.columns([4, 1, 1, 1, 1, 1])
-            for col, label in zip(hdr, ["Model", "⬇️", "❤️", "Bits", "Card", ""]):
+            hdr = st.columns([4, 1, 1, 1, 1, 1, 1])
+            for col, label in zip(hdr, ["Model", "⬇️", "❤️", "Bits", "Fit", "Card", ""]):
                 col.markdown(f"**{label}**")
             st.divider()
 
             for r in filtered:
-                rc = st.columns([4, 1, 1, 1, 1, 1])
+                rc = st.columns([4, 1, 1, 1, 1, 1, 1])
                 already = r["id"] in cached_ids
                 name_str = r["id"]
                 if already:
@@ -1346,9 +1346,19 @@ def page_models() -> None:
                 rc[2].write(f"{r['likes']:,}")
                 bits_val = r.get("_bits")
                 rc[3].write(f"`{bits_val}-bit`" if bits_val else "—")
+                # Fit badge — fast name-only estimate, no API call
+                _fit = mm.check_model_fit(r["id"], use_api=False)
+                if _fit["fit_level"]:
+                    rc[4].write(
+                        f"{_fit['emoji']} {_fit['model_gb']:.0f} GB"
+                        if _fit["model_gb"] else _fit["emoji"],
+                        help=_fit["tip"],
+                    )
+                else:
+                    rc[4].write("❓")
                 hf_url = f"https://huggingface.co/{r['id']}"
-                rc[4].markdown(f"[↗ Card]({hf_url})")
-                with rc[5]:
+                rc[5].markdown(f"[↗ Card]({hf_url})")
+                with rc[6]:
                     if already:
                         st.button("✓ Got it", key=f"get_{r['id']}", disabled=True,
                                   width="stretch")
@@ -1362,8 +1372,6 @@ def page_models() -> None:
                                     r["id"],
                                     hf_token=st.session_state.get("hf_token") or None,
                                 )
-                            # Store result in session state and rerun so the
-                            # banner renders full-width above the table
                             st.session_state["_dl_result"] = (ok, msg, r["id"])
                             if ok:
                                 st.balloons()
@@ -1388,19 +1396,70 @@ def page_models() -> None:
                 type="password",
                 help="Get yours at huggingface.co/settings/tokens",
             )
-            dl_btn = st.form_submit_button("⬇️ Download", type="primary")
+            fc1, fc2 = st.columns(2)
+            check_btn = fc1.form_submit_button("🔍 Check fit before downloading")
+            dl_btn = fc2.form_submit_button("⬇️ Download", type="primary")
 
-        if dl_btn and direct_id.strip():
+        if (check_btn or dl_btn) and direct_id.strip():
             token = direct_token.strip() or st.session_state.get("hf_token") or None
             if token:
                 st.session_state["hf_token"] = token
-            with st.spinner(f"Downloading **{direct_id}**… this may take several minutes."):
-                ok, msg = mm.download_model(direct_id.strip(), hf_token=token)
-            if ok:
-                st.success(f"✅ {msg}")
-                st.balloons()
-            else:
-                st.error(msg)
+
+            # ── Fit check card ──────────────────────────────────────────────
+            with st.spinner("Checking model size against your RAM…"):
+                _fit = mm.check_model_fit(direct_id.strip(), hf_token=token, use_api=True)
+
+            fit_bg = {
+                mm.FIT_PERFECT:   "rgba(34,197,94,0.15)",
+                mm.FIT_GOOD:      "rgba(234,179,8,0.15)",
+                mm.FIT_MARGINAL:  "rgba(249,115,22,0.15)",
+                mm.FIT_TOO_TIGHT: "rgba(239,68,68,0.15)",
+            }.get(_fit["fit_level"] or "", "rgba(100,100,100,0.10)")
+
+            _src_note = {
+                "api":  "Size from HuggingFace Hub",
+                "name": "Size estimated from model name",
+                "unknown": "",
+            }.get(_fit["source"], "")
+
+            st.markdown(
+                f"""<div style="border-radius:8px;padding:14px 18px;
+                    background:{fit_bg};margin-bottom:12px">
+                <span style="font-size:1.4em">{_fit['emoji']}</span>
+                &nbsp;<strong>{_fit['label']}</strong><br>
+                <small>{_fit['tip']}</small>
+                {"<br><small style='opacity:.6'>(" + _src_note + ")</small>" if _src_note else ""}
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+            _fc1, _fc2, _fc3 = st.columns(3)
+            _fc1.metric("Your RAM", f"{_fit['total_ram_gb']:.0f} GB",
+                        help="Total unified memory (GPU + RAM share this pool on Apple Silicon)")
+            if _fit["model_gb"]:
+                _fc2.metric("Model size", f"{_fit['model_gb']:.1f} GB")
+                _headroom = _fit["total_ram_gb"] - _fit["model_gb"]
+                _fc3.metric("Headroom", f"{_headroom:.1f} GB",
+                            delta_color="normal" if _headroom > 2 else "inverse",
+                            delta="✅ ok" if _headroom > 2 else "⚠️ tight")
+
+            if dl_btn:
+                if _fit["fit_level"] == mm.FIT_TOO_TIGHT:
+                    st.error(
+                        "⛔ Download blocked — this model is too large for your RAM. "
+                        "It will crash when you try to load it. "
+                        "Choose a smaller or more-quantized variant instead."
+                    )
+                else:
+                    with st.spinner(f"Downloading **{direct_id}**… this may take several minutes."):
+                        ok, msg = mm.download_model(direct_id.strip(), hf_token=token)
+                    if ok:
+                        st.success(f"✅ {msg}")
+                        st.balloons()
+                    else:
+                        st.error(msg)
+        elif dl_btn and not direct_id.strip():
+            st.warning("Enter a model ID first.")
 
 
 # ===========================================================================

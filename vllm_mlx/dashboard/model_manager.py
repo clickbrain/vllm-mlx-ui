@@ -11,10 +11,40 @@ management API, so models are stored on the server, not on this machine.
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Callable
 
 import requests as _requests
+
+# ── Fit-level constants (llmfit-inspired) ─────────────────────────────────────
+FIT_PERFECT  = "perfect"   # model uses < 50 % of unified memory
+FIT_GOOD     = "good"      # 50–70 %
+FIT_MARGINAL = "marginal"  # 70–85 %
+FIT_TOO_TIGHT = "too_tight"  # > 85 %
+
+_FIT_EMOJI = {
+    FIT_PERFECT:   "🟢",
+    FIT_GOOD:      "🟡",
+    FIT_MARGINAL:  "🟠",
+    FIT_TOO_TIGHT: "🔴",
+}
+_FIT_LABEL = {
+    FIT_PERFECT:   "Perfect fit",
+    FIT_GOOD:      "Good fit",
+    FIT_MARGINAL:  "Marginal — memory will be tight",
+    FIT_TOO_TIGHT: "Won't fit — likely OOM crash",
+}
+
+# Bytes per parameter for common quantizations
+_BITS_PER_QUANT: dict[str, float] = {
+    "2bit": 0.25, "2-bit": 0.25, "q2": 0.25,
+    "3bit": 0.375, "3-bit": 0.375, "q3": 0.375,
+    "4bit": 0.50,  "4-bit": 0.50,  "q4": 0.50,
+    "6bit": 0.75,  "6-bit": 0.75,  "q6": 0.75,
+    "8bit": 1.00,  "8-bit": 1.00,  "q8": 1.00,
+    "fp16": 2.00,  "bf16": 2.00,   "fp32": 4.00,
+}
 
 
 def _mgmt_base() -> str | None:
@@ -329,3 +359,157 @@ def get_hf_cache_dir() -> str:
     """Return the HuggingFace cache directory path."""
     hf_home = os.environ.get("HF_HOME", str(Path.home() / ".cache" / "huggingface"))
     return os.path.join(hf_home, "hub")
+
+
+# ── Memory fit helpers ─────────────────────────────────────────────────────────
+
+def get_total_ram_gb() -> float:
+    """Return total system RAM in GB (unified memory on Apple Silicon)."""
+    try:
+        import psutil
+        return psutil.virtual_memory().total / (1024 ** 3)
+    except Exception:
+        return 0.0
+
+
+def estimate_size_from_name(model_id: str) -> float | None:
+    """
+    Estimate model weight size in GB from its name alone (no API call).
+
+    Parses parameter count (e.g. 7B, 13B, 72B) and quantization (4bit, 8bit…)
+    from the model ID to produce a rough byte estimate.  Returns None when the
+    name doesn't contain enough information.
+    """
+    name = model_id.lower()
+
+    # Parameter count
+    param_b: float | None = None
+    m = re.search(r"(\d+(?:\.\d+)?)\s*b(?:[^a-z]|$)", name)
+    if m:
+        param_b = float(m.group(1))
+    else:
+        # Smaller models often listed in millions
+        m = re.search(r"(\d+(?:\.\d+)?)\s*m(?:[^a-z]|$)", name)
+        if m:
+            param_b = float(m.group(1)) / 1000.0
+
+    if param_b is None:
+        return None
+
+    # Bytes per parameter from quantization
+    bpp: float = 0.50  # default to 4-bit if unknown
+    for pat, b in _BITS_PER_QUANT.items():
+        if pat in name:
+            bpp = b
+            break
+
+    # weights + ~10% overhead (embeddings, norms, KV cache at typical context)
+    return param_b * bpp * 1.10
+
+
+def get_hf_model_size_gb(model_id: str, hf_token: str | None = None) -> float | None:
+    """
+    Query the HuggingFace Hub API for the total weight file size of a model
+    *before* downloading it.  Returns size in GB or None on failure.
+
+    Only sums files that are actual model weights (.safetensors, .npz, .bin,
+    .pt, .gguf) — excludes tokenizer files, config JSON, etc.
+    """
+    if hf_token:
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi()
+        info = api.model_info(model_id, files_metadata=True)
+        weight_exts = {".safetensors", ".npz", ".bin", ".pt", ".pth", ".gguf"}
+        total = 0
+        for f in (info.siblings or []):
+            if Path(f.rfilename).suffix.lower() in weight_exts:
+                total += getattr(f, "size", 0) or 0
+        return total / (1024 ** 3) if total > 0 else None
+    except Exception:
+        return None
+    finally:
+        if hf_token:
+            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+
+
+def _score_fit(model_gb: float, total_gb: float) -> str:
+    """Return a FIT_* constant based on model_gb vs available total_gb."""
+    if total_gb <= 0:
+        return FIT_MARGINAL
+    ratio = model_gb / total_gb
+    if ratio < 0.50:
+        return FIT_PERFECT
+    if ratio < 0.70:
+        return FIT_GOOD
+    if ratio < 0.85:
+        return FIT_MARGINAL
+    return FIT_TOO_TIGHT
+
+
+def check_model_fit(
+    model_id: str,
+    hf_token: str | None = None,
+    use_api: bool = False,
+) -> dict[str, Any]:
+    """
+    Check whether a model will fit in unified memory before downloading.
+
+    Returns:
+      fit_level   : FIT_PERFECT / FIT_GOOD / FIT_MARGINAL / FIT_TOO_TIGHT
+      emoji       : 🟢 / 🟡 / 🟠 / 🔴
+      label       : human-readable fit verdict
+      model_gb    : estimated weight size in GB (or None)
+      total_ram_gb: total system RAM in GB
+      source      : "api" | "name" | "unknown"
+      tip         : actionable advice string
+    """
+    total_gb = get_total_ram_gb()
+    model_gb: float | None = None
+    source = "unknown"
+
+    if use_api:
+        model_gb = get_hf_model_size_gb(model_id, hf_token)
+        if model_gb is not None:
+            source = "api"
+
+    if model_gb is None:
+        model_gb = estimate_size_from_name(model_id)
+        if model_gb is not None:
+            source = "name"
+
+    if model_gb is None or total_gb == 0:
+        return {
+            "fit_level": None,
+            "emoji": "❓",
+            "label": "Unknown — couldn't estimate model size",
+            "model_gb": None,
+            "total_ram_gb": total_gb,
+            "source": "unknown",
+            "tip": "Paste the full model ID in the Download by ID tab for an accurate check.",
+        }
+
+    fit = _score_fit(model_gb, total_gb)
+    tips = {
+        FIT_PERFECT:   f"This model uses ~{model_gb:.1f} GB of your {total_gb:.0f} GB — plenty of headroom.",
+        FIT_GOOD:      f"This model uses ~{model_gb:.1f} GB of your {total_gb:.0f} GB — will run well.",
+        FIT_MARGINAL:  (
+            f"This model needs ~{model_gb:.1f} GB of your {total_gb:.0f} GB. "
+            "Close other apps before loading. Consider a more-quantized variant."
+        ),
+        FIT_TOO_TIGHT: (
+            f"This model needs ~{model_gb:.1f} GB but you only have {total_gb:.0f} GB total. "
+            "It will likely crash with a Metal out-of-memory error. "
+            "Choose a smaller model or a lower-bit quantization."
+        ),
+    }
+    return {
+        "fit_level": fit,
+        "emoji": _FIT_EMOJI[fit],
+        "label": _FIT_LABEL[fit],
+        "model_gb": round(model_gb, 1),
+        "total_ram_gb": round(total_gb, 0),
+        "source": source,
+        "tip": tips[fit],
+    }
