@@ -1573,26 +1573,29 @@ def page_benchmarks() -> None:
 
         cached = mm.get_cached_models()
         model_ids = [m["id"] for m in cached]
-        # Build size lookup from cached models
-        _model_sizes: dict[str, float] = {m["id"]: m.get("size_gb", 0.0) for m in cached}
         config = sm.load_config()
+
+        # Model selectbox is OUTSIDE the form so changing it immediately
+        # reruns the page and updates the pre-flight memory check.
+        if model_ids:
+            cur_idx = (
+                model_ids.index(config.get("model", model_ids[0]))
+                if config.get("model") in model_ids
+                else 0
+            )
+            bench_model = st.selectbox("Model to benchmark", model_ids,
+                                       index=cur_idx, key="_bench_model_sel")
+        else:
+            bench_model = st.text_input(
+                "Model to benchmark",
+                value=config.get("model", ""),
+                placeholder="mlx-community/Llama-3.2-3B-Instruct-4bit",
+                key="_bench_model_text",
+            )
 
         with st.form("bench_form"):
             bc1, bc2 = st.columns(2)
             with bc1:
-                if model_ids:
-                    cur_idx = (
-                        model_ids.index(config.get("model", model_ids[0]))
-                        if config.get("model") in model_ids
-                        else 0
-                    )
-                    bench_model = st.selectbox("Model", model_ids, index=cur_idx)
-                else:
-                    bench_model = st.text_input(
-                        "Model",
-                        value=config.get("model", ""),
-                        placeholder="mlx-community/Llama-3.2-3B-Instruct-4bit",
-                    )
                 n_prompts = st.slider("Prompts", 1, 20, 3, help="More = more accurate average. Start low to avoid memory pressure.")
                 max_tok = st.slider("Max tokens per response", 64, 1024, 128, step=64,
                                     help="Lower = less KV cache memory. Reduce if you get crashes.")
