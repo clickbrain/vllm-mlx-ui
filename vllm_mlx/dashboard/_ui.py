@@ -1423,11 +1423,11 @@ def page_models() -> None:
                 # Fit badge — fast name-only estimate, no API call
                 _fit = mm.check_model_fit(r["id"], use_api=False)
                 if _fit["fit_level"]:
-                    rc[4].write(
+                    _fit_label = (
                         f"{_fit['emoji']} {_fit['model_gb']:.0f} GB"
-                        if _fit["model_gb"] else _fit["emoji"],
-                        help=_fit["tip"],
+                        if _fit["model_gb"] else _fit["emoji"]
                     )
+                    rc[4].write(_fit_label)
                 else:
                     rc[4].write("❓")
                 hf_url = f"https://huggingface.co/{r['id']}"
@@ -1639,6 +1639,30 @@ def page_benchmarks() -> None:
         # ── Pre-flight memory check ──────────────────────────────────────────
         if bench_model:
             _pf = br.pre_flight_check(bench_model)
+            # In remote mode, override local psutil RAM values with remote machine stats
+            if _is_remote():
+                _remote_mem = sm.get_memory_stats()
+                if _remote_mem["total_gb"] > 0:
+                    _pf["total_gb"] = _remote_mem["total_gb"]
+                    _pf["available_gb"] = _remote_mem["available_gb"]
+                    if _pf["model_gb"]:
+                        _req = _pf["model_gb"] * 1.25
+                        _pf["will_fit"] = _req <= _pf["available_gb"] * 0.80
+                        if not _pf["will_fit"]:
+                            _pf["warning"] = (
+                                f"This model needs ~{_req:.1f} GB but only "
+                                f"{_pf['available_gb']:.1f} GB of "
+                                f"{_pf['total_gb']:.0f} GB unified memory is available "
+                                f"on the remote machine."
+                            )
+                        elif _req > _pf["available_gb"] * 0.60:
+                            _pf["warning"] = (
+                                f"This model needs ~{_req:.1f} GB and "
+                                f"{_pf['available_gb']:.1f} GB is available on the remote "
+                                f"machine — it will fit but memory is tight."
+                            )
+                        else:
+                            _pf["warning"] = None
             if _pf["total_gb"] > 0:
                 _mem_col1, _mem_col2, _mem_col3 = st.columns(3)
                 _mem_col1.metric("Total RAM", f"{_pf['total_gb']:.0f} GB")

@@ -582,7 +582,19 @@ def get_memory_stats() -> dict:
     """
     Return current unified memory usage stats.
     Keys: total_gb, available_gb, used_gb, percent, pressure (low/medium/high/critical)
+    In remote mode, fetches from the remote machine's management API.
     """
+    cfg = load_config()
+    mgmt = _mgmt_base(cfg)
+    if mgmt:
+        try:
+            r = requests.get(f"{mgmt}/memory/stats", headers=_mgmt_headers(cfg), timeout=5)
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            pass
+        return {"total_gb": 0, "available_gb": 0, "used_gb": 0, "percent": 0, "pressure": "unknown"}
+
     try:
         import psutil
         vm = psutil.virtual_memory()
@@ -680,6 +692,7 @@ def _release_system_heap() -> list[str]:
 def force_release_memory() -> dict:
     """
     Comprehensive memory release for Apple Silicon unified memory.
+    In remote mode, proxies to the remote machine's management API.
 
     Steps (in order of impact):
     1. Stop the inference server if running
@@ -698,6 +711,21 @@ def force_release_memory() -> dict:
       heap_notes    : list[str] — what the general heap release attempted
       warnings      : list[str]
     """
+    cfg = load_config()
+    mgmt = _mgmt_base(cfg)
+    if mgmt:
+        try:
+            r = requests.post(f"{mgmt}/memory/release", headers=_mgmt_headers(cfg), timeout=30)
+            if r.status_code == 200:
+                return r.json()
+        except Exception as e:
+            before = get_memory_stats()
+            return {
+                "before": before, "after": before, "freed_gb": 0.0,
+                "server_stopped": False, "procs_killed": [], "heap_notes": [],
+                "warnings": [f"Remote release failed: {e}"],
+            }
+
     import os as _os
 
     before = get_memory_stats()

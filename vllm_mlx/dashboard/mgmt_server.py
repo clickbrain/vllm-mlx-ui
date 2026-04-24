@@ -199,6 +199,20 @@ def delete_model(model_id: str, _: None = Depends(_check_auth)) -> dict:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ── Memory ────────────────────────────────────────────────────────────────────
+
+@app.get("/memory/stats")
+def memory_stats(_: None = Depends(_check_auth)) -> dict:
+    """Return unified memory stats for this machine."""
+    return sm.get_memory_stats()
+
+
+@app.post("/memory/release")
+def memory_release(_: None = Depends(_check_auth)) -> dict:
+    """Release memory on this machine (stops server, GC, MLX cache clear)."""
+    return sm.force_release_memory()
+
+
 # ── Benchmarks ────────────────────────────────────────────────────────────────
 
 @app.get("/benchmarks")
