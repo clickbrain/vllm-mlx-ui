@@ -22,6 +22,8 @@ from typing import Any
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import benchmark_runner as br
@@ -459,6 +461,26 @@ def set_auto_switch(data: dict[str, Any], _: None = Depends(_check_auth)) -> dic
     cfg["auto_model_switch"] = bool(data.get("enabled", True))
     sm.save_config(cfg)
     return {"ok": True, "enabled": cfg["auto_model_switch"]}
+
+
+# ── Vue UI static serving ─────────────────────────────────────────────────────
+# Serve the built Vue UI from ui/dist/ at the root path.
+# API routes (/status, /memory, etc.) take priority because they are registered
+# first. The catch-all "/" route returns index.html for SPA client-side routing.
+
+import os as _os
+
+_UI_DIST = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))), "ui", "dist")
+
+if _os.path.isdir(_UI_DIST):
+    app.mount("/assets", StaticFiles(directory=_os.path.join(_UI_DIST, "assets")), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def _serve_spa(full_path: str = "") -> FileResponse:
+        # Don't intercept API paths — they're matched before this catch-all
+        index = _os.path.join(_UI_DIST, "index.html")
+        return FileResponse(index)
 
 
 # ── Server startup ────────────────────────────────────────────────────────────

@@ -96,3 +96,7 @@ temp/
 
 # MLX cache
 .mlx_cache/
+
+# Vue UI
+ui/node_modules/
+ui/dist/

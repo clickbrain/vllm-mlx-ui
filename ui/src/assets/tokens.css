@@ -1,0 +1,136 @@
+/* ─── Primitive Tokens ─────────────────────────────────────── */
+:root {
+  /* Graphite scale */
+  --g-950: #080809;
+  --g-900: #1C1C1E;
+  --g-800: #2C2C2E;
+  --g-700: #3A3A3C;
+  --g-600: #48484A;
+  --g-500: #636366;
+  --g-400: #8E8E93;
+  --g-300: #AEAEB2;
+  --g-200: #C7C7CC;
+  --g-100: #E5E5EA;
+  --g-050: #F5F5F7;
+
+  /* Silicon Blue — brand */
+  --si-700: #3D4A8F;
+  --si-600: #4C5BAD;
+  --si-500: #5B6AD0;
+  --si-400: #7A87DB;
+  --si-300: #9AA3E6;
+  --si-200: #BFC5F0;
+
+  /* Copper — warning / pressure */
+  --cu-600: #B45309;
+  --cu-500: #D97706;
+  --cu-400: #F59E0B;
+  --cu-300: #FCD34D;
+
+  /* Phosphor — success / healthy */
+  --ph-500: #22C55E;
+  --ph-400: #4ADE80;
+  --ph-300: #86EFAC;
+
+  /* Ruby / Critical — error / danger */
+  --cr-500: #EF4444;
+  --cr-300: #FCA5A5;
+
+  /* Extended palette */
+  --purple-300: #C4B5FD;
+  --cyan-300: #67E8F9;
+
+  /* ─── Semantic Tokens — Dark mode defaults ─── */
+
+  /* Backgrounds */
+  --bg-canvas:   var(--g-950);
+  --bg-base:     var(--g-950);
+  --bg-surface:  var(--g-900);
+  --bg-elevated: var(--g-800);
+  --bg-overlay:  var(--g-700);
+
+  /* Borders — rgba, never solid hex */
+  --bd-subtle:   rgba(255, 255, 255, .05);
+  --bd-default:  rgba(255, 255, 255, .09);
+  --bd-emphasis: rgba(255, 255, 255, .16);
+  --bd-focus:    var(--si-500);
+
+  /* Text hierarchy — all four levels */
+  --tx-primary:   var(--g-100);
+  --tx-secondary: var(--g-300);
+  --tx-tertiary:  var(--g-400);
+  --tx-muted:     var(--g-500);
+
+  /* Accent */
+  --ac-primary: var(--si-500);
+  --ac-hover:   var(--si-400);
+  --ac-bg:      rgba(91, 106, 208, .10);
+  --ac-border:  rgba(91, 106, 208, .22);
+
+  /* Arc gauge */
+  --arc-track: #2C2C2E;
+
+  /* ─── Typography ─── */
+  --font-sans:    -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  --font-mono:    "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+
+  --text-xs:   11px;
+  --text-sm:   13px;
+  --text-base: 15px;
+  --text-lg:   17px;
+  --text-xl:   22px;
+
+  /* ─── Spacing (base unit: 4px) ─── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-7:  28px;
+  --space-8:  32px;
+  --space-9:  36px;
+  --space-10: 40px;
+  --space-11: 44px;
+  --space-12: 48px;
+  --space-13: 52px;
+  --space-14: 56px;
+  --space-15: 60px;
+  --space-16: 64px;
+
+  /* ─── Border Radius ─── */
+  --r-sm:   4px;
+  --r-md:   6px;
+  --r-lg:   10px;
+  --r-xl:   14px;
+  --r-pill: 9999px;
+
+  /* ─── Transitions ─── */
+  --transition-fast: 100ms ease;
+  --transition-base: 150ms ease;
+  --transition-slow: 250ms ease;
+}
+
+/* ─── Light Mode Overrides ─── */
+[data-theme="light"] {
+  --bg-canvas:   #F2F2F7;
+  --bg-base:     #F2F2F7;
+  --bg-surface:  #FFFFFF;
+  --bg-elevated: #F2F2F7;
+  --bg-overlay:  #E5E5EA;
+
+  --bd-subtle:   rgba(0, 0, 0, .06);
+  --bd-default:  rgba(0, 0, 0, .11);
+  --bd-emphasis: rgba(0, 0, 0, .20);
+
+  --tx-primary:   #1C1C1E;
+  --tx-secondary: #3A3A3C;
+  --tx-tertiary:  #636366;
+  --tx-muted:     #8E8E93;
+
+  --ac-bg:     rgba(91, 106, 208, .07);
+  --ac-border: rgba(91, 106, 208, .18);
+
+  --arc-track: #D1D1D6;
+}
