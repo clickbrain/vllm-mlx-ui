@@ -138,6 +138,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+# ── Streamlit context detection ────────────────────────────────────────────────
+
+def _in_streamlit() -> bool:
+    """Return True only when called from an active Streamlit script context.
+
+    Uses Streamlit's internal get_script_run_ctx() to check for an active
+    context WITHOUT triggering the "missing ScriptRunContext" warning that
+    session_state access emits when called from non-Streamlit threads (e.g.,
+    the mgmt API's AnyIO worker threads).  All session_state reads/writes in
+    this module are gated behind this check so the mgmt API process never
+    spams the console with those warnings.
+    """
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        return get_script_run_ctx() is not None
+    except Exception:
+        return False
+
+
 # ── Remote management helpers ────────────────────────────────────────────────
 
 def _mgmt_base(config: dict[str, Any] | None = None) -> str | None:
@@ -147,12 +166,13 @@ def _mgmt_base(config: dict[str, Any] | None = None) -> str | None:
     toggle set to "local", even if a remote_mgmt_url is configured.
     """
     # Respect the UI's local/remote mode toggle when running inside Streamlit.
-    try:
-        import streamlit as _st
-        if _st.session_state.get("connection_mode", "local") == "local":
-            return None
-    except Exception:
-        pass  # Not in a Streamlit context (e.g., CLI or mgmt API process)
+    if _in_streamlit():
+        try:
+            import streamlit as _st
+            if _st.session_state.get("connection_mode", "local") == "local":
+                return None
+        except Exception:
+            pass
     if config is None:
         config = load_config()
     url = config.get("remote_mgmt_url", "").strip()
@@ -200,15 +220,18 @@ def load_config() -> dict[str, Any]:
 
     # Cache remote config in Streamlit session state (10 s TTL) to avoid an
     # extra HTTP round-trip on every Streamlit rerun / fragment refresh.
+    # Only access session_state when we're actually inside a Streamlit context
+    # to avoid ScriptRunContext warnings from the mgmt API process.
     mgmt = _mgmt_base(local)
     if mgmt:
-        try:
-            import streamlit as _st
-            cached = _st.session_state.get("_cfg_cache")
-            if cached and time.monotonic() - cached.get("_cfg_ts", 0) < 10:
-                return cached
-        except Exception:
-            pass
+        if _in_streamlit():
+            try:
+                import streamlit as _st
+                cached = _st.session_state.get("_cfg_cache")
+                if cached and time.monotonic() - cached.get("_cfg_ts", 0) < 10:
+                    return cached
+            except Exception:
+                pass
         try:
             r = _http.get(f"{mgmt}/config", headers=_mgmt_headers(local), timeout=3)
             if r.status_code == 200:
@@ -220,12 +243,13 @@ def load_config() -> dict[str, Any]:
                     if keep in local:
                         remote_cfg[keep] = local[keep]
                 result = {**DEFAULT_CONFIG, **remote_cfg}
-                try:
-                    import streamlit as _st
-                    result["_cfg_ts"] = time.monotonic()
-                    _st.session_state["_cfg_cache"] = result
-                except Exception:
-                    pass
+                if _in_streamlit():
+                    try:
+                        import streamlit as _st
+                        result["_cfg_ts"] = time.monotonic()
+                        _st.session_state["_cfg_cache"] = result
+                    except Exception:
+                        pass
                 return result
         except Exception:
             pass  # Fall back to local config silently
@@ -237,11 +261,12 @@ def save_config(config: dict[str, Any]) -> None:
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
     # Invalidate the config cache so the next load_config() fetches fresh data.
-    try:
-        import streamlit as _st
-        _st.session_state.pop("_cfg_cache", None)
-    except Exception:
-        pass
+    if _in_streamlit():
+        try:
+            import streamlit as _st
+            _st.session_state.pop("_cfg_cache", None)
+        except Exception:
+            pass
     mgmt = _mgmt_base(config)
     if mgmt:
         try:
@@ -282,11 +307,12 @@ def get_server_url(config: dict[str, Any] | None = None) -> str:
 
     # Only use remote_server_url when the UI is explicitly in remote mode.
     _use_remote = True
-    try:
-        import streamlit as _st
-        _use_remote = _st.session_state.get("connection_mode", "local") == "remote"
-    except Exception:
-        pass  # Not running inside Streamlit (e.g. mgmt API) — honour remote_server_url.
+    if _in_streamlit():
+        try:
+            import streamlit as _st
+            _use_remote = _st.session_state.get("connection_mode", "local") == "remote"
+        except Exception:
+            pass  # Fallback: assume remote (safe when remote_server_url is configured)
 
     if _use_remote:
         remote = config.get("remote_server_url", "").strip()

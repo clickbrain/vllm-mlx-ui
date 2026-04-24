@@ -2502,15 +2502,22 @@ def page_settings() -> None:
             "Inference server URL",
             value=_cfg_rs.get("remote_server_url", ""),
             placeholder="http://192.168.1.42:8000",
-            help="Base URL of the vllm-mlx inference server — do NOT include /v1. "
-                 "Example: http://BradStudio.local:8000",
+            help=(
+                "Base URL of the vllm-mlx inference server — do NOT include /v1. "
+                "**Use an IP address** (e.g. http://192.168.1.42:8000) rather than a "
+                ".local hostname for the fastest, most reliable connection. "
+                "Find the IP on the server machine: Settings → Connection Info."
+            ),
         )
         remote_mgmt_url = st.text_input(
             "Management API URL",
             value=_cfg_rs.get("remote_mgmt_url", ""),
             placeholder="http://192.168.1.42:8502",
-            help="The URL of the management API (port 8502 by default). "
-                 "This enables start/stop, model downloads, and logs from here.",
+            help=(
+                "The URL of the management API (port 8502 by default). "
+                "**Use an IP address** for the most reliable connection. "
+                "Same host as the inference server, different port."
+            ),
         )
         mgmt_api_key = st.text_input(
             "Management API key (optional)",
@@ -2532,13 +2539,27 @@ def page_settings() -> None:
         CONFIG_FILE.write_text(_json_rs.dumps(_cfg_rs, indent=2))
         st.success("✅ Saved. Reload the page to connect to the remote server.")
 
-    if remote_mgmt_url.strip() or _cfg_rs.get("remote_mgmt_url", ""):
-        active_url = remote_mgmt_url.strip() or _cfg_rs.get("remote_mgmt_url", "")
+    # ── Connectivity test + IP resolution hint ────────────────────────────────
+    _test_url = (remote_mgmt_url.strip() if rs_saved else "") or _cfg_rs.get("remote_mgmt_url", "")
+    if _test_url:
+        from vllm_mlx.dashboard.server_manager import _force_ipv4_url, _http as _sm_http
+        _resolved = _force_ipv4_url(_test_url.rstrip("/"))
+        _is_local_hostname = any(
+            _test_url.split("//")[-1].split(":")[0].endswith(s)
+            for s in (".local", "localhost")
+        )
+        if _resolved != _test_url.rstrip("/") and _is_local_hostname:
+            st.info(
+                f"🔍 **Hostname resolved to IPv4:** `{_resolved.split('//')[-1].split('/')[0]}`  \n"
+                "For the fastest connection, use this IP address directly instead of "
+                f"the `.local` hostname. Update the URL above to `{_resolved}` and "
+                f"`{_resolved.replace(':8502', ':8000')}` (or whichever port the "
+                "inference server is on)."
+            )
         try:
-            import requests as _req
-            r = _req.get(f"{active_url.rstrip('/')}/health", timeout=3)
+            r = _sm_http.get(f"{_test_url.rstrip('/')}/health", timeout=3)
             if r.status_code == 200:
-                st.success(f"✅ Management API reachable at `{active_url}`")
+                st.success(f"✅ Management API reachable at `{_test_url}`")
             else:
                 st.warning(f"⚠️ Management API responded with HTTP {r.status_code}")
         except Exception as _e:
@@ -2558,11 +2579,12 @@ def page_settings() -> None:
                     "• The remote machine is on the same network  \n"
                     "• macOS firewall on the server allows port 8502  \n"
                     "  *(System Settings → Network → Firewall → Options, add `vllm-mlx-ui`)*  \n"
-                    "• Try a different address from the server's Connection Info panel"
+                    "• Try a different address from the server's Connection Info panel  \n"
+                    "• If using a `.local` hostname, try the IP address instead"
                 )
             elif "Name or service not known" in _err or "nodename nor servname" in _err:
                 reason = "**Hostname not found** — the `.local` name isn't resolving."
-                fix = "Try using the IP address instead of the `.local` hostname."
+                fix = "Use the IP address instead of the `.local` hostname."
             else:
                 reason = "Cannot reach management API."
                 fix = f"Error detail: `{_err[:200]}`"

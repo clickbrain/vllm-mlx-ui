@@ -304,7 +304,7 @@ The dashboard opens at `http://localhost:8501`.
 │  Management API            :8502   │
 │  Streamlit dashboard       :8501   │
 └─────────────────────────────────────┘
-           ↕ LAN / WiFi
+           ↕ LAN / WiFi / Thunderbolt Bridge
 ┌─────────────────────────────────────┐
 │  Another device (any OS)            │
 │                                     │
@@ -322,7 +322,62 @@ The management API (port 8502) handles:
 - `GET /models` — list downloaded models
 - `POST /models/download` — download a model
 - `DELETE /models/{id}` — delete a model
+- `GET /memory/stats` — unified memory usage
+- `POST /memory/release` — release memory (GC + Metal cache)
 - `POST /v1/chat/completions` — OpenAI proxy with auto model switching
+
+### Setting Up Remote Access (Recommended Method)
+
+**Use IP addresses, not `.local` hostnames.**  macOS mDNS advertises both IPv6 link-local (`fe80::…`) and IPv4 addresses for `.local` names. Many HTTP clients attempt IPv6 first; since link-local IPv6 requires a network interface scope ID that URLs cannot encode, connections fail and time out (up to 3 s each) before falling back to IPv4. The dashboard resolves this automatically when you save a `.local` hostname, but using an IP address directly is faster and works on every network.
+
+**Step 1 — Find your server's IP address**
+
+On the server Mac, open the dashboard and go to **Server → Connection Info**. You'll see all available IP addresses. Copy the one that matches how you're connecting:
+
+| Connection type | Address to use |
+|-----------------|----------------|
+| Same Wi-Fi network | `192.168.x.x` or `10.x.x.x` |
+| Thunderbolt Bridge (fastest) | `192.168.200.x` (after static IP config — see below) |
+| USB-C/Thunderbolt link-local | `169.254.x.x` |
+
+You can also run this in Terminal on the server Mac:
+```bash
+# Wi-Fi address (en0 or en1):
+ipconfig getifaddr en0
+
+# All IPs:
+ifconfig | awk '/^[a-z]/{iface=$1} /inet /{print iface, $2}'
+```
+
+**Step 2 — Enter the URLs in Settings**
+
+On the client Mac, open the dashboard → **⚙️ Settings → 🔗 Remote Server** and enter:
+```
+Inference server URL:  http://192.168.x.x:8000
+Management API URL:    http://192.168.x.x:8502
+```
+
+After saving, a green ✅ appears if the connection works. If you entered a `.local` hostname, the settings page will show you the resolved IPv4 address and suggest switching to it.
+
+### Thunderbolt Bridge (macOS-to-macOS, fastest option)
+
+If you're connecting two Macs with a Thunderbolt cable, configure static IPs on the Thunderbolt Bridge interface for a reliable, 40 Gbps dedicated connection:
+
+**On the server Mac** (System Settings → Network → Thunderbolt Bridge):
+- Configure IPv4: **Manually**
+- IP Address: `192.168.200.1`
+- Subnet Mask: `255.255.255.0`
+- Router: *(leave blank)*
+
+**On the client Mac** (same section):
+- Configure IPv4: **Manually**
+- IP Address: `192.168.200.2`
+- Subnet Mask: `255.255.255.0`
+- Router: *(leave blank)*
+
+Then use `http://192.168.200.1:8000` and `http://192.168.200.1:8502` in Settings.
+
+> **Why Thunderbolt over Wi-Fi?** Thunderbolt Bridge is a direct 40 Gbps link between the two machines — no router, no Wi-Fi contention. Inference responses stream with < 1 ms network latency instead of the typical 5–20 ms over Wi-Fi.
 
 ---
 
@@ -413,7 +468,13 @@ vllm-mlx-ui
 
 **Can't connect from another device:** In Server settings, change "Listen on" to `0.0.0.0 — all network interfaces` and restart.
 
-**Remote dashboard can't reach server:** Make sure the Mac running vllm-mlx has "Listen on 0.0.0.0" enabled in Server settings. Check that your firewall allows ports 8000 and 8502.
+**Remote dashboard can't reach server:** Make sure the Mac running vllm-mlx has "Listen on 0.0.0.0" enabled in Server settings. Check that your firewall allows ports 8000 and 8502 *(System Settings → Network → Firewall → Options → add `vllm-mlx-ui`)*.
+
+**Remote connection is very slow or laggy:** You may be connecting via a `.local` hostname which resolves to IPv6 first, adding 3–6 s per request. Go to **⚙️ Settings → Remote Server** and enter the IPv4 address instead (e.g. `http://192.168.68.74:8000`). The settings page will show you the resolved IP after you save. See [Remote Access Architecture](#remote-access-architecture) for full setup instructions.
+
+**Remote connection shows local machine RAM on Benchmarks page:** This was fixed in v0.3.3. Run `brew upgrade vllm-mlx-ui` on both machines.
+
+**"ScriptRunContext" warnings flooding the terminal:** These were caused by the dashboard library being imported from the management API process. Fixed in v0.3.5. Run `brew upgrade vllm-mlx-ui`.
 
 ---
 
