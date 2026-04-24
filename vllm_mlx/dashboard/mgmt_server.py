@@ -36,7 +36,18 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # Restrict to localhost origins — the mgmt API is called from Python (httpx),
+    # not from browser JavaScript, so this never blocks legitimate use.
+    # Wildcard origins would allow any malicious website to control the server
+    # via fetch() without credentials.
+    allow_origins=[
+        "http://localhost:8501",
+        "http://127.0.0.1:8501",
+        "http://localhost:8502",
+        "http://127.0.0.1:8502",
+        "http://localhost",
+        "http://127.0.0.1",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -50,7 +61,9 @@ from starlette.requests import Request as _StarletteRequest
 class _PermissiveHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: _StarletteRequest, call_next):
         response = await call_next(request)
-        response.headers["X-Frame-Options"] = "ALLOWALL"
+        # Allow framing from any origin (needed for embedding in Streamlit iframes).
+        # X-Frame-Options ALLOWALL is non-standard and ignored by browsers;
+        # Content-Security-Policy frame-ancestors is the correct mechanism.
         response.headers["Content-Security-Policy"] = "frame-ancestors *"
         return response
 
@@ -59,10 +72,25 @@ app.add_middleware(_PermissiveHeadersMiddleware)
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
+# Cache the API key with a short TTL to avoid a disk read on every request.
+# The cache is invalidated automatically when the key changes (TTL ≤ 30 s).
+_auth_key_cache: dict[str, Any] = {"key": None, "ts": 0.0}
+_AUTH_KEY_TTL = 30.0  # seconds
+
+
+def _get_auth_key() -> str:
+    now = time.time()
+    if now - _auth_key_cache["ts"] > _AUTH_KEY_TTL:
+        try:
+            _auth_key_cache["key"] = sm.load_config().get("mgmt_api_key", "").strip()
+        except Exception:
+            _auth_key_cache["key"] = ""
+        _auth_key_cache["ts"] = now
+    return _auth_key_cache["key"] or ""
+
 
 def _check_auth(x_api_key: str | None = Header(default=None)) -> None:
-    cfg = sm.load_config()
-    key = cfg.get("mgmt_api_key", "").strip()
+    key = _get_auth_key()
     if key and x_api_key != key:
         raise HTTPException(status_code=401, detail="Invalid management API key")
 
@@ -157,6 +185,10 @@ def cache_size(_: None = Depends(_check_auth)) -> dict:
 
 class DownloadRequest(BaseModel):
     model_id: str
+    # NOTE: The HF token is transmitted as a plain HTTP JSON body field.
+    # On a private wired/Thunderbolt network the risk is low, but users on
+    # shared Wi-Fi should be aware. The token is never logged or persisted
+    # beyond the download operation (cleaned up in model_manager's finally block).
     token: str = ""
 
 
@@ -226,8 +258,11 @@ def list_benchmarks(_: None = Depends(_check_auth)) -> list:
 
 
 @app.delete("/benchmarks/{result_id}")
-def delete_benchmark(result_id: str, _: None = Depends(_check_auth)) -> dict:
-    br.delete_result(int(result_id))
+def delete_benchmark(result_id: int, _: None = Depends(_check_auth)) -> dict:
+    results = br.load_results()
+    if not (0 <= result_id < len(results)):
+        raise HTTPException(status_code=404, detail=f"Benchmark result {result_id} not found")
+    br.delete_result(result_id)
     return {"ok": True}
 
 
@@ -322,21 +357,26 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
         headers["Authorization"] = f"Bearer {key}"
 
     try:
-        async with httpx.AsyncClient(timeout=300) as client:
-            if request.get("stream"):
-                # Stream the response back
-                from fastapi.responses import StreamingResponse
+        if request.get("stream"):
+            # Stream the response back.
+            # The httpx client must be created INSIDE the generator — if it were
+            # created in the outer async-with block, Python would close it when
+            # this coroutine returns the StreamingResponse, before FastAPI has a
+            # chance to iterate the generator body.
+            from fastapi.responses import StreamingResponse
 
-                async def _stream():
-                    async with client.stream(
+            async def _stream():
+                async with httpx.AsyncClient(timeout=300) as _client:
+                    async with _client.stream(
                         "POST", f"{target}/v1/chat/completions",
                         json=request, headers=headers,
                     ) as resp:
                         async for chunk in resp.aiter_bytes():
                             yield chunk
 
-                return StreamingResponse(_stream(), media_type="text/event-stream")
-            else:
+            return StreamingResponse(_stream(), media_type="text/event-stream")
+        else:
+            async with httpx.AsyncClient(timeout=300) as client:
                 resp = await client.post(
                     f"{target}/v1/chat/completions",
                     json=request, headers=headers,

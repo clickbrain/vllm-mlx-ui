@@ -155,6 +155,87 @@ else
   ok "README.md: no invalid reinstall command"
 fi
 
+# ── 5. Runtime safety checks ────────────────────────────────────────────
+echo ""
+echo "5. Runtime safety"
+
+# 5a. Unguarded mlx.core import in Streamlit process (Process B)
+# Importing mlx.core without checking sys.modules first initializes Metal GPU
+# in the wrong process, wasting 200-500 MB of unified memory permanently.
+if python3 -c "
+import re, sys
+for fname in ['$DASHBOARD/_ui.py', '$DASHBOARD/benchmark_runner.py']:
+    lines = open(fname).read().splitlines()
+    for i, ln in enumerate(lines):
+        if re.search(r'^\s+import mlx\.core', ln):
+            # Check that the preceding few lines contain a sys.modules guard
+            context = '\n'.join(lines[max(0, i-3):i+1])
+            if 'sys.modules' not in context:
+                print(f'{fname}:{i+1}: unguarded import mlx.core — use sys.modules guard')
+                sys.exit(1)
+" 2>&1; then
+  ok "No unguarded 'import mlx.core' in Streamlit/benchmark process code"
+else
+  fail "Unguarded 'import mlx.core' in Process B — triggers Metal init, wastes 200-500 MB. Use: if \"mlx.core\" in sys.modules: ..."
+fi
+
+# 5b. startup_model_behavior must be read in app.py (not just saved in _ui.py)
+if grep -q "startup_model_behavior" "$DASHBOARD/app.py" 2>/dev/null; then
+  ok "startup_model_behavior is read and acted on in app.py"
+else
+  fail "startup_model_behavior is saved in _ui.py but never read in app.py — normal restarts will never auto-start the model"
+fi
+
+# 5c. Streaming proxy must NOT return StreamingResponse inside async-with httpx.AsyncClient
+# If it does, the client is closed before FastAPI iterates the generator.
+if python3 -c "
+import re, sys
+text = open('$DASHBOARD/mgmt_server.py').read()
+lines = text.splitlines()
+in_client = False
+client_indent = None
+for i, ln in enumerate(lines):
+    stripped = ln.lstrip()
+    if not stripped:
+        continue
+    indent = len(ln) - len(stripped)
+    if re.search(r'async with httpx\.AsyncClient', ln):
+        in_client = True
+        client_indent = indent
+    elif in_client:
+        if indent <= client_indent and stripped:
+            in_client = False  # exited the with block
+        elif 'return StreamingResponse' in ln:
+            print(f'Line {i+1}: StreamingResponse returned inside async with httpx.AsyncClient — client closes before generator runs')
+            sys.exit(1)
+" 2>&1; then
+  ok "Streaming proxy: httpx client not prematurely closed"
+else
+  fail "StreamingResponse returned inside 'async with httpx.AsyncClient' — move client creation inside the generator"
+fi
+
+# 5d. Direct CONFIG_FILE.write_text() in _ui.py bypasses save_config()
+# save_config() provides backup, remote sync, and _LOCAL_ONLY_KEYS stripping
+if python3 -c "
+import re, sys
+text = open('$DASHBOARD/_ui.py').read()
+hits = [i+1 for i, ln in enumerate(text.splitlines()) if re.search(r'CONFIG_FILE\.write_text\b', ln)]
+if hits:
+    print('Direct CONFIG_FILE.write_text() at lines: ' + ', '.join(map(str, hits)))
+    sys.exit(1)
+" 2>&1; then
+  ok "No direct CONFIG_FILE.write_text() calls in _ui.py (all writes go through save_config)"
+else
+  fail "_ui.py has direct CONFIG_FILE.write_text() call(s) — use sm.save_config() to get backup + remote sync + _LOCAL_ONLY_KEYS stripping"
+fi
+
+# 5e. force_release_memory must protect the Streamlit subprocess PID
+if grep -q "STREAMLIT_PID_FILE" "$DASHBOARD/server_manager.py" 2>/dev/null; then
+  ok "force_release_memory() protects the Streamlit subprocess PID (STREAMLIT_PID_FILE)"
+else
+  fail "STREAMLIT_PID_FILE not found in server_manager.py — remote Release Memory will kill the Streamlit dashboard"
+fi
+
 # ── Summary ──────────────────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

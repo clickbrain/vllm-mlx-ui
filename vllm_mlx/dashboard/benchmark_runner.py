@@ -133,14 +133,15 @@ def _clear_memory(callback: "Callable[[str], None] | None" = None) -> None:
     """
     Best-effort memory clearing before a benchmark run.
     - Runs Python GC in this process
-    - Clears the MLX Metal buffer cache (if MLX is available in this process)
+    - Clears the MLX Metal buffer cache ONLY if MLX is already loaded in this
+      process (importing it here would initialize Metal and waste 200-500 MB)
     - Pauses briefly to give macOS time to reclaim memory from recently-stopped processes
     """
     import gc as _gc
     _gc.collect()
     try:
-        import mlx.core as _mx
-        _mx.clear_cache()
+        if "mlx.core" in sys.modules:
+            sys.modules["mlx.core"].clear_cache()
     except Exception:
         pass
     if callback:

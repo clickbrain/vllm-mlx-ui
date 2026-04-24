@@ -23,6 +23,7 @@ from requests.adapters import HTTPAdapter
 STATE_DIR = Path.home() / ".vllm_mlx_ui"
 PID_FILE = STATE_DIR / "server.pid"
 UI_PID_FILE = STATE_DIR / "ui.pid"
+STREAMLIT_PID_FILE = STATE_DIR / "streamlit.pid"
 CONFIG_FILE = STATE_DIR / "server_config.json"
 LOG_FILE = STATE_DIR / "server.log"
 AUTO_START_FLAG = STATE_DIR / "auto_start_after_relaunch.flag"
@@ -896,6 +897,15 @@ def force_release_memory() -> dict:
         while _p.ppid() not in (0, 1):
             _protected_pids.add(_p.ppid())
             _p = _ps.Process(_p.ppid())
+    except Exception:
+        pass
+
+    # Protect the Streamlit subprocess (child of app.py; its cmdline contains
+    # vllm_mlx path so it would match _VLLM_MARKERS without this guard).
+    try:
+        if STREAMLIT_PID_FILE.exists():
+            _streamlit_pid = int(STREAMLIT_PID_FILE.read_text().strip())
+            _protected_pids.add(_streamlit_pid)
     except Exception:
         pass
 

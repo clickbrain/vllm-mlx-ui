@@ -221,6 +221,17 @@ def main() -> None:
     _time.sleep(1.0)
     if mgmt_thread.is_alive():
         print(f"[vllm-mlx] ✅ Management API listening on 0.0.0.0:{mgmt_port}")
+        # Warn when no auth key is set — the API is accessible to any LAN host
+        try:
+            from vllm_mlx.dashboard.server_manager import _load_local_config
+            if not _load_local_config().get("mgmt_api_key", "").strip():
+                print(
+                    f"[vllm-mlx] ⚠️  No mgmt_api_key set — management API on port {mgmt_port} "
+                    "is open to any host on your network. Set a key in Settings → Remote Server.",
+                    file=sys.stderr,
+                )
+        except Exception:
+            pass
     else:
         print(f"[vllm-mlx] ⚠️  Management API did NOT start — check stderr for details",
               file=sys.stderr)
@@ -240,6 +251,15 @@ def main() -> None:
                 print(f"[vllm-mlx] {'✅' if _ok else '⚠️ '} {_msg}")
             else:
                 print("[vllm-mlx] ℹ️  Post-upgrade relaunch: no model configured.")
+        else:
+            # Normal startup — honour startup_model_behavior setting
+            _cfg = load_config()
+            _behavior = _cfg.get("startup_model_behavior", "auto")
+            if _behavior == "auto" and _cfg.get("model", "").strip():
+                print(f"[vllm-mlx] 🔄 startup_model_behavior=auto — starting: {_cfg['model']}")
+                _time.sleep(1.0)
+                _ok, _msg = start_server(_cfg)
+                print(f"[vllm-mlx] {'✅' if _ok else '⚠️ '} {_msg}")
     except Exception as _exc:
         print(f"[vllm-mlx] ⚠️  Auto-start check failed: {_exc}", file=sys.stderr)
 
@@ -259,6 +279,15 @@ def main() -> None:
         ]
     )
 
+    # Record the Streamlit subprocess PID so force_release_memory() can protect
+    # it from being treated as an orphaned vllm process (its cmdline contains
+    # vllm_mlx path and would otherwise match the orphan-detection heuristic).
+    try:
+        from vllm_mlx.dashboard.server_manager import STREAMLIT_PID_FILE
+        STREAMLIT_PID_FILE.write_text(str(streamlit_proc.pid))
+    except Exception:
+        pass
+
     try:
         streamlit_proc.wait()
     except KeyboardInterrupt:
@@ -269,6 +298,11 @@ def main() -> None:
     finally:
         try:
             UI_PID_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            from vllm_mlx.dashboard.server_manager import STREAMLIT_PID_FILE as _SPID
+            _SPID.unlink(missing_ok=True)
         except Exception:
             pass
         # Relaunch after upgrade

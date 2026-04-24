@@ -150,7 +150,7 @@ if not st.session_state.get("_update_check_started"):
     def _bg_update_check():
         try:
             from vllm_mlx.dashboard import update_checker as _uc
-            _uc.check_updates()   # stores result in session_state when done
+            _uc.check_updates()   # stores result in update_checker module-level cache
         except Exception:
             pass
     _threading.Thread(target=_bg_update_check, daemon=True).start()
@@ -2672,13 +2672,7 @@ def page_settings() -> None:
             _cfg_rs["remote_server_url"] = _infer_url_save
             _cfg_rs["remote_mgmt_url"]   = _mgmt_url_save
             _cfg_rs["mgmt_api_key"]      = mgmt_api_key.strip()
-            _ensure_state_dir()
-            CONFIG_FILE.write_text(json.dumps(_cfg_rs, indent=2))
-            try:
-                st.session_state.pop("_cfg_cache", None)
-                st.session_state.pop("_cfg_ts", None)
-            except Exception:
-                pass
+            sm.save_config(_cfg_rs)
             st.success("✅ Saved.")
 
             # Test both connections and report per-URL status
@@ -2790,14 +2784,7 @@ def page_settings() -> None:
                 ], capture_output=True, text=True, timeout=60)
                 if _res.returncode == 0:
                     _cfg_fw["_firewall_configured"] = True
-                    _ensure_state_dir()
-                    CONFIG_FILE.write_text(json.dumps(_cfg_fw, indent=2))
-                    # Invalidate cache so the next load_config() sees the updated flag.
-                    try:
-                        st.session_state.pop("_cfg_cache", None)
-                        st.session_state.pop("_cfg_ts", None)
-                    except Exception:
-                        pass
+                    sm.save_config(_cfg_fw)
                     st.success("✅ Firewall rule applied! Remote clients can now connect.")
                     st.rerun()
                 else:
@@ -2909,9 +2896,9 @@ def page_settings() -> None:
     st.write(f"**Platform:** {platform.mac_ver()[0] or platform.platform()}")
 
     try:
-        import mlx.core as mx
-        st.write(f"**MLX device:** {mx.default_device()}")
-    except ImportError:
+        if "mlx.core" in sys.modules:
+            st.write(f"**MLX device:** {sys.modules['mlx.core'].default_device()}")
+    except Exception:
         pass
 
     st.markdown(
@@ -2971,9 +2958,7 @@ with st.sidebar:
             try:
                 _mode_cfg = sm._load_local_config()
                 _mode_cfg["connection_mode"] = _new_mode
-                sm.CONFIG_FILE.write_text(json.dumps(_mode_cfg, indent=2))
-                st.session_state.pop("_cfg_cache", None)
-                st.session_state.pop("_cfg_ts", None)
+                sm.save_config(_mode_cfg)
             except Exception:
                 pass
             st.rerun()
