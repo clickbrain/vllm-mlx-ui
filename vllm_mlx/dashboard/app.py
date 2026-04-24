@@ -59,53 +59,77 @@ def _kill_stale_ui(ui_pid_file: Path) -> bool:
 def _kill_process_on_port(port: int) -> bool:
     """
     Find and terminate whatever process is listening on *port*.
-    Tries psutil first (fast, no subprocess), then falls back to lsof.
-    Returns True if a process was found and signalled.
+
+    Uses lsof as primary strategy (always reliable on macOS, no special
+    permissions needed), psutil as fallback.  Waits for the OS to actually
+    release the port before returning.
     """
+    import subprocess as _sp
     import time as _t
 
     pids: list[int] = []
+    own = os.getpid()
 
-    # Strategy 1: psutil (most reliable)
-    try:
-        import psutil
-        for conn in psutil.net_connections(kind="tcp"):
-            if conn.laddr.port == port and conn.status == psutil.CONN_LISTEN:
-                if conn.pid and conn.pid != os.getpid():
-                    pids.append(conn.pid)
-    except Exception:
-        pass
+    # Strategy 1: lsof (primary — most reliable on macOS)
+    # Try both "tcp:<port>" and ":<port>" formats; add -n/-P to skip slow
+    # DNS and service-name lookups.
+    for fmt in [f"tcp:{port}", f":{port}"]:
+        try:
+            out = _sp.check_output(
+                ["lsof", "-t", "-i", fmt, "-n", "-P"],
+                text=True,
+                stderr=_sp.DEVNULL,
+            ).strip()
+            for tok in out.split():
+                try:
+                    pid = int(tok)
+                    if pid != own and pid not in pids:
+                        pids.append(pid)
+                except ValueError:
+                    pass
+            if pids:
+                break
+        except Exception:
+            pass
 
-    # Strategy 2: lsof fallback
+    # Strategy 2: psutil fallback
     if not pids:
         try:
-            import subprocess as _sp
-            out = _sp.check_output(
-                ["lsof", "-ti", f"tcp:{port}"], text=True, stderr=_sp.DEVNULL
-            ).strip()
-            for p in out.split():
-                pid = int(p)
-                if pid != os.getpid():
-                    pids.append(pid)
+            import psutil
+            # Accept both string and constant forms of LISTEN status
+            _listen = {"LISTEN", getattr(psutil, "CONN_LISTEN", "LISTEN")}
+            for conn in psutil.net_connections(kind="tcp"):
+                try:
+                    if (conn.laddr.port == port
+                            and conn.status in _listen
+                            and conn.pid
+                            and conn.pid != own):
+                        pids.append(conn.pid)
+                except Exception:
+                    pass
         except Exception:
             pass
 
     if not pids:
         return False
 
+    # SIGTERM — ask politely first
     for pid in pids:
         try:
             os.kill(pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
             pass
 
-    _t.sleep(1.5)
+    _t.sleep(2.0)  # wait for graceful exit and socket close
 
+    # SIGKILL any survivors
     for pid in pids:
         try:
             os.kill(pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
+
+    _t.sleep(1.0)  # wait for SIGKILL + OS to reclaim the port
 
     return True
 

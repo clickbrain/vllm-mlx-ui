@@ -341,7 +341,18 @@ def set_auto_switch(data: dict[str, Any], _: None = Depends(_check_auth)) -> dic
 
 def start_mgmt_server(host: str = "0.0.0.0", port: int = 8502) -> None:
     """Start the management API server (blocking). Call from a daemon thread."""
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    cfg = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="warning",
+        loop="asyncio",
+        # Allow binding even if the port is in TIME_WAIT after a crash.
+        # This does NOT allow two processes to share the port — the old
+        # process must still be killed; this only handles OS socket cleanup lag.
+        reuse_port=True,
+    )
+    uvicorn.Server(cfg).run()
 
 
 def start_mgmt_server_thread(host: str = "0.0.0.0", port: int = 8502) -> threading.Thread:
