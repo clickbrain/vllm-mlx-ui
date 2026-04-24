@@ -35,6 +35,80 @@ def _find_binary() -> list[str]:
     return [sys.executable, "-m", "vllm_mlx.dashboard.app"]
 
 
+def _find_vllm_ui_pids() -> list[int]:
+    """Find all running vllm-mlx-ui processes (by name and port), excluding self."""
+    import subprocess as _sp
+    own = os.getpid()
+    pids: list[int] = []
+
+    # Strategy 1: find by process name via pgrep
+    try:
+        out = _sp.check_output(
+            ["pgrep", "-f", "vllm.mlx.ui|vllm-mlx-ui"],
+            text=True, stderr=_sp.DEVNULL
+        ).strip()
+        for tok in out.split():
+            try:
+                pid = int(tok)
+                if pid != own and pid not in pids:
+                    pids.append(pid)
+            except ValueError:
+                pass
+    except Exception:
+        pass
+
+    # Strategy 2: find by ports 8501/8502
+    for port in [8501, 8502]:
+        for fmt in [f"tcp:{port}", f":{port}"]:
+            try:
+                out = _sp.check_output(
+                    ["lsof", "-t", "-i", fmt, "-n", "-P"],
+                    text=True, stderr=_sp.DEVNULL
+                ).strip()
+                for tok in out.split():
+                    try:
+                        pid = int(tok)
+                        if pid != own and pid not in pids:
+                            pids.append(pid)
+                    except ValueError:
+                        pass
+                if pids:
+                    break
+            except Exception:
+                pass
+
+    return pids
+
+
+def stop_all() -> None:
+    """Terminate all running vllm-mlx-ui instances. Used by --stop flag."""
+    import time as _t
+    pids = _find_vllm_ui_pids()
+    if not pids:
+        print("No running vllm-mlx-ui instances found.")
+        return
+    print(f"Stopping {len(pids)} vllm-mlx-ui process(es): {pids}")
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+    _t.sleep(2.0)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    _t.sleep(1.0)
+    # Clean up PID file
+    try:
+        from vllm_mlx.dashboard.server_manager import UI_PID_FILE
+        UI_PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+    print("✅ Stopped.")
+
+
 def _kill_stale_ui(ui_pid_file: Path) -> bool:
     """Kill a previously running vllm-mlx-ui process recorded in ui_pid_file."""
     try:
@@ -42,7 +116,6 @@ def _kill_stale_ui(ui_pid_file: Path) -> bool:
         os.kill(old_pid, signal.SIGTERM)
         import time as _t
         _t.sleep(1.5)
-        # If still alive, escalate
         try:
             os.kill(old_pid, signal.SIGKILL)
         except ProcessLookupError:
@@ -57,28 +130,18 @@ def _kill_stale_ui(ui_pid_file: Path) -> bool:
 
 
 def _kill_process_on_port(port: int) -> bool:
-    """
-    Find and terminate whatever process is listening on *port*.
-
-    Uses lsof as primary strategy (always reliable on macOS, no special
-    permissions needed), psutil as fallback.  Waits for the OS to actually
-    release the port before returning.
-    """
+    """Find and terminate whatever process is listening on *port*."""
     import subprocess as _sp
     import time as _t
 
     pids: list[int] = []
     own = os.getpid()
 
-    # Strategy 1: lsof (primary — most reliable on macOS)
-    # Try both "tcp:<port>" and ":<port>" formats; add -n/-P to skip slow
-    # DNS and service-name lookups.
     for fmt in [f"tcp:{port}", f":{port}"]:
         try:
             out = _sp.check_output(
                 ["lsof", "-t", "-i", fmt, "-n", "-P"],
-                text=True,
-                stderr=_sp.DEVNULL,
+                text=True, stderr=_sp.DEVNULL,
             ).strip()
             for tok in out.split():
                 try:
@@ -92,11 +155,9 @@ def _kill_process_on_port(port: int) -> bool:
         except Exception:
             pass
 
-    # Strategy 2: psutil fallback
     if not pids:
         try:
             import psutil
-            # Accept both string and constant forms of LISTEN status
             _listen = {"LISTEN", getattr(psutil, "CONN_LISTEN", "LISTEN")}
             for conn in psutil.net_connections(kind="tcp"):
                 try:
@@ -113,24 +174,21 @@ def _kill_process_on_port(port: int) -> bool:
     if not pids:
         return False
 
-    # SIGTERM — ask politely first
     for pid in pids:
         try:
             os.kill(pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
             pass
 
-    _t.sleep(2.0)  # wait for graceful exit and socket close
+    _t.sleep(2.0)
 
-    # SIGKILL any survivors
     for pid in pids:
         try:
             os.kill(pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
 
-    _t.sleep(1.0)  # wait for SIGKILL + OS to reclaim the port
-
+    _t.sleep(1.0)
     return True
 
 
@@ -181,6 +239,11 @@ def _request_firewall_exception(binary_path: str) -> None:
 
 
 def main() -> None:
+    # Handle --stop flag before anything else
+    if "--stop" in sys.argv:
+        stop_all()
+        sys.exit(0)
+
     try:
         import streamlit  # noqa: F401
     except ImportError:
@@ -206,29 +269,27 @@ def main() -> None:
         ui_port_pref = 8501
         mgmt_port_pref = 8502
 
-    # Clear any stale previous UI instance BEFORE writing our own PID.
-    # uvicorn.run() swallows OSError on bind failure — we MUST clear ports proactively.
+    # Stop any existing vllm-mlx-ui instances (by name + port) before starting.
     import time as _time
 
+    _stale_pids = _find_vllm_ui_pids()
+    if _stale_pids:
+        print(f"[vllm-mlx] Stopping previous instance(s): {_stale_pids}", file=sys.stderr)
+        for _pid in _stale_pids:
+            try:
+                os.kill(_pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+        _time.sleep(2.0)
+        for _pid in _stale_pids:
+            try:
+                os.kill(_pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        _time.sleep(2.0)  # wait for OS to fully release sockets
+
     if UI_PID_FILE.exists():
-        _kill_stale_ui(UI_PID_FILE)
-
-    # Always sweep both ports regardless of PID file.
-    _port_cleared = False
-    if _kill_process_on_port(mgmt_port_pref):
-        _port_cleared = True
-        print(f"[vllm-mlx] Cleared stale process on port {mgmt_port_pref}", file=sys.stderr)
-    if _kill_process_on_port(ui_port_pref):
-        _port_cleared = True
-        print(f"[vllm-mlx] Cleared stale process on port {ui_port_pref}", file=sys.stderr)
-
-    # Wait up to 5 seconds for the OS to release the sockets (handles TIME_WAIT)
-    if _port_cleared:
-        for _wait_attempt in range(5):
-            _time.sleep(1.0)
-            if not _find_free_port(ui_port_pref, exclude={mgmt_port_pref}) != ui_port_pref \
-               and not _find_free_port(mgmt_port_pref, exclude={ui_port_pref}) != mgmt_port_pref:
-                break  # both ports now free
+        UI_PID_FILE.unlink(missing_ok=True)
 
     mgmt_port = mgmt_port_pref
     ui_port = str(ui_port_pref)
