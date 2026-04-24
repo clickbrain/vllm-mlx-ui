@@ -321,47 +321,81 @@ def _get_all_local_addresses() -> list[dict[str, str]]:
 
 
 def _connection_info_block(port: int, model: str = "", api_key: str = "", mgmt_port: int = 8502, lan_only: bool = False) -> None:
-    """Render a connection info expander showing all available addresses."""
+    """Render a connection info expander — prominently shows client setup values."""
+    import shutil as _shutil
     addrs = _get_all_local_addresses()
+    # Separate into useful categories: prefer non-link-local IPs first
+    _ip_addrs = [a for a in addrs if not a["ip"].endswith(".local") and not a["ip"].startswith("169.254.")]
+    _ll_addrs = [a for a in addrs if not a["ip"].endswith(".local") and a["ip"].startswith("169.254.")]
+    _mdns_addrs = [a for a in addrs if a["ip"].endswith(".local")]
+    _sorted_addrs = _ip_addrs + _ll_addrs + _mdns_addrs
+
+    # Find the vllm-mlx-ui binary path for firewall instructions
+    _bin_path = _shutil.which("vllm-mlx-ui") or "/opt/homebrew/bin/vllm-mlx-ui"
 
     with st.expander("📡 Connection info — copy these into your client", expanded=True):
-        if model:
-            st.markdown("**Model ID** (paste into your client's model field)")
-            st.code(model, language="text")
-        if api_key:
-            st.markdown("**API key**")
-            st.code(api_key, language="text")
-
-        st.markdown("**Available addresses** — pick the one that works for your device:")
-
-        rows = []
-        for a in addrs:
-            rows.append({
-                "Interface":      a["label"],
-                "Base URL (/v1)": f"http://{a['ip']}:{port}/v1",
-                "Chat endpoint":  f"http://{a['ip']}:{port}/v1/chat/completions",
-                "Management API": f"http://{a['ip']}:{mgmt_port}",
-            })
-
-        import pandas as _pd
-        st.dataframe(
-            _pd.DataFrame(rows),
-            width="stretch",
-            hide_index=True,
-        )
-        st.caption(
-            "💡 **Which URL to use?**  \n"
-            "• Most OpenAI-compatible clients (e.g. Cursor, Continue) want the **Base URL** (`/v1`).  \n"
-            "• Some clients (e.g. direct curl / custom apps) need the full **Chat endpoint** (`/v1/chat/completions`).  \n"
-            "• On the same Wi-Fi, use the **Wi-Fi/Ethernet** address.  "
-            "Direct Thunderbolt cable → use the **link-local** address."
-        )
         if lan_only:
             st.warning(
-                "⚠️ Server is listening on **localhost only**. "
-                "To allow other devices to connect, change *Listen on* in Server → Configuration to "
-                "**0.0.0.0 — all interfaces** and restart."
+                "⚠️ **Server is only reachable from this Mac** (listening on localhost).  \n"
+                "To allow other devices to connect: go to **Server → Configuration**, "
+                "change *Listen on* to **0.0.0.0 — all interfaces**, and restart."
             )
+            return
+
+        st.markdown("### 🖥 Connecting from another Mac or device")
+        st.caption(
+            "On the **client machine**, open vllm-mlx-ui → ⚙️ Settings → 🔗 Remote Server "
+            "and enter the values for the address you want to use:"
+        )
+
+        for a in _sorted_addrs:
+            if a["ip"].endswith(".local"):
+                continue  # skip .local — shown below as a fallback note
+            _infer_url = f"http://{a['ip']}:{port}/v1"
+            _mgmt_url = f"http://{a['ip']}:{mgmt_port}"
+            with st.container(border=True):
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    st.markdown(f"**{a['label']}**")
+                with c2:
+                    st.markdown("Inference server URL")
+                    st.code(_infer_url, language="text")
+                    st.markdown("Management API URL")
+                    st.code(_mgmt_url, language="text")
+
+        if _mdns_addrs:
+            st.caption(
+                f"💡 You can also try `{_mdns_addrs[0]['ip']}` as the hostname — "
+                "but an IP address above is faster and more reliable."
+            )
+
+        if model:
+            st.divider()
+            st.markdown("**OpenAI-compatible client settings** (Cursor, Continue, LM Studio, etc.)")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("Base URL")
+                st.code(f"http://{(_ip_addrs or _ll_addrs or _mdns_addrs)[0]['ip']}:{port}/v1", language="text")
+            with c2:
+                st.markdown("Model")
+                st.code(model, language="text")
+            if api_key:
+                st.markdown("API key")
+                st.code(api_key, language="text")
+
+        st.divider()
+        st.markdown("#### 🔒 Firewall — allow remote connections")
+        st.markdown(
+            "macOS firewall may block incoming connections on port "
+            f"**{mgmt_port}** (management) and **{port}** (inference).  \n"
+            "Run this once in Terminal on **this Mac** to allow them:"
+        )
+        st.code(
+            f"/usr/libexec/ApplicationFirewall/socketfilterfw --add {_bin_path}\n"
+            f"/usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp {_bin_path}",
+            language="bash"
+        )
+        st.caption(f"Binary location: `{_bin_path}`")
 
 
 def _swap_model(new_model_id: str) -> None:
@@ -2499,109 +2533,225 @@ def page_settings() -> None:
                     "Use the sidebar toggle to switch to Remote.")
     else:
         st.warning("No remote server configured yet. Fill in the fields below and save to enable the toggle.")
+    # ── Parse existing saved URLs back to host + ports for pre-filling ──────────
+    import re as _re_rs
+    def _parse_host_port(url: str, default_port: int) -> tuple[str, int]:
+        m = _re_rs.match(r"https?://([^:/]+)(?::(\d+))?", url.strip())
+        if m:
+            return m.group(1), int(m.group(2) or default_port)
+        return "", default_port
+
+    _saved_infer_url = _cfg_rs.get("remote_server_url", "")
+    _saved_mgmt_url  = _cfg_rs.get("remote_mgmt_url", "")
+    _saved_host, _saved_infer_port = _parse_host_port(_saved_infer_url, 8000)
+    _saved_host2, _saved_mgmt_port = _parse_host_port(_saved_mgmt_url, 8502)
+    _prefill_host = _saved_host or _saved_host2
+
     with st.form("remote_server_form"):
-        remote_server_url = st.text_input(
-            "Inference server URL",
-            value=_cfg_rs.get("remote_server_url", ""),
-            placeholder="http://192.168.1.42:8000/v1",
+        server_addr = st.text_input(
+            "Server address (IP or hostname)",
+            value=_prefill_host,
+            placeholder="192.168.200.1",
             help=(
-                "Base URL of the vllm-mlx inference server. "
-                "You can include `/v1` or leave it off — both work. "
-                "**Use an IP address** (e.g. http://192.168.1.42:8000/v1) rather than a "
-                ".local hostname for the fastest, most reliable connection. "
-                "Find the IP on the server machine: Settings → Connection Info."
+                "Enter just the **IP address** of the remote Mac running vllm-mlx-ui — "
+                "no `http://`, no port number.  \n"
+                "Find it on the server: Settings → 📡 Connection Info.  \n"
+                "A static IP (e.g. Thunderbolt Bridge `192.168.200.1`) is the most reliable."
             ),
         )
-        remote_mgmt_url = st.text_input(
-            "Management API URL",
-            value=_cfg_rs.get("remote_mgmt_url", ""),
-            placeholder="http://192.168.1.42:8502",
-            help=(
-                "The URL of the management API (port 8502 by default). "
-                "**Use an IP address** for the most reliable connection. "
-                "Same host as the inference server, different port."
-            ),
-        )
+
+        with st.expander("⚙️ Advanced — custom ports"):
+            _adv_c1, _adv_c2 = st.columns(2)
+            with _adv_c1:
+                infer_port = st.number_input(
+                    "Inference server port", min_value=1, max_value=65535,
+                    value=_saved_infer_port,
+                    help="Default is 8000. Change only if the server uses a different port.",
+                )
+            with _adv_c2:
+                mgmt_port_input = st.number_input(
+                    "Management API port", min_value=1, max_value=65535,
+                    value=_saved_mgmt_port,
+                    help="Default is 8502. Change only if the server uses a different port.",
+                )
+
         mgmt_api_key = st.text_input(
             "Management API key (optional)",
             value=_cfg_rs.get("mgmt_api_key", ""),
             type="password",
             help="Set this to protect the management API. Must match the key on the server.",
         )
-        rs_saved = st.form_submit_button("💾 Save remote connection", type="primary")
+        rs_saved = st.form_submit_button("💾 Save & test connection", type="primary")
+
+    # Show live URL preview as the user types (re-renders on form interaction)
+    _preview_host = server_addr.strip() if server_addr.strip() else _prefill_host
+    if _preview_host:
+        _prev_infer = f"http://{_preview_host}:{int(infer_port)}/v1"
+        _prev_mgmt  = f"http://{_preview_host}:{int(mgmt_port_input)}"
+        with st.container(border=True):
+            st.caption("📋 URLs that will be saved:")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**Inference server URL**")
+                st.code(_prev_infer, language="text")
+            with c2:
+                st.markdown("**Management API URL**")
+                st.code(_prev_mgmt, language="text")
 
     if rs_saved:
-        _raw_rs = remote_server_url.strip().rstrip("/")
-        _cfg_rs["remote_server_url"] = _raw_rs[:-3] if _raw_rs.endswith("/v1") else _raw_rs
-        _cfg_rs["remote_mgmt_url"] = remote_mgmt_url.strip()
-        _cfg_rs["mgmt_api_key"] = mgmt_api_key.strip()
-        # Save locally only — don't sync connectivity settings to remote
-        import json as _json_rs
-        from vllm_mlx.dashboard.server_manager import CONFIG_FILE, _ensure_state_dir
-        _ensure_state_dir()
-        CONFIG_FILE.write_text(_json_rs.dumps(_cfg_rs, indent=2))
-        st.success("✅ Saved. Reload the page to connect to the remote server.")
+        _host_rs = server_addr.strip()
+        if not _host_rs:
+            st.error("❌ Please enter a server address.")
+        else:
+            from vllm_mlx.dashboard.server_manager import _force_ipv4_url, _http as _sm_http, CONFIG_FILE, _ensure_state_dir
+            import json as _json_rs
 
-    # ── Connectivity test + IP resolution hint ────────────────────────────────
-    _test_url = (remote_mgmt_url.strip() if rs_saved else "") or _cfg_rs.get("remote_mgmt_url", "")
-    if _test_url:
-        from vllm_mlx.dashboard.server_manager import _force_ipv4_url, _http as _sm_http
-        _resolved = _force_ipv4_url(_test_url.rstrip("/"))
-        _is_local_hostname = any(
-            _test_url.split("//")[-1].split(":")[0].endswith(s)
-            for s in (".local", "localhost")
+            _infer_url_save = f"http://{_host_rs}:{int(infer_port)}"
+            _mgmt_url_save  = f"http://{_host_rs}:{int(mgmt_port_input)}"
+
+            # Auto-resolve .local hostnames to IPv4
+            _resolved_mgmt = _force_ipv4_url(_mgmt_url_save)
+            if _resolved_mgmt != _mgmt_url_save:
+                _resolved_ip = _resolved_mgmt.split("//")[-1].split(":")[0]
+                st.info(f"🔍 Hostname resolved to IPv4 `{_resolved_ip}` — saving IP directly for speed.")
+                _infer_url_save = f"http://{_resolved_ip}:{int(infer_port)}"
+                _mgmt_url_save  = f"http://{_resolved_ip}:{int(mgmt_port_input)}"
+
+            _cfg_rs["remote_server_url"] = _infer_url_save
+            _cfg_rs["remote_mgmt_url"]   = _mgmt_url_save
+            _cfg_rs["mgmt_api_key"]      = mgmt_api_key.strip()
+            _ensure_state_dir()
+            CONFIG_FILE.write_text(_json_rs.dumps(_cfg_rs, indent=2))
+            st.success("✅ Saved.")
+
+            # Test both connections and report per-URL status
+            _test_results = []
+            for _label, _url, _path, _expect_json in [
+                ("Management API", _mgmt_url_save, "/health", True),
+                ("Inference server", _infer_url_save, "/health", False),
+            ]:
+                try:
+                    _r = _sm_http.get(f"{_url.rstrip('/')}{_path}", timeout=3)
+                    if _r.status_code == 200:
+                        if _expect_json:
+                            _ct = _r.headers.get("content-type", "")
+                            if _ct.startswith("application/json") and _r.json().get("ok"):
+                                _test_results.append(("✅", _label, f"Reachable at `{_url}`"))
+                            else:
+                                _test_results.append(("⚠️", _label,
+                                    f"Wrong service on port {int(mgmt_port_input)} — got `{_ct}`. "
+                                    "This may be the Streamlit UI (port 8501), not the mgmt API."))
+                        else:
+                            _test_results.append(("✅", _label, f"Reachable at `{_url}`"))
+                    else:
+                        _test_results.append(("⚠️", _label, f"HTTP {_r.status_code}"))
+                except Exception as _te:
+                    _terr = str(_te)
+                    if "Connection refused" in _terr:
+                        _test_results.append(("❌", _label, "Connection refused — is vllm-mlx-ui running on the server?"))
+                    elif "timed out" in _terr.lower() or "timeout" in _terr.lower():
+                        _test_results.append(("❌", _label, "Timed out — address unreachable. Check firewall (see below)."))
+                    elif "nodename nor servname" in _terr or "Name or service" in _terr:
+                        _test_results.append(("❌", _label, "Hostname not found — try using an IP address instead."))
+                    else:
+                        _test_results.append(("❌", _label, f"Error: `{_terr[:120]}`"))
+
+            for _icon, _lbl, _msg in _test_results:
+                if _icon == "✅":
+                    st.success(f"{_icon} **{_lbl}:** {_msg}")
+                elif _icon == "⚠️":
+                    st.warning(f"{_icon} **{_lbl}:** {_msg}")
+                else:
+                    st.error(f"{_icon} **{_lbl}:** {_msg}")
+
+            _any_failed = any(r[0] == "❌" for r in _test_results)
+            if _any_failed:
+                import shutil as _shutil_fw
+                _bin_fw = _shutil_fw.which("vllm-mlx-ui") or "/opt/homebrew/bin/vllm-mlx-ui"
+                st.markdown(
+                    "**🔒 Firewall fix — run this on the server Mac:**\n"
+                    "```bash\n"
+                    f"sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add {_bin_fw}\n"
+                    f"sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp {_bin_fw}\n"
+                    "```\n"
+                    f"Binary location: `{_bin_fw}`  \n\n"
+                    "Or: **System Settings → Network → Firewall → Options → + → "
+                    f"select `{_bin_fw}` → Allow incoming connections**"
+                )
+
+    elif _prefill_host:
+        # Show last saved test result passively if we have a configured remote
+        from vllm_mlx.dashboard.server_manager import _http as _sm_http
+        _passive_mgmt = _cfg_rs.get("remote_mgmt_url", "")
+        if _passive_mgmt:
+            try:
+                _r2 = _sm_http.get(f"{_passive_mgmt.rstrip('/')}/health", timeout=2)
+                if _r2.status_code == 200 and _r2.headers.get("content-type","").startswith("application/json") and _r2.json().get("ok"):
+                    st.success(f"✅ Management API reachable at `{_passive_mgmt}`")
+                else:
+                    st.warning(f"⚠️ Management API at `{_passive_mgmt}` returned HTTP {_r2.status_code}")
+            except Exception:
+                st.warning(f"⚠️ Cannot reach management API at `{_passive_mgmt}` — check server is running and firewall allows connections.")
+
+    st.divider()
+    st.subheader("🔒 Firewall — Allow Remote Connections")
+    import shutil as _shutil_fw2
+    _bin_path_fw = _shutil_fw2.which("vllm-mlx-ui") or "/opt/homebrew/bin/vllm-mlx-ui"
+    _cfg_fw = sm._load_local_config()
+    _fw_done = _cfg_fw.get("_firewall_configured", False)
+
+    if _fw_done:
+        st.success(
+            "✅ Firewall exception was previously configured for this app.  \n"
+            "If remote connections still fail, click **Re-apply** below."
         )
-        if _resolved != _test_url.rstrip("/") and _is_local_hostname:
-            st.info(
-                f"🔍 **Hostname resolved to IPv4:** `{_resolved.split('//')[-1].split('/')[0]}`  \n"
-                "For the fastest connection, use this IP address directly instead of "
-                f"the `.local` hostname. Update the URL above to `{_resolved}` and "
-                f"`{_resolved.replace(':8502', ':8000')}` (or whichever port the "
-                "inference server is on)."
-            )
-        try:
-            r = _sm_http.get(f"{_test_url.rstrip('/')}/health", timeout=3)
-            if r.status_code == 200 and r.headers.get("content-type", "").startswith("application/json") and r.json().get("ok"):
-                st.success(f"✅ Management API reachable at `{_test_url}`")
-            elif r.status_code == 200:
-                st.error(
-                    f"❌ **Wrong service on that port** — got an HTTP 200 but not from the "
-                    f"vllm-mlx management API (content-type: `{r.headers.get('content-type', 'unknown')}`).  \n"
-                    "This is likely the Streamlit dashboard (port 8501) or another web app.  \n"
-                    "**The management API runs on port 8502** — check the Studio firewall "
-                    "allows port 8502 *(System Settings → Network → Firewall → Options → add `vllm-mlx-ui`)*."
-                )
-            else:
-                st.warning(f"⚠️ Management API responded with HTTP {r.status_code}")
-        except Exception as _e:
-            _err = str(_e)
-            if "Connection refused" in _err:
-                reason = "**Connection refused** — the management API is not running on that address."
-                fix = (
-                    "**To fix this:** Open a terminal on the remote machine and run:\n"
-                    "```bash\nvllm-mlx-ui\n```\n"
-                    "The management API (port 8502) only runs while the dashboard is open on the server. "
-                    "Leave that terminal/window running, then try again here."
-                )
-            elif "timed out" in _err.lower() or "timeout" in _err.lower():
-                reason = "**Timed out** — the address is unreachable."
-                fix = (
-                    "Check that:  \n"
-                    "• The remote machine is on the same network  \n"
-                    "• macOS firewall on the server allows port 8502  \n"
-                    "  *(System Settings → Network → Firewall → Options → add `vllm-mlx-ui` → Allow incoming connections)*  \n"
-                    "• Try a different address from the server's Connection Info panel  \n"
-                    "• If using a `.local` hostname, try the IP address instead"
-                )
-            elif "Name or service not known" in _err or "nodename nor servname" in _err:
-                reason = "**Hostname not found** — the `.local` name isn't resolving."
-                fix = "Use the IP address instead of the `.local` hostname."
-            else:
-                reason = "Cannot reach management API."
-                fix = f"Error detail: `{_err[:200]}`"
+    else:
+        st.info(
+            "To let another Mac connect to this one, macOS firewall must allow "
+            f"**{_bin_path_fw}** to accept incoming connections.  \n"
+            "Click the button below — you'll be prompted for your Mac password once."
+        )
 
-            st.error(f"❌ {reason}")
-            st.markdown(fix)
+    _fw_c1, _fw_c2, _ = st.columns([1, 1, 3])
+    with _fw_c1:
+        _fw_label = "✅ Re-apply Firewall Rule" if _fw_done else "🔒 Fix Firewall (one-time)"
+        if st.button(_fw_label, type="primary" if not _fw_done else "secondary", key="_fw_btn"):
+            import subprocess as _sp_fw, json as _json_fw
+            from vllm_mlx.dashboard.server_manager import CONFIG_FILE, _ensure_state_dir
+            try:
+                _res = _sp_fw.run([
+                    "osascript", "-e",
+                    f'do shell script "/usr/libexec/ApplicationFirewall/socketfilterfw --add {_bin_path_fw!r} '
+                    f'&& /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp {_bin_path_fw!r}" '
+                    f'with administrator privileges'
+                ], capture_output=True, text=True, timeout=60)
+                if _res.returncode == 0:
+                    _cfg_fw["_firewall_configured"] = True
+                    _ensure_state_dir()
+                    CONFIG_FILE.write_text(_json_fw.dumps(_cfg_fw, indent=2))
+                    st.success("✅ Firewall rule applied! Remote clients can now connect.")
+                    st.rerun()
+                else:
+                    _errmsg = _res.stderr.strip() or _res.stdout.strip()
+                    if "User canceled" in _errmsg or "(-128)" in _errmsg:
+                        st.warning("⚠️ Cancelled — no changes made. Run manually (see below).")
+                    else:
+                        st.error(f"❌ Could not apply rule: `{_errmsg[:200]}`")
+            except Exception as _fw_err:
+                st.error(f"❌ Failed: `{str(_fw_err)[:200]}`")
+
+    with _fw_c2:
+        with st.expander("📋 Manual steps"):
+            st.markdown(
+                "Run this in Terminal on **this Mac**:\n"
+                "```bash\n"
+                f"sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add {_bin_path_fw}\n"
+                f"sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp {_bin_path_fw}\n"
+                "```\n"
+                "Or: **System Settings → Network → Firewall → Options → + →** "
+                f"navigate to `{_bin_path_fw}` → **Allow incoming connections**  \n\n"
+                f"App binary: `{_bin_path_fw}`"
+            )
 
     st.divider()
     st.subheader("🔒 Security")

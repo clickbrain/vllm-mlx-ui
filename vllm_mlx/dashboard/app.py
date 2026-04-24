@@ -134,6 +134,49 @@ def _kill_process_on_port(port: int) -> bool:
     return True
 
 
+def _find_free_port(preferred: int, max_attempts: int = 20) -> int:
+    """Return preferred port if free, otherwise the next free port above it."""
+    import socket as _socket
+    for port in range(preferred, preferred + max_attempts):
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("", port))
+                return port
+            except OSError:
+                continue
+    return preferred  # fallback — let the OS error surface normally
+
+
+def _request_firewall_exception(binary_path: str) -> None:
+    """
+    Ask macOS firewall to allow incoming connections for the vllm-mlx-ui binary.
+    Uses socketfilterfw directly (no admin prompt if already allowed).
+    Silently no-ops on failure — the user can always allow it manually.
+    """
+    import subprocess as _sp
+    try:
+        # First check if already allowed
+        result = _sp.run(
+            ["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getappinfo", binary_path],
+            capture_output=True, text=True, timeout=3
+        )
+        if "ALLOW" in result.stdout.upper():
+            return  # Already allowed — nothing to do
+    except Exception:
+        pass
+
+    try:
+        # socketfilterfw --add requires root on newer macOS; use osascript to prompt
+        _sp.run([
+            "osascript", "-e",
+            f'do shell script "/usr/libexec/ApplicationFirewall/socketfilterfw --add {binary_path!r} '
+            f'&& /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp {binary_path!r}" '
+            f'with administrator privileges'
+        ], timeout=60, capture_output=True)
+    except Exception:
+        pass  # User declined or osascript not available — silently ignore
+
+
 def main() -> None:
     try:
         import streamlit  # noqa: F401
@@ -151,35 +194,49 @@ def main() -> None:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         cfg = _load_local_config()
         ui_host = cfg.get("ui_host", "127.0.0.1")
-        ui_port = str(cfg.get("ui_port", 8501))
-        mgmt_port = int(cfg.get("mgmt_port", 8502))
+        ui_port_pref = int(cfg.get("ui_port", 8501))
+        mgmt_port_pref = int(cfg.get("mgmt_port", 8502))
     except Exception:
         from pathlib import Path as _Path
         UI_PID_FILE = _Path.home() / ".vllm_mlx_ui" / "ui.pid"
         ui_host = "127.0.0.1"
-        ui_port = "8501"
-        mgmt_port = 8502
+        ui_port_pref = 8501
+        mgmt_port_pref = 8502
 
     # Clear any stale previous UI instance BEFORE writing our own PID.
-    # Strategy: PID file first (surgical), then port-based sweep (belt-and-suspenders).
-    # uvicorn.run() swallows OSError on bind failure — it never propagates to our
-    # except clause — so we MUST clear ports proactively rather than reactively.
+    # uvicorn.run() swallows OSError on bind failure — we MUST clear ports proactively.
     import time as _time
 
     if UI_PID_FILE.exists():
         _kill_stale_ui(UI_PID_FILE)
 
-    # Always sweep both ports regardless of PID file; covers the case where the
-    # old process died without cleanup or was started by a different mechanism.
+    # Always sweep both ports regardless of PID file.
     _port_cleared = False
-    if _kill_process_on_port(mgmt_port):
+    if _kill_process_on_port(mgmt_port_pref):
         _port_cleared = True
-        print(f"[vllm-mlx] Cleared stale process on port {mgmt_port}", file=sys.stderr)
-    if _kill_process_on_port(int(ui_port)):
+        print(f"[vllm-mlx] Cleared stale process on port {mgmt_port_pref}", file=sys.stderr)
+    if _kill_process_on_port(ui_port_pref):
         _port_cleared = True
-        print(f"[vllm-mlx] Cleared stale process on port {ui_port}", file=sys.stderr)
+        print(f"[vllm-mlx] Cleared stale process on port {ui_port_pref}", file=sys.stderr)
     if _port_cleared:
-        _time.sleep(1.0)  # give the OS time to release the sockets
+        _time.sleep(1.0)
+
+    # Auto-select free ports (handles port conflicts gracefully)
+    mgmt_port = _find_free_port(mgmt_port_pref)
+    ui_port_int = _find_free_port(ui_port_pref)
+    ui_port = str(ui_port_int)
+    if mgmt_port != mgmt_port_pref:
+        print(f"[vllm-mlx] ⚠️  Port {mgmt_port_pref} busy — management API will use port {mgmt_port}")
+        try:
+            from vllm_mlx.dashboard.server_manager import _load_local_config, CONFIG_FILE
+            import json as _json
+            _cfg_save = _load_local_config()
+            _cfg_save["mgmt_port"] = mgmt_port
+            CONFIG_FILE.write_text(_json.dumps(_cfg_save, indent=2))
+        except Exception:
+            pass
+    if ui_port_int != ui_port_pref:
+        print(f"[vllm-mlx] ⚠️  Port {ui_port_pref} busy — dashboard will use port {ui_port_int}")
 
     # Write our PID so the Shutdown button and future startups can find us
     try:
@@ -196,6 +253,22 @@ def main() -> None:
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
+
+    # Request firewall exception for this binary (first run only, prompts for admin).
+    # We do this before the mgmt API starts so the port is open when it binds.
+    _binary_path = _find_binary()[0] if _find_binary()[0] != sys.executable else None
+    if _binary_path and ui_host == "0.0.0.0":
+        try:
+            from vllm_mlx.dashboard.server_manager import _load_local_config, CONFIG_FILE
+            import json as _json
+            _fw_cfg = _load_local_config()
+            if not _fw_cfg.get("_firewall_requested"):
+                print("[vllm-mlx] 🔒 Requesting macOS firewall exception (one-time setup)…")
+                _request_firewall_exception(_binary_path)
+                _fw_cfg["_firewall_requested"] = True
+                CONFIG_FILE.write_text(_json.dumps(_fw_cfg, indent=2))
+        except Exception:
+            pass
 
     # Start the management API server in a daemon thread.
     def _start_mgmt() -> None:
