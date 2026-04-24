@@ -314,6 +314,8 @@ def _get_all_local_addresses() -> list[dict[str, str]]:
                         label = f"{iface} (link-local / Thunderbolt or USB-C)"
                     else:
                         label = f"{iface} (Wi-Fi / Ethernet)"
+                elif iface == "bridge0":
+                    label = "bridge0 (Thunderbolt Bridge)"
                 elif iface.startswith("bridge") or iface.startswith("vmnet"):
                     label = f"{iface} (virtual network)"
                 elif iface.startswith("utun") or iface.startswith("tun") or iface.startswith("ppp"):
@@ -1085,9 +1087,9 @@ def page_server() -> None:
         with m1:
             gpu_mem = st.slider(
                 "GPU memory utilisation",
-                min_value=0.50, max_value=0.99,
-                value=float(config.get("gpu_memory_utilization", 0.90)),
-                step=0.01, format="%.0f%%",
+                min_value=50, max_value=99,
+                value=int(float(config.get("gpu_memory_utilization", 0.90)) * 100),
+                step=1, format="%d%%",
                 help="What fraction of your Mac's RAM to dedicate to the model. "
                      "90% is a safe default. Increase for large models.",
             )
@@ -1177,7 +1179,7 @@ def page_server() -> None:
             "max_request_tokens": int(max_tokens),  # must be >= max_tokens; keep in sync
             "reasoning_parser": reasoning_parser,
             "tool_call_parser": tool_call_parser,
-            "gpu_memory_utilization": float(gpu_mem),
+            "gpu_memory_utilization": gpu_mem / 100,
             "enable_prefix_cache": enable_prefix_cache,
             "cache_memory_mb": int(cache_memory_mb),
             "kv_cache_quantization": kv_quant,
@@ -1797,12 +1799,18 @@ def page_models() -> None:
                         "Choose a smaller or more-quantized variant instead."
                     )
                 else:
+                    # Check if already cached
+                    _already_cached = any(m["id"] == direct_id.strip() for m in mm.get_cached_models())
+                    if _already_cached:
+                        st.warning(f"⚠️ **{direct_id.strip().split('/')[-1]}** is already in your library.")
+                        # Still allow re-download but show the warning
                     if _is_remote():
                         ok, msg = mm.download_model(direct_id.strip(), hf_token=token)
                         if ok:
                             _remote_dls = st.session_state.setdefault("_remote_dl_tracking", {})
                             _remote_dls[direct_id.strip()] = "downloading"
                             st.success(f"✅ Download started: {msg}")
+                            st.info("📋 Scroll up to see download progress in the queue panel.")
                         else:
                             st.error(msg)
                     else:
@@ -1812,6 +1820,7 @@ def page_models() -> None:
                                 f"✅ **{direct_id.strip().split('/')[-1]}** added to download queue.  \n"
                                 "Watch the queue panel at the top of this page."
                             )
+                            st.info("📋 Scroll up to see download progress in the queue panel.")
                             _fire_fireworks()
                         else:
                             st.info("⏳ Already in download queue.")

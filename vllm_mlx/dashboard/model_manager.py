@@ -695,27 +695,36 @@ def search_hf_models(
     tags: list[str] | None = None,
     limit: int = 50,
 ) -> list[dict]:
-    """Search all of HuggingFace Hub (not just mlx-community)."""
-    from huggingface_hub import HfApi
-    api = HfApi()
+    """Search all of HuggingFace Hub (not just mlx-community) via REST API."""
+    import urllib.parse
+    params: dict[str, Any] = {
+        "sort": "downloads",
+        "direction": "-1",
+        "limit": str(min(limit, 100)),
+        "full": "false",
+        "config": "false",
+    }
+    if query.strip():
+        params["search"] = query.strip()
+    if tags:
+        params["filter"] = ",".join(tags)
+    url = "https://huggingface.co/api/models?" + urllib.parse.urlencode(params)
     try:
-        kwargs: dict = dict(search=query if query.strip() else None, limit=limit, sort="downloads")
-        if tags:
-            kwargs["tags"] = tags
-        import inspect
-        sig = inspect.signature(api.list_models)
-        if "direction" in sig.parameters:
-            kwargs["direction"] = -1
-        models_iter = api.list_models(**kwargs)
+        resp = _requests.get(url, timeout=15)
+        resp.raise_for_status()
         results = []
-        for m in models_iter:
+        for m in resp.json():
+            model_id = m.get("modelId") or m.get("id", "")
+            if not model_id:
+                continue
+            model_tags = list(m.get("tags") or [])
             results.append({
-                "id": m.modelId,
-                "downloads": getattr(m, "downloads", 0) or 0,
-                "likes": getattr(m, "likes", 0) or 0,
-                "tags": list(getattr(m, "tags", []) or []),
-                "last_modified": str(getattr(m, "lastModified", "") or ""),
-                "is_mlx": "mlx" in [t.lower() for t in (getattr(m, "tags", []) or [])],
+                "id": model_id,
+                "downloads": m.get("downloads", 0) or 0,
+                "likes": m.get("likes", 0) or 0,
+                "tags": model_tags,
+                "last_modified": str(m.get("lastModified") or ""),
+                "is_mlx": "mlx" in [t.lower() for t in model_tags],
             })
         return results
     except Exception as e:
