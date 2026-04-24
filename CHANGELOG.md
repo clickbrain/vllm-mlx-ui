@@ -6,7 +6,42 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
 
 ---
 
-## [UI 1.4.1] — 2026-04-22
+## [UI 1.6.0] — 2026-04-24
+
+### Fixed
+- **HF-wide model search returns no results** — replaced `HfApi().list_models()` (breaks
+  silently when `huggingface_hub` version changes) with a direct call to the stable
+  HuggingFace REST API (`https://huggingface.co/api/models`). Sorted by downloads, full
+  tag list preserved, `is_mlx` auto-detected from tags.
+- **GPU memory utilisation shows 1% instead of 90%** — the Server configuration slider
+  used `value=0.90` with `format="%.0f%%"`: `%.0f` on `0.90` rounds to `"1"`. Fixed by
+  switching to an integer range (50–99) with `format="%d%%"`. The stored config value
+  is still a float (divided by 100 on save).
+- **Thunderbolt Bridge interface labelled "virtual network"** — `bridge0` (macOS
+  Thunderbolt Bridge) is now explicitly detected and labelled "Thunderbolt Bridge"
+  in the network connections list. Generic `bridge*` interfaces retain the "virtual
+  network" label.
+- **Download by ID: no duplicate check** — added a pre-download warning when the
+  requested model ID already exists in the local library (`get_cached_models()` check).
+- **Download by ID: no progress feedback** — added a "Scroll up to see download progress
+  in the queue panel" info message after a download is enqueued.
+
+---
+
+## [UI 1.5.0] — 2026-04-24
+
+### Fixed
+- **Model fit indicators used wrong RAM total on remote connections** — `check_model_fit()`
+  was called once per search result row, each call making an HTTP request to the remote
+  machine to get total RAM. With 50 results this caused request timeouts and silently
+  fell back to the local machine's RAM. Fixed by calling `get_total_ram_gb()` once
+  before the search loop and passing `total_gb=` to every `check_model_fit()` call.
+- **Remote download queue panel showed no progress** — the download-tracking panel now
+  polls `GET /models/download_status/{id}` on the remote Studio machine and displays
+  live status. Both the Search tab and Download by ID tab write to
+  `session_state["_remote_dl_tracking"]`, so the panel reflects all in-flight downloads.
+  Auto-refresh triggers whenever any local or remote download is active.
+
 
 ### Fixed
 - **install.sh: critical bug** — installer was downloading vllm-mlx from
