@@ -256,8 +256,21 @@ def load_config() -> dict[str, Any]:
     return local
 
 
+_LOCAL_ONLY_KEYS = frozenset({
+    "remote_server_url", "remote_mgmt_url", "mgmt_api_key",
+    "ui_host", "ui_port", "mgmt_port",
+    "_firewall_requested", "_firewall_configured",
+})
+
+
 def save_config(config: dict[str, Any]) -> None:
     _ensure_state_dir()
+    # Backup previous config before overwriting (gives users a recovery path)
+    if CONFIG_FILE.exists():
+        try:
+            CONFIG_FILE.replace(CONFIG_FILE.with_suffix(".json.bak"))
+        except Exception:
+            pass
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
     # Invalidate the config cache so the next load_config() fetches fresh data.
@@ -270,7 +283,10 @@ def save_config(config: dict[str, Any]) -> None:
     mgmt = _mgmt_base(config)
     if mgmt:
         try:
-            _http.post(f"{mgmt}/config", json=config,
+            # Strip local-only connectivity keys so we never overwrite the
+            # remote machine's own network settings with the local values.
+            remote_payload = {k: v for k, v in config.items() if k not in _LOCAL_ONLY_KEYS}
+            _http.post(f"{mgmt}/config", json=remote_payload,
                        headers=_mgmt_headers(config), timeout=5)
         except Exception:
             pass  # Best effort; local save already succeeded
@@ -489,8 +505,10 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
     mgmt = _mgmt_base(config)
     if mgmt:
         try:
-            # Push config to remote first so it starts with latest settings
-            _http.post(f"{mgmt}/config", json=config, headers=_mgmt_headers(config), timeout=5)
+            # Push config to remote first so it starts with latest settings.
+            # Strip local-only keys so we never overwrite remote connectivity settings.
+            remote_payload = {k: v for k, v in config.items() if k not in _LOCAL_ONLY_KEYS}
+            _http.post(f"{mgmt}/config", json=remote_payload, headers=_mgmt_headers(config), timeout=5)
             r = _http.post(f"{mgmt}/start", headers=_mgmt_headers(config), timeout=10)
             d = r.json()
             return d.get("ok", False), d.get("message", str(r.status_code))

@@ -44,7 +44,7 @@ def _find_vllm_ui_pids() -> list[int]:
     # Strategy 1: find by process name via pgrep
     try:
         out = _sp.check_output(
-            ["pgrep", "-f", "vllm.mlx.ui|vllm-mlx-ui"],
+            ["pgrep", "-f", "vllm_mlx/dashboard|vllm-mlx-ui"],
             text=True, stderr=_sp.DEVNULL
         ).strip()
         for tok in out.split():
@@ -311,18 +311,24 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
-    # Request firewall exception for this binary (first run only, prompts for admin).
-    # We do this before the mgmt API starts so the port is open when it binds.
-    _binary_path = _find_binary()[0] if _find_binary()[0] != sys.executable else None
+    # Request firewall exception for this binary.
+    # Re-runs on every brew upgrade because the real binary path changes (new
+    # Cellar version), invalidating the previous firewall rule.  We store the
+    # version that last ran the exception so we can detect upgrades.
+    _bin_candidates = _find_binary()
+    _binary_path = _bin_candidates[0] if _bin_candidates[0] != sys.executable else None
     if _binary_path and ui_host == "0.0.0.0":
         try:
             from vllm_mlx.dashboard.server_manager import _load_local_config, CONFIG_FILE
+            from vllm_mlx import __version__ as _current_ver
             import json as _json
             _fw_cfg = _load_local_config()
-            if not _fw_cfg.get("_firewall_requested"):
-                print("[vllm-mlx] 🔒 Requesting macOS firewall exception (one-time setup)…")
+            _fw_ver = _fw_cfg.get("_firewall_version", "")
+            if not _fw_cfg.get("_firewall_requested") or _fw_ver != _current_ver:
+                print("[vllm-mlx] 🔒 Requesting macOS firewall exception…")
                 _request_firewall_exception(_binary_path)
                 _fw_cfg["_firewall_requested"] = True
+                _fw_cfg["_firewall_version"] = _current_ver
                 CONFIG_FILE.write_text(_json.dumps(_fw_cfg, indent=2))
         except Exception:
             pass

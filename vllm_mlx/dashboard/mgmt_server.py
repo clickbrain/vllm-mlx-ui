@@ -130,7 +130,11 @@ def get_config(_: None = Depends(_check_auth)) -> dict:
 
 @app.post("/config")
 def set_config(data: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
-    sm.save_config(data)
+    # Strip local-only connectivity keys (defense-in-depth) so a misconfigured
+    # client cannot overwrite the remote machine's own network settings.
+    from .server_manager import _LOCAL_ONLY_KEYS
+    filtered = {k: v for k, v in data.items() if k not in _LOCAL_ONLY_KEYS}
+    sm.save_config(filtered)
     return {"ok": True}
 
 

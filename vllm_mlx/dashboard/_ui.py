@@ -2577,6 +2577,13 @@ def page_settings() -> None:
     _saved_host2, _saved_mgmt_port = _parse_host_port(_saved_mgmt_url, 8502)
     _prefill_host = _saved_host or _saved_host2
 
+    # Pre-initialize with saved values so they are always defined before and
+    # after the form block (form widgets ARE accessible outside the form since
+    # the form is a submit boundary not a Python scope, but initializing here
+    # ensures correct values even when the form has never been rendered).
+    infer_port = _saved_infer_port
+    mgmt_port_input = _saved_mgmt_port
+
     with st.form("remote_server_form"):
         server_addr = st.text_input(
             "Server address (IP or hostname)",
@@ -2652,6 +2659,11 @@ def page_settings() -> None:
             _cfg_rs["mgmt_api_key"]      = mgmt_api_key.strip()
             _ensure_state_dir()
             CONFIG_FILE.write_text(_json_rs.dumps(_cfg_rs, indent=2))
+            # Invalidate the config cache so the next load_config() picks up the new URLs.
+            try:
+                st.session_state.pop("_cfg_cache", None)
+            except Exception:
+                pass
             st.success("✅ Saved.")
 
             # Test both connections and report per-URL status
@@ -2678,7 +2690,14 @@ def page_settings() -> None:
                 except Exception as _te:
                     _terr = str(_te)
                     if "Connection refused" in _terr:
-                        _test_results.append(("❌", _label, "Connection refused — is vllm-mlx-ui running on the server?"))
+                        if _label == "Inference server":
+                            _test_results.append(("⚠️", _label,
+                                "Not started — go to the **Server page** on the remote Mac and start a model. "
+                                "The inference server only runs when a model is active."))
+                        else:
+                            _test_results.append(("❌", _label,
+                                "Connection refused — is vllm-mlx-ui running on the server? "
+                                "Check the firewall fix below."))
                     elif "timed out" in _terr.lower() or "timeout" in _terr.lower():
                         _test_results.append(("❌", _label, "Timed out — address unreachable. Check firewall (see below)."))
                     elif "nodename nor servname" in _terr or "Name or service" in _terr:
@@ -2729,11 +2748,23 @@ def page_settings() -> None:
     _bin_path_fw = _shutil_fw2.which("vllm-mlx-ui") or "/opt/homebrew/bin/vllm-mlx-ui"
     _cfg_fw = sm._load_local_config()
     _fw_done = _cfg_fw.get("_firewall_configured", False)
+    # Also check if the version has changed since firewall was last configured —
+    # brew upgrades change the real binary path, invalidating the old rule.
+    try:
+        from vllm_mlx import __version__ as _cur_ver_fw
+        _fw_stale = _fw_done and (_cfg_fw.get("_firewall_version", "") != _cur_ver_fw)
+    except Exception:
+        _fw_stale = False
 
-    if _fw_done:
+    if _fw_done and not _fw_stale:
         st.success(
             "✅ Firewall exception was previously configured for this app.  \n"
             "If remote connections still fail, click **Re-apply** below."
+        )
+    elif _fw_stale:
+        st.warning(
+            "⚠️ App was upgraded — firewall exception needs to be re-applied for the new version.  \n"
+            "Click **Re-apply** below (one admin password prompt)."
         )
     else:
         st.info(
@@ -2744,7 +2775,7 @@ def page_settings() -> None:
 
     _fw_c1, _fw_c2, _ = st.columns([1, 1, 3])
     with _fw_c1:
-        _fw_label = "✅ Re-apply Firewall Rule" if _fw_done else "🔒 Fix Firewall (one-time)"
+        _fw_label = "✅ Re-apply Firewall Rule" if (_fw_done or _fw_stale) else "🔒 Fix Firewall (one-time)"
         if st.button(_fw_label, type="primary" if not _fw_done else "secondary", key="_fw_btn"):
             import subprocess as _sp_fw, json as _json_fw
             from vllm_mlx.dashboard.server_manager import CONFIG_FILE, _ensure_state_dir
@@ -2757,8 +2788,18 @@ def page_settings() -> None:
                 ], capture_output=True, text=True, timeout=60)
                 if _res.returncode == 0:
                     _cfg_fw["_firewall_configured"] = True
+                    try:
+                        from vllm_mlx import __version__ as _ver_fw_save
+                        _cfg_fw["_firewall_version"] = _ver_fw_save
+                    except Exception:
+                        pass
                     _ensure_state_dir()
                     CONFIG_FILE.write_text(_json_fw.dumps(_cfg_fw, indent=2))
+                    # Invalidate cache so the next load_config() sees the updated flag.
+                    try:
+                        st.session_state.pop("_cfg_cache", None)
+                    except Exception:
+                        pass
                     st.success("✅ Firewall rule applied! Remote clients can now connect.")
                     st.rerun()
                 else:
