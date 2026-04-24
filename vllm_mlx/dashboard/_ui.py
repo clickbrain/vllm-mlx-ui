@@ -2895,8 +2895,8 @@ def page_settings() -> None:
     st.subheader("ℹ️ About")
     from vllm_mlx.dashboard import __version__ as _ui_ver
     try:
-        mlx_lm_ver = importlib.metadata.version("mlx-lm")
-        st.write(f"**mlx-lm version:** {mlx_lm_ver}")
+        ver = importlib.metadata.version("vllm-mlx")
+        st.write(f"**vllm-mlx version:** {ver}")
     except Exception:
         pass
     st.write(f"**Dashboard UI version:** {_ui_ver}")
