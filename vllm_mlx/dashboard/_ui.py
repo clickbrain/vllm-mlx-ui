@@ -2561,8 +2561,16 @@ def page_settings() -> None:
             )
         try:
             r = _sm_http.get(f"{_test_url.rstrip('/')}/health", timeout=3)
-            if r.status_code == 200:
+            if r.status_code == 200 and r.headers.get("content-type", "").startswith("application/json") and r.json().get("ok"):
                 st.success(f"✅ Management API reachable at `{_test_url}`")
+            elif r.status_code == 200:
+                st.error(
+                    f"❌ **Wrong service on that port** — got an HTTP 200 but not from the "
+                    f"vllm-mlx management API (content-type: `{r.headers.get('content-type', 'unknown')}`).  \n"
+                    "This is likely the Streamlit dashboard (port 8501) or another web app.  \n"
+                    "**The management API runs on port 8502** — check the Studio firewall "
+                    "allows port 8502 *(System Settings → Network → Firewall → Options → add `vllm-mlx-ui`)*."
+                )
             else:
                 st.warning(f"⚠️ Management API responded with HTTP {r.status_code}")
         except Exception as _e:
@@ -2581,7 +2589,7 @@ def page_settings() -> None:
                     "Check that:  \n"
                     "• The remote machine is on the same network  \n"
                     "• macOS firewall on the server allows port 8502  \n"
-                    "  *(System Settings → Network → Firewall → Options, add `vllm-mlx-ui`)*  \n"
+                    "  *(System Settings → Network → Firewall → Options → add `vllm-mlx-ui` → Allow incoming connections)*  \n"
                     "• Try a different address from the server's Connection Info panel  \n"
                     "• If using a `.local` hostname, try the IP address instead"
                 )
