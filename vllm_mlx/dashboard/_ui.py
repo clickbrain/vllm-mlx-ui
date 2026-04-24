@@ -482,6 +482,62 @@ def _swap_model(new_model_id: str) -> None:
         st.error(f"Failed to start: {msg}")
 
 
+def _fire_fireworks() -> None:
+    """Render a short fireworks celebration animation inside the page."""
+    import streamlit.components.v1 as _components
+    _components.html(
+        """<!DOCTYPE html><html><head><style>
+        *{margin:0;padding:0}
+        html,body{width:100%;height:180px;overflow:hidden;background:transparent}
+        canvas{position:absolute;top:0;left:0}
+        </style></head><body><canvas id="c"></canvas><script>
+        (function(){
+          var c=document.getElementById('c');
+          var W=window.innerWidth,H=180;
+          c.width=W;c.height=H;
+          var ctx=c.getContext('2d');
+          var particles=[];
+          var colors=['#ff4444','#ffcc00','#00ff88','#00aaff','#ff69b4',
+                      '#ff8800','#cc44ff','#44ffff','#ffffff'];
+          function burst(x,y){
+            for(var i=0;i<70;i++){
+              var a=(i/70)*Math.PI*2;
+              var sp=3+Math.random()*9;
+              particles.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,
+                              life:1.0,color:colors[Math.floor(Math.random()*colors.length)],
+                              r:1.5+Math.random()*2.5});
+            }
+          }
+          var shots=[[.12,.35],[.5,.12],[.88,.32],[.3,.08],[.72,.1],[.05,.55],[.95,.48]];
+          var si=0;
+          var launcher=setInterval(function(){
+            if(si>=shots.length){clearInterval(launcher);return;}
+            burst(W*shots[si][0],H*shots[si][1]);si++;
+          },210);
+          function draw(){
+            ctx.fillStyle='rgba(0,0,0,0.18)';
+            ctx.fillRect(0,0,W,H);
+            for(var i=particles.length-1;i>=0;i--){
+              var p=particles[i];
+              p.x+=p.vx;p.y+=p.vy;p.vy+=0.16;p.vx*=0.98;p.life-=0.013;
+              if(p.life<=0){particles.splice(i,1);continue;}
+              ctx.globalAlpha=p.life;
+              ctx.fillStyle=p.color;
+              ctx.beginPath();
+              ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+              ctx.fill();
+            }
+            ctx.globalAlpha=1;
+            if(particles.length>0||si<shots.length) requestAnimationFrame(draw);
+            else setTimeout(function(){c.style.opacity=0;},300);
+          }
+          draw();
+        })();
+        </script></body></html>""",
+        height=180,
+    )
+
+
 # ===========================================================================
 # Page: Overview
 # ===========================================================================
@@ -1177,8 +1233,63 @@ def page_server() -> None:
 def page_models() -> None:
     st.title("📦 Models")
 
+    # ── Download Queue Panel ──────────────────────────────────────────────────
+    _local_queue = mm.download_manager.get_queue()
+    if _local_queue:
+        st.subheader("⬇️ Download Queue")
+        _any_active = False
+        _prev_done = set(st.session_state.get("_dl_queue_done", set()))
+        _cur_done: set[str] = set()
+        for _qi in _local_queue:
+            _mid = _qi["model_id"]
+            _short = _mid.split("/")[-1]
+            _status = _qi["status"]
+            if _status == "done":
+                _cur_done.add(_mid)
+            if _status in ("queued", "downloading"):
+                _any_active = True
+            _qc1, _qc2, _qc3 = st.columns([4, 2, 4])
+            with _qc1:
+                st.write(f"**{_short}**")
+                st.caption(_mid)
+            with _qc2:
+                _badge_color = {"queued": "#6366f1", "downloading": "#f59e0b",
+                                "done": "#10b981", "error": "#ef4444"}.get(_status, "#6b7280")
+                st.markdown(
+                    f"<span style='background:{_badge_color};color:#fff;padding:2px 8px;"
+                    f"border-radius:4px;font-size:.8rem'>{_status}</span>",
+                    unsafe_allow_html=True,
+                )
+            with _qc3:
+                if _status == "downloading":
+                    _pct = _qi.get("pct", 0.0)
+                    _bdl = _qi.get("bytes_dl", 0)
+                    _btot = _qi.get("total_bytes", 0)
+                    st.progress(_pct)
+                    if _btot > 0:
+                        st.caption(f"{_bdl / 1e9:.2f} / {_btot / 1e9:.2f} GB")
+                    elif _bdl > 0:
+                        st.caption(f"{_bdl / 1e9:.2f} GB downloaded")
+                elif _status == "done":
+                    _bdl = _qi.get("bytes_dl", 0)
+                    if _bdl > 0:
+                        st.caption(f"{_bdl / 1e9:.2f} GB")
+                elif _status == "error":
+                    st.error(_qi.get("error") or "Unknown error", icon="❌")
+        # Detect newly completed downloads → celebrate
+        _newly_done = _cur_done - _prev_done
+        if _newly_done:
+            _fire_fireworks()
+        st.session_state["_dl_queue_done"] = _cur_done
+        if st.button("🧹 Clear finished", key="_clear_dl_queue"):
+            mm.download_manager.clear_finished()
+            st.rerun()
+        if _any_active:
+            st.markdown('<meta http-equiv="refresh" content="3">', unsafe_allow_html=True)
+        st.divider()
+
     tab_lib, tab_search, tab_direct = st.tabs(
-        ["📚 My library", "🔍 Search mlx-community", "⬇️ Download by ID"]
+        ["📚 My library", "🔍 Search", "⬇️ Download by ID"]
     )
 
     # ── My library ───────────────────────────────────────────────────────────
@@ -1209,16 +1320,26 @@ def page_models() -> None:
             st.caption(f"Starter model: `{STARTER_MODEL}`")
             if start_dl or st.session_state.get("_starter_dl_triggered"):
                 st.session_state["_starter_dl_triggered"] = True
-                with st.spinner(
-                    f"Downloading **{STARTER_MODEL.split('/')[-1]}**…  "
-                    "This may take several minutes depending on your connection."
-                ):
+                if _is_remote():
                     ok, msg = mm.download_model(STARTER_MODEL)
+                    if ok:
+                        for _ in range(600):
+                            _status = mm.get_download_status(STARTER_MODEL)
+                            _s = _status.get("status")
+                            if _s == "done":
+                                break
+                            if _s == "error":
+                                ok = False
+                                msg = _status.get("error", "Download failed on remote server")
+                                break
+                            time.sleep(1)
+                else:
+                    ok = mm.download_manager.enqueue(STARTER_MODEL)
+                    msg = "Added to download queue"
                 st.session_state.pop("_starter_dl_triggered", None)
                 if ok:
-                    st.success(f"✅ **{STARTER_MODEL.split('/')[-1]}** downloaded! "
-                               "Refresh this tab to see it in your library.")
-                    st.balloons()
+                    st.success(f"✅ **{STARTER_MODEL.split('/')[-1]}** added to download queue! "
+                               "Watch the queue panel at the top of this page.")
                 else:
                     st.error(f"❌ Download failed: {msg}")
                     st.info("You can try again using the **⬇ Download by ID** tab above.")
@@ -1229,12 +1350,17 @@ def page_models() -> None:
             mc2.metric("Models cached", len(cached))
             st.caption(f"Cache: `{mm.get_hf_cache_dir()}`")
 
-            # Disk usage pie chart
+            # Disk usage pie chart — show short names (strip org/ prefix)
             if len(cached) > 1:
+                import pandas as _pd_pie
+                _pie_df = _pd_pie.DataFrame([
+                    {"size_gb": m["size_gb"], "name": m["id"].split("/")[-1]}
+                    for m in cached
+                ])
                 fig_pie = px.pie(
-                    pd.DataFrame(cached),
+                    _pie_df,
                     values="size_gb",
-                    names="id",
+                    names="name",
                     title="Disk usage by model",
                     color_discrete_sequence=px.colors.qualitative.Vivid,
                 )
@@ -1242,24 +1368,51 @@ def page_models() -> None:
 
             st.divider()
 
-            _status_lib = sm.get_server_status()
-            _lib_config = sm.load_config()
-            _active_model = _lib_config.get("model", "")
-            if _status_lib["running"] and _status_lib["healthy"]:
-                _active_model = _status_lib["health"].get("model_name", _active_model)
+            # ── Search + Sort controls ────────────────────────────────────────
+            _lib_fc1, _lib_fc2 = st.columns([3, 1])
+            with _lib_fc1:
+                _lib_query = st.text_input(
+                    "Search library",
+                    placeholder="Filter by name…",
+                    key="_lib_search",
+                    label_visibility="collapsed",
+                )
+            with _lib_fc2:
+                _lib_sort = st.selectbox(
+                    "Sort",
+                    ["🔤 Name (A–Z)", "📦 Size (largest first)", "📦 Size (smallest first)"],
+                    key="_lib_sort",
+                    label_visibility="collapsed",
+                )
 
-            for model in cached:
+            _lib_filtered = [
+                m for m in cached
+                if not _lib_query.strip()
+                or _lib_query.strip().lower() in m["id"].lower()
+            ]
+            if _lib_sort == "🔤 Name (A–Z)":
+                _lib_filtered = sorted(_lib_filtered, key=lambda m: m["id"].lower())
+            elif _lib_sort == "📦 Size (largest first)":
+                _lib_filtered = sorted(_lib_filtered, key=lambda m: m["size_gb"], reverse=True)
+            else:
+                _lib_filtered = sorted(_lib_filtered, key=lambda m: m["size_gb"])
+
+            _status_lib = sm.get_server_status()
+            _active_model = sm.load_config().get("model", "")
+
+            for model in _lib_filtered:
                 is_active = model["id"] == _active_model
                 c_name, c_size, c_use, c_del = st.columns([4, 1, 1, 1])
                 with c_name:
                     badge = " &nbsp;<span style='background:#10b981;color:#fff;padding:2px 7px;border-radius:4px;font-size:.75rem'>● active</span>" if is_active else ""
                     hf_url = f"https://huggingface.co/{model['id']}"
+                    short_name = model["id"].split("/")[-1]
                     st.markdown(
-                        f"**{model['id']}**{badge} &nbsp;"
+                        f"**{short_name}**{badge} &nbsp;"
                         f"[<small>↗ Model Card</small>]({hf_url})",
                         unsafe_allow_html=True,
                     )
-                    st.caption(f"`{model['path']}`")
+                    st.caption(f"`{model['id']}`")
                 with c_size:
                     st.write(f"{model['size_gb']:.2f} GB")
                 with c_use:
@@ -1328,7 +1481,14 @@ def page_models() -> None:
 
     # ── Search ───────────────────────────────────────────────────────────────
     with tab_search:
-        st.subheader("Search mlx-community on HuggingFace")
+        st.subheader("Search models on HuggingFace")
+
+        search_scope = st.radio(
+            "Search scope",
+            ["mlx-community", "All of HuggingFace"],
+            horizontal=True,
+            key="_search_scope",
+        )
 
         q_col, btn_col = st.columns([4, 1])
         with q_col:
@@ -1352,7 +1512,10 @@ def page_models() -> None:
         if do_search:
             st.session_state.search_query = query_input
             with st.spinner("Searching HuggingFace…"):
-                results = mm.search_mlx_models(query_input, limit=60)
+                if search_scope == "All of HuggingFace":
+                    results = mm.search_hf_models(query_input, limit=60)
+                else:
+                    results = mm.search_mlx_models(query_input, limit=60)
             if results and results[0].get("error"):
                 st.error(f"Search failed: {results[0]['error']}")
                 st.session_state.search_results = []
@@ -1456,18 +1619,26 @@ def page_models() -> None:
                 _dl_ok, _dl_msg, _dl_id = st.session_state.pop("_dl_result")
                 short_name = _dl_id.split("/")[-1]
                 if _dl_ok:
-                    st.success(f"✅ **{short_name}** downloaded successfully  \n"
-                               f"`{_dl_id}`")
+                    st.success(f"✅ **{short_name}** added to download queue  \n`{_dl_id}`")
                 else:
-                    st.error(f"❌ Download failed for **{short_name}**: {_dl_msg}")
+                    st.error(f"❌ Queue failed for **{short_name}**: {_dl_msg}")
 
-            hdr = st.columns([4, 1, 1, 1, 1, 1, 1])
-            for col, label in zip(hdr, ["Model", "⬇️", "❤️", "Bits", "Fit", "Card", ""]):
-                col.markdown(f"**{label}**")
+            _is_hf_wide = search_scope == "All of HuggingFace"
+            if _is_hf_wide:
+                hdr = st.columns([4, 1, 1, 1, 1, 1, 1, 1])
+                for col, label in zip(hdr, ["Model", "⬇️", "❤️", "Bits", "Fit", "MLX?", "Card", ""]):
+                    col.markdown(f"**{label}**")
+            else:
+                hdr = st.columns([4, 1, 1, 1, 1, 1, 1])
+                for col, label in zip(hdr, ["Model", "⬇️", "❤️", "Bits", "Fit", "Card", ""]):
+                    col.markdown(f"**{label}**")
             st.divider()
 
             for r in filtered:
-                rc = st.columns([4, 1, 1, 1, 1, 1, 1])
+                if _is_hf_wide:
+                    rc = st.columns([4, 1, 1, 1, 1, 1, 1, 1])
+                else:
+                    rc = st.columns([4, 1, 1, 1, 1, 1, 1])
                 already = r["id"] in cached_ids
                 name_str = r["id"]
                 if already:
@@ -1488,24 +1659,26 @@ def page_models() -> None:
                 else:
                     rc[4].write("❓")
                 hf_url = f"https://huggingface.co/{r['id']}"
-                rc[5].markdown(f"[↗ Card]({hf_url})")
-                with rc[6]:
+                if _is_hf_wide:
+                    rc[5].write("✅" if r.get("is_mlx") else "—")
+                    rc[6].markdown(f"[↗ Card]({hf_url})")
+                    _btn_col = rc[7]
+                else:
+                    rc[5].markdown(f"[↗ Card]({hf_url})")
+                    _btn_col = rc[6]
+                with _btn_col:
                     if already:
                         st.button("✓ Got it", key=f"get_{r['id']}", disabled=True,
                                   width="stretch")
                     else:
                         if st.button("⬇️ Get", key=f"get_{r['id']}", width="stretch"):
-                            with st.spinner(
-                                f"Downloading **{r['id'].split('/')[-1]}**… "
-                                "this may take several minutes."
-                            ):
-                                ok, msg = mm.download_model(
-                                    r["id"],
-                                    hf_token=st.session_state.get("hf_token") or None,
-                                )
+                            _hf_tok = st.session_state.get("hf_token") or None
+                            if _is_remote():
+                                ok, msg = mm.download_model(r["id"], hf_token=_hf_tok)
+                            else:
+                                ok = mm.download_manager.enqueue(r["id"], _hf_tok)
+                                msg = "Added to download queue" if ok else "Already in queue"
                             st.session_state["_dl_result"] = (ok, msg, r["id"])
-                            if ok:
-                                st.balloons()
                             st.rerun()
 
     # ── Download by ID ───────────────────────────────────────────────────────
@@ -1582,13 +1755,22 @@ def page_models() -> None:
                         "Choose a smaller or more-quantized variant instead."
                     )
                 else:
-                    with st.spinner(f"Downloading **{direct_id}**… this may take several minutes."):
+                    if _is_remote():
                         ok, msg = mm.download_model(direct_id.strip(), hf_token=token)
-                    if ok:
-                        st.success(f"✅ {msg}")
-                        st.balloons()
+                        if ok:
+                            st.success(f"✅ Download started: {msg}")
+                        else:
+                            st.error(msg)
                     else:
-                        st.error(msg)
+                        _queued = mm.download_manager.enqueue(direct_id.strip(), token)
+                        if _queued:
+                            st.success(
+                                f"✅ **{direct_id.strip().split('/')[-1]}** added to download queue.  \n"
+                                "Watch the queue panel at the top of this page."
+                            )
+                            _fire_fireworks()
+                        else:
+                            st.info("⏳ Already in download queue.")
         elif dl_btn and not direct_id.strip():
             st.warning("Enter a model ID first.")
 

@@ -212,16 +212,50 @@ def download_model(req: DownloadRequest, _: None = Depends(_check_auth)) -> dict
     with _download_lock:
         if _download_status.get(model_id, {}).get("status") == "downloading":
             return {"ok": True, "message": "Already downloading", "status": "downloading"}
-        _download_status[model_id] = {"status": "downloading", "error": None}
+        _download_status[model_id] = {"status": "downloading", "error": None, "bytes_downloaded": 0, "total_bytes": 0}
 
     def _do_download() -> None:
         try:
-            mm.download_model(model_id, req.token or None)
+            total_bytes = 0
+            try:
+                size_gb = mm.get_hf_model_size_gb(model_id, req.token or None)
+                if size_gb:
+                    total_bytes = int(size_gb * 1024 ** 3)
+                    with _download_lock:
+                        _download_status[model_id]["total_bytes"] = total_bytes
+            except Exception:
+                pass
+
+            def _monitor() -> None:
+                import time as _t
+                while True:
+                    with _download_lock:
+                        if _download_status.get(model_id, {}).get("status") != "downloading":
+                            break
+                    partial = mm.get_partial_download_bytes(model_id)
+                    with _download_lock:
+                        if model_id in _download_status:
+                            _download_status[model_id]["bytes_downloaded"] = partial
+                    _t.sleep(2)
+
+            threading.Thread(target=_monitor, daemon=True).start()
+
+            mm.download_model_local(model_id, req.token or None)
             with _download_lock:
-                _download_status[model_id] = {"status": "done", "error": None}
+                _download_status[model_id] = {
+                    "status": "done",
+                    "error": None,
+                    "bytes_downloaded": mm.get_partial_download_bytes(model_id),
+                    "total_bytes": total_bytes,
+                }
         except Exception as exc:
             with _download_lock:
-                _download_status[model_id] = {"status": "error", "error": str(exc)}
+                _download_status[model_id] = {
+                    "status": "error",
+                    "error": str(exc),
+                    "bytes_downloaded": 0,
+                    "total_bytes": 0,
+                }
 
     # Run download in a background thread so the HTTP response returns immediately.
     # The client polls GET /models/download_status/{model_id} for progress.

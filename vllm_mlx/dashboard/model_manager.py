@@ -12,6 +12,7 @@ management API, so models are stored on the server, not on this machine.
 
 import os
 import re
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
@@ -212,6 +213,138 @@ def download_model(
             os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
 
 
+def download_model_local(model_id: str, hf_token: str | None = None) -> tuple[bool, str]:
+    """Download directly to local HF cache (no remote routing). Used by DownloadManager."""
+    if hf_token:
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+    try:
+        from huggingface_hub import snapshot_download
+        local_dir = snapshot_download(repo_id=model_id, local_files_only=False)
+        return True, f"Downloaded to {local_dir}"
+    except Exception as e:
+        return False, str(e)
+    finally:
+        if hf_token:
+            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+
+
+def get_partial_download_bytes(model_id: str) -> int:
+    """Return bytes currently present in HF cache for a model (partial or complete)."""
+    try:
+        cache_dir = Path(get_hf_cache_dir())
+        folder_name = "models--" + model_id.replace("/", "--")
+        model_dir = Path(cache_dir) / folder_name
+        if not model_dir.exists():
+            return 0
+        total = 0
+        for f in model_dir.rglob("*"):
+            if f.is_file() and not f.is_symlink():
+                try:
+                    total += f.stat().st_size
+                except OSError:
+                    pass
+        return total
+    except Exception:
+        return 0
+
+
+class DownloadManager:
+    """Thread-safe local download queue. Module-level singleton; persists across Streamlit reruns."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._queue: list[dict] = []
+        self._worker: threading.Thread | None = None
+
+    def enqueue(self, model_id: str, hf_token: str | None = None) -> bool:
+        """Add to queue. Returns False if already queued or downloading."""
+        with self._lock:
+            for item in self._queue:
+                if item["model_id"] == model_id and item["status"] in ("queued", "downloading"):
+                    return False
+            self._queue.append({
+                "model_id": model_id,
+                "hf_token": hf_token,
+                "status": "queued",
+                "pct": 0.0,
+                "bytes_dl": 0,
+                "total_bytes": 0,
+                "error": None,
+            })
+        self._ensure_worker()
+        return True
+
+    def get_queue(self) -> list[dict]:
+        with self._lock:
+            return [dict(i) for i in self._queue]
+
+    def clear_finished(self) -> None:
+        with self._lock:
+            self._queue = [i for i in self._queue if i["status"] not in ("done", "error")]
+
+    def has_active(self) -> bool:
+        with self._lock:
+            return any(i["status"] in ("queued", "downloading") for i in self._queue)
+
+    def _ensure_worker(self) -> None:
+        with self._lock:
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = threading.Thread(target=self._run, daemon=True)
+                self._worker.start()
+
+    def _run(self) -> None:
+        while True:
+            with self._lock:
+                item = next((i for i in self._queue if i["status"] == "queued"), None)
+                if item is None:
+                    break
+                item["status"] = "downloading"
+
+            model_id = item["model_id"]
+            hf_token = item["hf_token"]
+
+            # Get expected size for progress %
+            try:
+                size_gb = get_hf_model_size_gb(model_id, hf_token)
+                if size_gb:
+                    with self._lock:
+                        item["total_bytes"] = int(size_gb * 1024 ** 3)
+            except Exception:
+                pass
+
+            # Monitor bytes-in-cache while downloading
+            def _monitor(it: dict) -> None:
+                import time as _t
+                while True:
+                    with self._lock:
+                        if it["status"] != "downloading":
+                            break
+                    partial = get_partial_download_bytes(it["model_id"])
+                    with self._lock:
+                        it["bytes_dl"] = partial
+                        if it["total_bytes"] > 0 and partial > 0:
+                            it["pct"] = min(partial / it["total_bytes"], 0.98)
+                    _t.sleep(2)
+
+            import threading as _th
+            _th.Thread(target=_monitor, args=(item,), daemon=True).start()
+
+            try:
+                ok, msg = download_model_local(model_id, hf_token)
+                with self._lock:
+                    item["status"] = "done" if ok else "error"
+                    item["pct"] = 1.0 if ok else item["pct"]
+                    item["error"] = None if ok else msg
+                    item["bytes_dl"] = get_partial_download_bytes(model_id)
+            except Exception as exc:
+                with self._lock:
+                    item["status"] = "error"
+                    item["error"] = str(exc)
+
+
+download_manager = DownloadManager()
+
+
 def get_download_status(model_id: str) -> dict[str, Any]:
     """Poll remote download status (no-op in local mode).
 
@@ -390,7 +523,19 @@ def get_hf_cache_dir() -> str:
 # ── Memory fit helpers ─────────────────────────────────────────────────────────
 
 def get_total_ram_gb() -> float:
-    """Return total system RAM in GB (unified memory on Apple Silicon)."""
+    """Return total system RAM in GB.
+
+    In remote mode, returns the remote machine's unified memory so that
+    fit-check results reflect the machine that will actually run the model.
+    """
+    mgmt = _mgmt_base()
+    if mgmt:
+        try:
+            r = _requests.get(f"{mgmt}/memory/stats", headers=_mgmt_headers(), timeout=5)
+            if r.status_code == 200:
+                return float(r.json().get("total_gb", 0.0))
+        except Exception:
+            pass
     try:
         import psutil
         return psutil.virtual_memory().total / (1024 ** 3)
@@ -542,3 +687,35 @@ def check_model_fit(
         "source": source,
         "tip": tips[fit],
     }
+
+
+def search_hf_models(
+    query: str = "",
+    tags: list[str] | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Search all of HuggingFace Hub (not just mlx-community)."""
+    from huggingface_hub import HfApi
+    api = HfApi()
+    try:
+        kwargs: dict = dict(search=query if query.strip() else None, limit=limit, sort="downloads")
+        if tags:
+            kwargs["tags"] = tags
+        import inspect
+        sig = inspect.signature(api.list_models)
+        if "direction" in sig.parameters:
+            kwargs["direction"] = -1
+        models_iter = api.list_models(**kwargs)
+        results = []
+        for m in models_iter:
+            results.append({
+                "id": m.modelId,
+                "downloads": getattr(m, "downloads", 0) or 0,
+                "likes": getattr(m, "likes", 0) or 0,
+                "tags": list(getattr(m, "tags", []) or []),
+                "last_modified": str(getattr(m, "lastModified", "") or ""),
+                "is_mlx": "mlx" in [t.lower() for t in (getattr(m, "tags", []) or [])],
+            })
+        return results
+    except Exception as e:
+        return [{"error": str(e)}]
