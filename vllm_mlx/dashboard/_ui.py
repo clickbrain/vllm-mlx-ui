@@ -2445,8 +2445,9 @@ def page_settings() -> None:
     _cfg_net = sm.load_config()
     ui_host_cur = _cfg_net.get("ui_host", "127.0.0.1")
     ui_port_cur = int(_cfg_net.get("ui_port", 8501))
+    mgmt_port_cur = int(_cfg_net.get("mgmt_port", 8502))
 
-    ra1, ra2 = st.columns(2)
+    ra1, ra2, ra3 = st.columns(3)
     with ra1:
         ui_host_sel = st.selectbox(
             "Dashboard accessible from",
@@ -2465,51 +2466,80 @@ def page_settings() -> None:
             value=ui_port_cur,
             min_value=1024,
             max_value=65535,
-            help="Default is 8501. Change if another app is using that port.",
+            help="Port the Streamlit browser dashboard runs on. Default is 8501.",
+        )
+    with ra3:
+        mgmt_port_sel = st.number_input(
+            "Management API port",
+            value=mgmt_port_cur,
+            min_value=1024,
+            max_value=65535,
+            help=(
+                "Port the management API runs on. Default is **8502**. "
+                "This is the port remote clients enter in Settings → Remote Server. "
+                "Must be different from the Dashboard port."
+            ),
         )
 
-    _net_changed = (ui_host_val != ui_host_cur) or (int(ui_port_sel) != ui_port_cur)
-
-    if st.button("💾 Save & show connection info", type="primary"):
-        _cfg_net["ui_host"] = ui_host_val
-        _cfg_net["ui_port"] = int(ui_port_sel)
-        sm.save_config(_cfg_net)
-        if _net_changed:
-            st.session_state["_net_restart_pending"] = True
-        else:
-            st.session_state.pop("_net_restart_pending", None)
-            st.success("✅ Saved — no restart needed, settings are already applied.")
-
-    if st.session_state.get("_net_restart_pending"):
-        st.warning(
-            "⚠️ **Settings saved.** The dashboard must restart to bind to the new "
-            "address/port. **Do you want to restart now?**"
-        )
-        _rn1, _rn2, _ = st.columns([1, 1, 3])
-        with _rn1:
-            if st.button("🔄 Restart Now", type="primary", key="_net_restart_yes"):
-                st.session_state.pop("_net_restart_pending", None)
-                from vllm_mlx.dashboard import update_checker as _uc_net
-                st.info("Restarting dashboard… your browser will reconnect shortly.")
-                _uc_net.relaunch()
-        with _rn2:
-            if st.button("Later", key="_net_restart_no"):
-                st.session_state.pop("_net_restart_pending", None)
-                st.info("Settings saved. Restart vllm-mlx-ui manually when ready.")
-                st.rerun()
-
-    if ui_host_val == "0.0.0.0":
-        st.markdown("🌐 **The dashboard will be reachable at these addresses:**")
-        _dash_addrs = _get_all_local_addresses()
-        rows = [f"| `{a['label']}` | `http://{a['ip']}:{int(ui_port_sel)}` |" for a in _dash_addrs]
-        st.markdown(
-            "| Interface | Dashboard URL |\n"
-            "|-----------|---------------|\n"
-            + "\n".join(rows)
-        )
-        st.caption("Share any of these with devices on the same network. The Wi-Fi/Ethernet address is usually best.")
+    if int(ui_port_sel) == int(mgmt_port_sel):
+        st.error("❌ Dashboard port and Management API port must be different.")
     else:
-        st.info(f"🔒 Dashboard is only accessible at **http://127.0.0.1:{int(ui_port_sel)}** (this Mac).")
+        _net_changed = (
+            ui_host_val != ui_host_cur
+            or int(ui_port_sel) != ui_port_cur
+            or int(mgmt_port_sel) != mgmt_port_cur
+        )
+
+        if st.button("💾 Save & show connection info", type="primary"):
+            _cfg_net["ui_host"] = ui_host_val
+            _cfg_net["ui_port"] = int(ui_port_sel)
+            _cfg_net["mgmt_port"] = int(mgmt_port_sel)
+            sm.save_config(_cfg_net)
+            if _net_changed:
+                st.session_state["_net_restart_pending"] = True
+            else:
+                st.session_state.pop("_net_restart_pending", None)
+                st.success("✅ Saved — no restart needed, settings are already applied.")
+
+        if st.session_state.get("_net_restart_pending"):
+            st.warning(
+                "⚠️ **Settings saved.** The dashboard must restart to bind to the new "
+                "address/port. **Do you want to restart now?**"
+            )
+            _rn1, _rn2, _ = st.columns([1, 1, 3])
+            with _rn1:
+                if st.button("🔄 Restart Now", type="primary", key="_net_restart_yes"):
+                    st.session_state.pop("_net_restart_pending", None)
+                    from vllm_mlx.dashboard import update_checker as _uc_net
+                    st.info("Restarting dashboard… your browser will reconnect shortly.")
+                    _uc_net.relaunch()
+            with _rn2:
+                if st.button("Later", key="_net_restart_no"):
+                    st.session_state.pop("_net_restart_pending", None)
+                    st.info("Settings saved. Restart vllm-mlx-ui manually when ready.")
+                    st.rerun()
+
+        if ui_host_val == "0.0.0.0":
+            st.markdown("🌐 **This Mac will be reachable at these addresses:**")
+            _dash_addrs = _get_all_local_addresses()
+            rows = [
+                f"| `{a['label']}` | `http://{a['ip']}:{int(ui_port_sel)}` | `http://{a['ip']}:{int(mgmt_port_sel)}` |"
+                for a in _dash_addrs
+            ]
+            st.markdown(
+                "| Interface | Dashboard (browser) | Management API (remote clients) |\n"
+                "|-----------|--------------------|---------------------------------|\n"
+                + "\n".join(rows)
+            )
+            st.caption(
+                f"Remote clients should enter the **Management API** URL (port **{int(mgmt_port_sel)}**) "
+                "in Settings → Remote Server. Use the Wi-Fi/Ethernet or Thunderbolt Bridge address."
+            )
+        else:
+            st.info(
+                f"🔒 Dashboard: **http://127.0.0.1:{int(ui_port_sel)}** (this Mac only)  \n"
+                f"🔒 Management API: **http://127.0.0.1:{int(mgmt_port_sel)}** (this Mac only)"
+            )
 
     st.divider()
     st.subheader("🔗 Remote Server")
