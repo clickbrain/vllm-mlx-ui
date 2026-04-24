@@ -129,114 +129,6 @@ def _kill_stale_ui(ui_pid_file: Path) -> bool:
         return False
 
 
-def _kill_process_on_port(port: int) -> bool:
-    """Find and terminate whatever process is listening on *port*."""
-    import subprocess as _sp
-    import time as _t
-
-    pids: list[int] = []
-    own = os.getpid()
-
-    for fmt in [f"tcp:{port}", f":{port}"]:
-        try:
-            out = _sp.check_output(
-                ["lsof", "-t", "-i", fmt, "-n", "-P"],
-                text=True, stderr=_sp.DEVNULL,
-            ).strip()
-            for tok in out.split():
-                try:
-                    pid = int(tok)
-                    if pid != own and pid not in pids:
-                        pids.append(pid)
-                except ValueError:
-                    pass
-            if pids:
-                break
-        except Exception:
-            pass
-
-    if not pids:
-        try:
-            import psutil
-            _listen = {"LISTEN", getattr(psutil, "CONN_LISTEN", "LISTEN")}
-            for conn in psutil.net_connections(kind="tcp"):
-                try:
-                    if (conn.laddr.port == port
-                            and conn.status in _listen
-                            and conn.pid
-                            and conn.pid != own):
-                        pids.append(conn.pid)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    if not pids:
-        return False
-
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
-
-    _t.sleep(2.0)
-
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-
-    _t.sleep(1.0)
-    return True
-
-
-def _find_free_port(preferred: int, exclude: set[int] | None = None, max_attempts: int = 20) -> int:
-    """Return preferred port if free (and not in exclude), otherwise the next free port above it."""
-    import socket as _socket
-    exclude = exclude or set()
-    for port in range(preferred, preferred + max_attempts):
-        if port in exclude:
-            continue
-        with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
-            try:
-                s.bind(("", port))
-                return port
-            except OSError:
-                continue
-    return preferred  # fallback — let the OS error surface normally
-
-
-def _request_firewall_exception(binary_path: str) -> None:
-    """
-    Ask macOS firewall to allow incoming connections for the vllm-mlx-ui binary.
-    Uses socketfilterfw directly (no admin prompt if already allowed).
-    Silently no-ops on failure — the user can always allow it manually.
-    """
-    import subprocess as _sp
-    try:
-        # First check if already allowed
-        result = _sp.run(
-            ["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getappinfo", binary_path],
-            capture_output=True, text=True, timeout=3
-        )
-        if "ALLOW" in result.stdout.upper():
-            return  # Already allowed — nothing to do
-    except Exception:
-        pass
-
-    try:
-        # socketfilterfw --add requires root on newer macOS; use osascript to prompt
-        _sp.run([
-            "osascript", "-e",
-            f'do shell script "/usr/libexec/ApplicationFirewall/socketfilterfw --add {binary_path!r} '
-            f'&& /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp {binary_path!r}" '
-            f'with administrator privileges'
-        ], timeout=60, capture_output=True)
-    except Exception:
-        pass  # User declined or osascript not available — silently ignore
-
 
 def main() -> None:
     # Handle --stop flag before anything else
@@ -286,7 +178,7 @@ def main() -> None:
                 os.kill(_pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
-        _time.sleep(2.0)  # wait for OS to fully release sockets
+        _time.sleep(0.5)  # brief wait for OS to release sockets after SIGKILL
 
     if UI_PID_FILE.exists():
         UI_PID_FILE.unlink(missing_ok=True)
@@ -311,26 +203,11 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
-    # Request a macOS firewall exception for this binary on first run.
-    # Because the launcher scripts now use stable relative-path content that
-    # is byte-identical across every brew upgrade, the ALF hash never changes
-    # and the rule persists forever — no need to re-run after upgrades.
-    _bin_candidates = _find_binary()
-    _binary_path = _bin_candidates[0] if _bin_candidates[0] != sys.executable else None
-    if _binary_path and ui_host == "0.0.0.0":
-        try:
-            from vllm_mlx.dashboard.server_manager import _load_local_config, CONFIG_FILE
-            import json as _json
-            _fw_cfg = _load_local_config()
-            if not _fw_cfg.get("_firewall_requested"):
-                print("[vllm-mlx] 🔒 Requesting macOS firewall exception (one-time setup)…")
-                _request_firewall_exception(_binary_path)
-                _fw_cfg["_firewall_requested"] = True
-                CONFIG_FILE.write_text(_json.dumps(_fw_cfg, indent=2))
-        except Exception:
-            pass
-
     # Start the management API server in a daemon thread.
+    # NOTE: The management API always binds to 0.0.0.0 (all interfaces) regardless
+    # of the ui_host setting. This is intentional — remote clients need to reach it
+    # over the network. Access control is provided by the X-Api-Key header.
+    # Users who set ui_host=127.0.0.1 restrict the Streamlit UI only, not the mgmt API.
     def _start_mgmt() -> None:
         try:
             from vllm_mlx.dashboard.mgmt_server import start_mgmt_server
@@ -380,7 +257,6 @@ def main() -> None:
             "--theme.secondaryBackgroundColor=#1C1C1E",
             "--theme.textColor=#F5F5F7",
         ]
-        + sys.argv[1:],
     )
 
     try:

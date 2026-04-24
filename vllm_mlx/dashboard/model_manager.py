@@ -50,18 +50,24 @@ _BITS_PER_QUANT: dict[str, float] = {
 def _mgmt_base() -> str | None:
     """Return the management API base URL if remote mode is active.
 
+    Returns None when not in an active Streamlit browser session (prevents
+    the mgmt API server itself from recursively calling itself).
     Returns None when the UI session has the connection toggle set to "local".
     """
+    from . import server_manager as sm
+    if not sm._in_streamlit():
+        return None
     try:
         import streamlit as _st
         if _st.session_state.get("connection_mode", "local") == "local":
             return None
     except Exception:
-        pass
-    from . import server_manager as sm
+        return None
     cfg = sm._load_local_config()
     url = cfg.get("remote_mgmt_url", "").strip()
-    return url.rstrip("/") if url else None
+    if not url:
+        return None
+    return sm._force_ipv4_url(url.rstrip("/"))
 
 
 def _mgmt_headers() -> dict[str, str]:

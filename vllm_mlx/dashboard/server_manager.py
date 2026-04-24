@@ -240,7 +240,9 @@ def load_config() -> dict[str, Any]:
             try:
                 import streamlit as _st
                 cached = _st.session_state.get("_cfg_cache")
-                if cached and time.monotonic() - cached.get("_cfg_ts", 0) < 10:
+                if (cached
+                        and "_cfg_ts" in _st.session_state
+                        and time.monotonic() - _st.session_state["_cfg_ts"] < 10):
                     return cached
             except Exception:
                 pass
@@ -250,16 +252,15 @@ def load_config() -> dict[str, Any]:
                 remote_cfg = r.json()
                 # Preserve local UI/connectivity settings so we don't overwrite
                 # the address we need to reach the remote machine.
-                for keep in ("remote_server_url", "remote_mgmt_url", "mgmt_api_key",
-                             "ui_host", "ui_port", "mgmt_port"):
+                for keep in _LOCAL_ONLY_KEYS:
                     if keep in local:
                         remote_cfg[keep] = local[keep]
                 result = {**DEFAULT_CONFIG, **remote_cfg}
                 if _in_streamlit():
                     try:
                         import streamlit as _st
-                        result["_cfg_ts"] = time.monotonic()
                         _st.session_state["_cfg_cache"] = result
+                        _st.session_state["_cfg_ts"] = time.monotonic()
                     except Exception:
                         pass
                 return result
@@ -271,7 +272,7 @@ def load_config() -> dict[str, Any]:
 _LOCAL_ONLY_KEYS = frozenset({
     "remote_server_url", "remote_mgmt_url", "mgmt_api_key",
     "ui_host", "ui_port", "mgmt_port",
-    "_firewall_requested", "_firewall_configured",
+    "_firewall_configured",
     "auto_model_switch",
     "connection_mode",        # last-used connection target (local/remote)
     "startup_model_behavior", # startup UX preference
@@ -908,7 +909,7 @@ def force_release_memory() -> dict:
                 mem_gb = (proc.info.get("memory_info") or type("", (), {"rss": 0})()).rss / (1024 ** 3)
 
                 is_vllm = any(m in cmdline for m in _VLLM_MARKERS)
-                is_large_python = "python" in name and mem_gb >= 1.0
+                is_large_python = "python" in name and mem_gb >= 1.0 and is_vllm
 
                 if is_vllm or is_large_python:
                     _os.kill(pid, signal.SIGTERM)

@@ -226,7 +226,7 @@ def list_benchmarks(_: None = Depends(_check_auth)) -> list:
 
 @app.delete("/benchmarks/{result_id}")
 def delete_benchmark(result_id: str, _: None = Depends(_check_auth)) -> dict:
-    br.delete_result(result_id)
+    br.delete_result(int(result_id))
     return {"ok": True}
 
 

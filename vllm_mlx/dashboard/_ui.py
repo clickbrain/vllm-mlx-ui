@@ -30,6 +30,7 @@ import streamlit as st
 # Suppress Streamlit's "missing ScriptRunContext" warnings that are emitted by
 # fragment auto-refresh threads (AnyIO worker threads). Streamlit itself marks
 # these as ignorable but they flood the terminal on every 5-second refresh.
+import importlib.metadata
 import logging as _logging
 _logging.getLogger(
     "streamlit.runtime.scriptrunner_utils.script_run_context"
@@ -2194,7 +2195,7 @@ def page_chat() -> None:
         api_messages: list[dict] = []
         if system_prompt.strip():
             api_messages.append({"role": "system", "content": system_prompt.strip()})
-        for m in st.session_state.chats[cid]["messages"][-24:]:
+        for m in st.session_state.chats[cid]["messages"][-128:]:
             api_messages.append({"role": m["role"], "content": m["content"]})
 
         payload = {
@@ -2764,11 +2765,6 @@ def page_settings() -> None:
     _fw_done = _cfg_fw.get("_firewall_configured", False)
 
     if _fw_done:
-        st.success(
-            "✅ Firewall exception was previously configured for this app.  \n"
-            "If remote connections still fail, click **Re-apply** below."
-        )
-    elif _fw_done:
         st.success(
             "✅ Firewall exception was previously configured for this app.  \n"
             "If remote connections still fail, click **Re-apply** below."

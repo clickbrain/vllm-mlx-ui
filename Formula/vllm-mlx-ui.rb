@@ -46,11 +46,9 @@ class VllmMlxUi < Formula
     # Install the package with the [ui] extra (streamlit, plotly, pandas, httpx).
     system venv/"bin/pip", "install", ".[ui]"
 
-    # Explicitly upgrade key dependencies to their latest compatible versions.
-    # pip install . above satisfies minimum version constraints but won't
-    # necessarily pick the newest release.  Upgrading explicitly ensures the
-    # inference library and model-download tooling are always current.
-    system venv/"bin/pip", "install", "--upgrade", "mlx-lm", "huggingface-hub"
+    # Upgrade key dependencies within the ranges declared in pyproject.toml.
+    # Using version bounds prevents silent breakage from incompatible upstream releases.
+    system venv/"bin/pip", "install", "--upgrade", "mlx-lm>=0.31.0", "huggingface-hub>=0.23.0"
 
     # Install stable launcher scripts into Homebrew's bin.
     #
