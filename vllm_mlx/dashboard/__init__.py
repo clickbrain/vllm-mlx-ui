@@ -6,4 +6,4 @@
 # engine (waybarrios/vllm-mlx) share the package name "vllm-mlx", so metadata
 # lookup returns whichever was installed last and is unreliable.
 # When bumping a release: update pyproject.toml version AND this string together.
-__version__ = "0.3.26"
+__version__ = "0.3.27"
