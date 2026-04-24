@@ -197,8 +197,8 @@ def download_status(model_id: str, _: None = Depends(_check_auth)) -> dict:
 @app.delete("/models/{model_id:path}")
 def delete_model(model_id: str, _: None = Depends(_check_auth)) -> dict:
     try:
-        mm.delete_model(model_id)
-        return {"ok": True}
+        ok, msg = mm.delete_model(model_id)
+        return {"ok": ok, "message": msg}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
