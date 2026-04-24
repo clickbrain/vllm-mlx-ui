@@ -26,6 +26,10 @@ class VllmMlxUi < Formula
   depends_on arch: :arm64
   depends_on "python@3.11"
 
+  # Don't let Homebrew rewrite dylib IDs inside the Python venv — the paths
+  # are too long for the Mach-O header and the relinking isn't needed anyway.
+  skip_clean "libexec"
+
   # ── Install ───────────────────────────────────────────────
   def install
     python = Formula["python@3.11"].opt_bin/"python3.11"
