@@ -651,7 +651,7 @@ def _release_system_heap() -> list[str]:
     # the unified memory pool.
     try:
         import mlx.core as _mx
-        _mx.metal.clear_cache()
+        _mx.clear_cache()
         notes.append("MLX Metal buffer cache cleared")
     except Exception:
         notes.append("MLX not loaded — Metal cache skip")

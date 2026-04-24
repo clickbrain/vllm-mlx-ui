@@ -140,7 +140,7 @@ def _clear_memory(callback: "Callable[[str], None] | None" = None) -> None:
     _gc.collect()
     try:
         import mlx.core as _mx
-        _mx.metal.clear_cache()
+        _mx.clear_cache()
     except Exception:
         pass
     if callback:
@@ -152,7 +152,7 @@ def _clear_memory(callback: "Callable[[str], None] | None" = None) -> None:
 # the model is loaded, then hands off to the real benchmark module.
 _BENCH_PREAMBLE = (
     "import gc; gc.collect();"
-    "\ntry:\n import mlx.core as _mx; _mx.metal.clear_cache()\nexcept Exception: pass"
+    "\ntry:\n import mlx.core as _mx; _mx.clear_cache()\nexcept Exception: pass"
     "\nimport runpy, sys; runpy.run_module('vllm_mlx.benchmark', run_name='__main__', alter_sys=True)"
 )
 
