@@ -294,6 +294,7 @@ def save_config(config: dict[str, Any]) -> None:
         try:
             import streamlit as _st
             _st.session_state.pop("_cfg_cache", None)
+            _st.session_state.pop("_cfg_ts", None)
         except Exception:
             pass
     mgmt = _mgmt_base(config)
@@ -909,15 +910,14 @@ def force_release_memory() -> dict:
                 mem_gb = (proc.info.get("memory_info") or type("", (), {"rss": 0})()).rss / (1024 ** 3)
 
                 is_vllm = any(m in cmdline for m in _VLLM_MARKERS)
-                is_large_python = "python" in name and mem_gb >= 1.0 and is_vllm
 
-                if is_vllm or is_large_python:
+                if is_vllm:
                     _os.kill(pid, signal.SIGTERM)
                     procs_killed.append({
                         "pid": pid,
                         "mem_gb": round(mem_gb, 1),
                         "cmd": cmdline[:120],
-                        "reason": "vllm" if is_vllm else "large python",
+                        "reason": "vllm",
                     })
             except (psutil.NoSuchProcess, psutil.AccessDenied, ProcessLookupError):
                 pass

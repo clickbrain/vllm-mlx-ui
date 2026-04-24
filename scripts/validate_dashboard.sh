@@ -121,7 +121,7 @@ from vllm_mlx.dashboard import server_manager as sm, model_manager as mm, benchm
 sm_needed = ['start_server','stop_server','kill_stale_server','get_server_status','check_health',
              'load_config','save_config','get_logs','get_metrics','get_cache_stats','clear_cache',
              'get_server_url','PID_FILE','STATE_DIR','CONFIG_FILE','REASONING_PARSERS','TOOL_CALL_PARSERS',
-             '_ensure_state_dir','_load_local_config']
+             '_load_local_config']
 mm_needed = ['delete_model','download_model','get_cache_total_size','get_cached_models',
              'get_hf_cache_dir','get_model_presets','search_mlx_models']
 br_needed = ['clear_all_results','delete_result','load_results','RESULTS_FILE','run_benchmark']

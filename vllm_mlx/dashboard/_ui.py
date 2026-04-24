@@ -16,7 +16,10 @@ from __future__ import annotations
 import base64
 import json
 import os
+import platform
+import re
 import signal
+import subprocess
 import time
 from datetime import datetime
 from typing import Any
@@ -1351,8 +1354,6 @@ def page_models() -> None:
 
         results: list[dict] = st.session_state.search_results
         if results:
-            import re as _re
-
             def _bits(model_id: str, tags: list) -> int | None:
                 name = model_id.lower()
                 tag_str = " ".join(t.lower() for t in tags)
@@ -1368,10 +1369,10 @@ def page_models() -> None:
                 return None
 
             def _params_b(model_id: str) -> float:
-                m = _re.search(r"[\-_]?(\d+(?:\.\d+)?)b[\-_]", model_id.lower())
+                m = re.search(r"[\-_]?(\d+(?:\.\d+)?)b[\-_]", model_id.lower())
                 if m:
                     return float(m.group(1))
-                m2 = _re.search(r"(\d+(?:\.\d+)?)b$", model_id.lower().split("/")[-1])
+                m2 = re.search(r"(\d+(?:\.\d+)?)b$", model_id.lower().split("/")[-1])
                 if m2:
                     return float(m2.group(1))
                 return 0.0
@@ -2339,10 +2340,10 @@ def page_settings() -> None:
                 _out_area = st.empty()
                 _buf: list[str] = []
                 with st.spinner("Upgrading — this takes 1–3 minutes…"):
-                    proc = uc.subprocess.Popen(
+                    proc = subprocess.Popen(
                         _cmd,
-                        stdout=uc.subprocess.PIPE,
-                        stderr=uc.subprocess.STDOUT,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
                         text=True,
                     )
                     assert proc.stdout
@@ -2395,8 +2396,10 @@ def page_settings() -> None:
     )
     if st.button("Save token"):
         st.session_state["hf_token"] = hf_token
-        import os
-        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+        if hf_token:
+            os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+        else:
+            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
         st.success("Token saved for this session.")
 
     st.divider()
@@ -2579,9 +2582,8 @@ def page_settings() -> None:
     else:
         st.warning("No remote server configured yet. Fill in the fields below and save to enable the toggle.")
     # ── Parse existing saved URLs back to host + ports for pre-filling ──────────
-    import re as _re_rs
     def _parse_host_port(url: str, default_port: int) -> tuple[str, int]:
-        m = _re_rs.match(r"https?://([^:/]+)(?::(\d+))?", url.strip())
+        m = re.match(r"https?://([^:/]+)(?::(\d+))?", url.strip())
         if m:
             return m.group(1), int(m.group(2) or default_port)
         return "", default_port
@@ -2656,7 +2658,6 @@ def page_settings() -> None:
             st.error("❌ Please enter a server address.")
         else:
             from vllm_mlx.dashboard.server_manager import _force_ipv4_url, _http as _sm_http, CONFIG_FILE, _ensure_state_dir
-            import json as _json_rs
 
             _infer_url_save = f"http://{_host_rs}:{int(infer_port)}"
             _mgmt_url_save  = f"http://{_host_rs}:{int(mgmt_port_input)}"
@@ -2673,10 +2674,10 @@ def page_settings() -> None:
             _cfg_rs["remote_mgmt_url"]   = _mgmt_url_save
             _cfg_rs["mgmt_api_key"]      = mgmt_api_key.strip()
             _ensure_state_dir()
-            CONFIG_FILE.write_text(_json_rs.dumps(_cfg_rs, indent=2))
-            # Invalidate the config cache so the next load_config() picks up the new URLs.
+            CONFIG_FILE.write_text(json.dumps(_cfg_rs, indent=2))
             try:
                 st.session_state.pop("_cfg_cache", None)
+                st.session_state.pop("_cfg_ts", None)
             except Exception:
                 pass
             st.success("✅ Saved.")
@@ -2780,10 +2781,9 @@ def page_settings() -> None:
     with _fw_c1:
         _fw_label = "✅ Re-apply Firewall Rule" if _fw_done else "🔒 Fix Firewall (one-time)"
         if st.button(_fw_label, type="primary" if not _fw_done else "secondary", key="_fw_btn"):
-            import subprocess as _sp_fw, json as _json_fw
             from vllm_mlx.dashboard.server_manager import CONFIG_FILE, _ensure_state_dir
             try:
-                _res = _sp_fw.run([
+                _res = subprocess.run([
                     "osascript", "-e",
                     f'do shell script "/usr/libexec/ApplicationFirewall/socketfilterfw --add {_bin_path_fw!r} '
                     f'&& /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp {_bin_path_fw!r}" '
@@ -2792,10 +2792,11 @@ def page_settings() -> None:
                 if _res.returncode == 0:
                     _cfg_fw["_firewall_configured"] = True
                     _ensure_state_dir()
-                    CONFIG_FILE.write_text(_json_fw.dumps(_cfg_fw, indent=2))
+                    CONFIG_FILE.write_text(json.dumps(_cfg_fw, indent=2))
                     # Invalidate cache so the next load_config() sees the updated flag.
                     try:
                         st.session_state.pop("_cfg_cache", None)
+                        st.session_state.pop("_cfg_ts", None)
                     except Exception:
                         pass
                     st.success("✅ Firewall rule applied! Remote clients can now connect.")
@@ -2830,10 +2831,11 @@ def page_settings() -> None:
     _ui_host  = _cfg_sec.get("ui_host", "127.0.0.1")
     _inf_host = _cfg_sec.get("host", "127.0.0.1")
 
-    # Warn when the server is exposed but has no API key
-    if not _mgmt_key and _ui_host == "0.0.0.0":
+    # The management API always binds to 0.0.0.0 regardless of ui_host, so
+    # warn whenever there is no key — not only when ui_host is 0.0.0.0.
+    if not _mgmt_key:
         st.warning(
-            "⚠️ **The management API has no key set** and the dashboard is accessible "
+            "⚠️ **The management API has no key set** and is accessible "
             "to anyone on your network.  Anyone on your Wi-Fi could start/stop the server "
             "or manage models.  Set a **Management API key** in the Remote Server section "
             "below to protect it."
@@ -2844,10 +2846,12 @@ def page_settings() -> None:
             "Anyone on your network can send chat requests.  Add an **API key** on the "
             "Server page to require authentication."
         )
-    if _mgmt_key and _inf_key and (_ui_host == "0.0.0.0" or _inf_host == "0.0.0.0"):
+    if _mgmt_key and _inf_key and _inf_host == "0.0.0.0":
         st.success("✅ Both the inference server and management API are protected by API keys.")
-    elif _ui_host == "127.0.0.1" and _inf_host == "127.0.0.1":
-        st.info("🔒 Both servers are bound to localhost — only accessible from this Mac.")
+    elif _mgmt_key and _inf_host == "127.0.0.1":
+        st.success("✅ Management API is protected. Inference server is localhost-only.")
+    elif _mgmt_key:
+        st.info("ℹ️ Management API is protected by an API key.")
 
     st.divider()
     st.subheader("🔄 Auto Model Switch (Proxy)")
@@ -2895,7 +2899,6 @@ def page_settings() -> None:
 
     st.divider()
     st.subheader("ℹ️ About")
-    import platform
     from vllm_mlx.dashboard import __version__ as _ui_ver
     try:
         ver = importlib.metadata.version("vllm-mlx")
@@ -2967,11 +2970,11 @@ with st.sidebar:
             st.session_state.connection_mode = _new_mode
             # Persist so the choice survives browser refreshes and app restarts.
             try:
-                import json as _json_mode
                 _mode_cfg = sm._load_local_config()
                 _mode_cfg["connection_mode"] = _new_mode
-                sm.CONFIG_FILE.write_text(_json_mode.dumps(_mode_cfg, indent=2))
+                sm.CONFIG_FILE.write_text(json.dumps(_mode_cfg, indent=2))
                 st.session_state.pop("_cfg_cache", None)
+                st.session_state.pop("_cfg_ts", None)
             except Exception:
                 pass
             st.rerun()

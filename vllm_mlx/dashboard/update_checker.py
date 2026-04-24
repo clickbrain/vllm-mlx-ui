@@ -236,38 +236,6 @@ def upgrade_command() -> list[str]:
     ]
 
 
-def _find_binary() -> list[str]:
-    """
-    Return the command to relaunch vllm-mlx-ui as a list of strings.
-    Tries multiple strategies so the binary is found even when the
-    Streamlit subprocess has a stripped-down PATH.
-    """
-    import sys
-
-    # 1. Current process PATH (works in most environments)
-    found = shutil.which("vllm-mlx-ui")
-    if found:
-        return [found]
-
-    # 2. Common Homebrew locations (macOS Apple Silicon and Intel)
-    for candidate in [
-        "/opt/homebrew/bin/vllm-mlx-ui",
-        "/usr/local/bin/vllm-mlx-ui",
-    ]:
-        if shutil.os.path.isfile(candidate) and shutil.os.access(candidate, shutil.os.X_OK):
-            return [candidate]
-
-    # 3. Same bin directory as the current Python interpreter
-    from pathlib import Path
-    sibling = Path(sys.executable).parent / "vllm-mlx-ui"
-    if sibling.exists():
-        return [str(sibling)]
-
-    # 4. Last resort: re-run as a Python module (always works but skips
-    #    Homebrew's PATH manipulation)
-    return [sys.executable, "-m", "vllm_mlx.dashboard.app"]
-
-
 def relaunch() -> None:
     """
     Signal app.py to start a fresh vllm-mlx-ui process, then exit.
