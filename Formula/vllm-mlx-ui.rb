@@ -52,13 +52,28 @@ class VllmMlxUi < Formula
     # inference library and model-download tooling are always current.
     system venv/"bin/pip", "install", "--upgrade", "mlx-lm", "huggingface-hub"
 
-    # Symlink all entry-point scripts into Homebrew's bin so they are on PATH
+    # Install stable launcher scripts into Homebrew's bin.
+    #
+    # We deliberately DO NOT use write_env_script / write_exec_script here.
+    # Those helpers hardcode the versioned Cellar path inside the script body
+    # (e.g. /opt/homebrew/Cellar/vllm-mlx-ui/0.3.15/libexec/...).  Every brew
+    # upgrade writes a new Cellar path, changing the file's content and hash.
+    # macOS Application Firewall keyed its allow-rule on that hash, so the rule
+    # silently broke after every upgrade — forcing the user to re-authorise.
+    #
+    # Instead we write a tiny script whose body is IDENTICAL across every
+    # version: it resolves its own real path at runtime and exec's the matching
+    # venv binary from a stable relative offset (../libexec/venv/bin/<cmd>).
+    # The ALF hash never changes → the firewall rule persists forever.
     %w[vllm-mlx vllm-mlx-ui vllm-mlx-chat vllm-mlx-bench].each do |cmd|
-      script = venv/"bin"/cmd
-      (bin/cmd).write_env_script script, {}
-    rescue StandardError
-      # Not all entry points exist in all versions — skip missing ones silently
-      next
+      next unless (venv/"bin"/cmd).exist?
+
+      (bin/cmd).write <<~SH
+        #!/bin/bash
+        _s="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
+        exec "$(dirname "$_s")/../libexec/venv/bin/#{cmd}" "$@"
+      SH
+      (bin/cmd).chmod 0755
     end
   end
 

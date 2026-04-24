@@ -311,24 +311,21 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
-    # Request firewall exception for this binary.
-    # Re-runs on every brew upgrade because the real binary path changes (new
-    # Cellar version), invalidating the previous firewall rule.  We store the
-    # version that last ran the exception so we can detect upgrades.
+    # Request a macOS firewall exception for this binary on first run.
+    # Because the launcher scripts now use stable relative-path content that
+    # is byte-identical across every brew upgrade, the ALF hash never changes
+    # and the rule persists forever — no need to re-run after upgrades.
     _bin_candidates = _find_binary()
     _binary_path = _bin_candidates[0] if _bin_candidates[0] != sys.executable else None
     if _binary_path and ui_host == "0.0.0.0":
         try:
             from vllm_mlx.dashboard.server_manager import _load_local_config, CONFIG_FILE
-            from vllm_mlx import __version__ as _current_ver
             import json as _json
             _fw_cfg = _load_local_config()
-            _fw_ver = _fw_cfg.get("_firewall_version", "")
-            if not _fw_cfg.get("_firewall_requested") or _fw_ver != _current_ver:
-                print("[vllm-mlx] 🔒 Requesting macOS firewall exception…")
+            if not _fw_cfg.get("_firewall_requested"):
+                print("[vllm-mlx] 🔒 Requesting macOS firewall exception (one-time setup)…")
                 _request_firewall_exception(_binary_path)
                 _fw_cfg["_firewall_requested"] = True
-                _fw_cfg["_firewall_version"] = _current_ver
                 CONFIG_FILE.write_text(_json.dumps(_fw_cfg, indent=2))
         except Exception:
             pass
