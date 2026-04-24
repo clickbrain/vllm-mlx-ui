@@ -30,14 +30,22 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-# Suppress Streamlit's "missing ScriptRunContext" warnings that are emitted by
-# fragment auto-refresh threads (AnyIO worker threads). Streamlit itself marks
-# these as ignorable but they flood the terminal on every 5-second refresh.
+# Suppress Streamlit's "missing ScriptRunContext" warnings.
+# Root cause: fragment auto-refresh threads (AnyIO worker threads) call
+# load_config() which previously called get_script_run_ctx() unconditionally.
+# That was fixed in server_manager._in_streamlit() to short-circuit on AnyIO
+# threads. This Filter is belt-and-suspenders: unlike setLevel(), a Filter
+# cannot be overridden by Streamlit's own logging initialization.
 import importlib.metadata
 import logging as _logging
+
+class _NoScriptRunCtxWarning(_logging.Filter):
+    def filter(self, record: _logging.LogRecord) -> bool:
+        return "missing ScriptRunContext" not in record.getMessage()
+
 _logging.getLogger(
     "streamlit.runtime.scriptrunner_utils.script_run_context"
-).setLevel(_logging.ERROR)
+).addFilter(_NoScriptRunCtxWarning())
 
 from vllm_mlx.dashboard import benchmark_runner as br
 from vllm_mlx.dashboard import model_manager as mm

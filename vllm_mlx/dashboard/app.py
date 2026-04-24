@@ -9,11 +9,18 @@ import sys
 import threading
 from pathlib import Path
 
-# Suppress the noisy "missing ScriptRunContext" warnings that fire on AnyIO
-# worker threads (FastAPI/uvicorn runs in the same process as Streamlit).
-logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(
-    logging.ERROR
-)
+# Suppress any residual "missing ScriptRunContext" warnings.
+# Root cause fix is in server_manager._in_streamlit() which short-circuits
+# before touching Streamlit internals when called from AnyIO worker threads.
+# This Filter is belt-and-suspenders: unlike setLevel(), a Filter is never
+# overridden by Streamlit's own logging initialization at import time.
+class _NoScriptRunCtxWarning(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "missing ScriptRunContext" not in record.getMessage()
+
+logging.getLogger(
+    "streamlit.runtime.scriptrunner_utils.script_run_context"
+).addFilter(_NoScriptRunCtxWarning())
 
 
 def _find_binary() -> list[str]:

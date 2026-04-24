@@ -149,13 +149,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
 def _in_streamlit() -> bool:
     """Return True only when called from an active Streamlit script context.
 
-    Uses Streamlit's internal get_script_run_ctx() to check for an active
-    context WITHOUT triggering the "missing ScriptRunContext" warning that
-    session_state access emits when called from non-Streamlit threads (e.g.,
-    the mgmt API's AnyIO worker threads).  All session_state reads/writes in
-    this module are gated behind this check so the mgmt API process never
-    spams the console with those warnings.
+    This is used to decide whether it is safe to access st.session_state and
+    whether remote mode should be active.  Must return False for every
+    non-Streamlit call site (mgmt API uvicorn threads, CLI, tests) to prevent
+    infinite recursion and console noise.
+
+    IMPORTANT: calling get_script_run_ctx() from an AnyIO worker thread
+    (uvicorn's request handler pool) emits a "missing ScriptRunContext" WARNING
+    on every call.  We short-circuit for those threads by checking the thread
+    name BEFORE touching any Streamlit API so the warning never fires.
     """
+    import threading
+    thread_name = threading.current_thread().name
+    # AnyIO worker threads are uvicorn request handlers — never Streamlit contexts.
+    if "AnyIO" in thread_name:
+        return False
     try:
         from streamlit.runtime.scriptrunner import get_script_run_ctx
         return get_script_run_ctx() is not None
