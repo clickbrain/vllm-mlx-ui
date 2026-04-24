@@ -810,7 +810,7 @@ The dashboard checks for updates once per hour and shows a banner when one is av
 
 ### What gets updated
 
-The update command (`brew upgrade --fetch-HEAD vllm-mlx-ui`) updates:
+The update command (`brew update && brew upgrade vllm-mlx-ui`) updates:
 - **vllm-mlx-ui** — the dashboard you're using
 - **vllm-mlx** — the inference engine (from waybarrios/vllm-mlx, the upstream source)
 - **mlx-lm** and **huggingface-hub** — Python library dependencies
@@ -823,8 +823,9 @@ The update command (`brew upgrade --fetch-HEAD vllm-mlx-ui`) updates:
 
 **From the terminal (any time):**
 ```bash
-brew upgrade --fetch-HEAD vllm-mlx-ui
+brew update && brew upgrade vllm-mlx-ui
 ```
+> `brew update` is required first — it fetches the latest formula from the tap. `brew upgrade` alone won't see new versions of third-party packages like this one.
 
 ### After updating
 

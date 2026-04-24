@@ -222,7 +222,10 @@ def upgrade_command() -> list[str]:
     """Return the shell command to upgrade the installation."""
     method = _detect_install_method()
     if method == "homebrew":
-        return ["brew", "upgrade", "--fetch-HEAD", "vllm-mlx-ui"]
+        # brew update pulls the latest tap (third-party taps are git repos —
+        # they are NOT updated by the JSON API download that brew upgrade does).
+        # brew upgrade then installs the newest stable release.
+        return ["sh", "-c", "brew update && brew upgrade vllm-mlx-ui"]
     # pip / install.sh path — upgrade the dashboard and all key dependencies
     pip = shutil.which("pip3") or "pip3"
     return [

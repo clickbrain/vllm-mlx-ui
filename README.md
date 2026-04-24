@@ -66,9 +66,9 @@ vllm-mlx-ui
 
 **Upgrading (Homebrew):**
 ```bash
-brew upgrade --fetch-HEAD vllm-mlx-ui
+brew update && brew upgrade vllm-mlx-ui
 ```
-This upgrades the UI, the inference engine, and all Python dependencies in one step.
+`brew update` fetches the latest formula from the tap (required for third-party taps — `brew upgrade` alone won't see new versions). This upgrades the UI, the inference engine, and all Python dependencies in one step.
 
 **Uninstalling (Homebrew):**
 ```bash
@@ -472,9 +472,9 @@ vllm-mlx-ui
 
 **Remote connection is very slow or laggy:** You may be connecting via a `.local` hostname which resolves to IPv6 first, adding 3–6 s per request. Go to **⚙️ Settings → Remote Server** and enter the IPv4 address instead (e.g. `http://192.168.68.74:8000`). The settings page will show you the resolved IP after you save. See [Remote Access Architecture](#remote-access-architecture) for full setup instructions.
 
-**Remote connection shows local machine RAM on Benchmarks page:** This was fixed in v0.3.3. Run `brew upgrade vllm-mlx-ui` on both machines.
+**Remote connection shows local machine RAM on Benchmarks page:** This was fixed in v0.3.3. Run `brew update && brew upgrade vllm-mlx-ui` on both machines.
 
-**"ScriptRunContext" warnings flooding the terminal:** These were caused by the dashboard library being imported from the management API process. Fixed in v0.3.5. Run `brew upgrade vllm-mlx-ui`.
+**"ScriptRunContext" warnings flooding the terminal:** These were caused by the dashboard library being imported from the management API process. Fixed in v0.3.5. Run `brew update && brew upgrade vllm-mlx-ui`.
 
 ---
 

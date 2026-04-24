@@ -2278,7 +2278,9 @@ def page_settings() -> None:
 
         if _any_update or st.session_state.get("_trigger_upgrade"):
             _cmd = uc.upgrade_command()
-            st.code(" ".join(_cmd), language="bash")
+            # For sh -c wrappers show the inner command; for plain lists join normally
+            _display_cmd = _cmd[2] if (len(_cmd) == 3 and _cmd[:2] == ["sh", "-c"]) else " ".join(_cmd)
+            st.code(_display_cmd, language="bash")
             st.caption("Updates the dashboard, inference engine, and all dependencies, then relaunches automatically.")
 
             # Auto-trigger if coming from sidebar button
