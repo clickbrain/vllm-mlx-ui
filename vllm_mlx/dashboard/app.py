@@ -137,10 +137,25 @@ def main() -> None:
         mgmt_port = 8502
 
     # Clear any stale previous UI instance BEFORE writing our own PID.
-    # (If we write first, the retry logic in _start_mgmt would read our
-    # own PID and signal ourselves.)
+    # Strategy: PID file first (surgical), then port-based sweep (belt-and-suspenders).
+    # uvicorn.run() swallows OSError on bind failure — it never propagates to our
+    # except clause — so we MUST clear ports proactively rather than reactively.
+    import time as _time
+
     if UI_PID_FILE.exists():
         _kill_stale_ui(UI_PID_FILE)
+
+    # Always sweep both ports regardless of PID file; covers the case where the
+    # old process died without cleanup or was started by a different mechanism.
+    _port_cleared = False
+    if _kill_process_on_port(mgmt_port):
+        _port_cleared = True
+        print(f"[vllm-mlx] Cleared stale process on port {mgmt_port}", file=sys.stderr)
+    if _kill_process_on_port(int(ui_port)):
+        _port_cleared = True
+        print(f"[vllm-mlx] Cleared stale process on port {ui_port}", file=sys.stderr)
+    if _port_cleared:
+        _time.sleep(1.0)  # give the OS time to release the sockets
 
     # Write our PID so the Shutdown button and future startups can find us
     try:
@@ -159,41 +174,16 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
     # Start the management API server in a daemon thread.
-    # If the port is already in use, find and clear the process holding it.
     def _start_mgmt() -> None:
         try:
             from vllm_mlx.dashboard.mgmt_server import start_mgmt_server
             start_mgmt_server(host="0.0.0.0", port=mgmt_port)
-        except OSError as exc:
-            if "address already in use" in str(exc).lower() or exc.errno == 48:
-                print(
-                    f"[vllm-mlx] Port {mgmt_port} in use — clearing stale process…",
-                    file=sys.stderr,
-                )
-                if _kill_process_on_port(mgmt_port):
-                    import time as _t
-                    _t.sleep(1.0)
-                    try:
-                        from vllm_mlx.dashboard.mgmt_server import start_mgmt_server
-                        start_mgmt_server(host="0.0.0.0", port=mgmt_port)
-                        return
-                    except Exception as retry_exc:
-                        print(
-                            f"[vllm-mlx] Retry failed: {retry_exc}",
-                            file=sys.stderr,
-                        )
-            print(
-                f"[vllm-mlx] Management API failed to bind port {mgmt_port}: {exc}\n"
-                f"           Try: lsof -ti tcp:{mgmt_port} | xargs kill",
-                file=sys.stderr,
-            )
         except Exception as exc:
             print(f"[vllm-mlx] Management API failed to start: {exc}", file=sys.stderr)
 
     mgmt_thread = threading.Thread(target=_start_mgmt, daemon=True)
     mgmt_thread.start()
 
-    import time as _time
     _time.sleep(1.0)
     if mgmt_thread.is_alive():
         print(f"[vllm-mlx] ✅ Management API listening on 0.0.0.0:{mgmt_port}")
