@@ -47,6 +47,10 @@ _BITS_PER_QUANT: dict[str, float] = {
 }
 
 
+# Duplicated from server_manager to avoid circular imports.
+# Both versions check Streamlit context + session_state to route model
+# operations to the remote mgmt API when in remote mode.
+# IMPORTANT: if the logic changes in server_manager._mgmt_base(), update here too.
 def _mgmt_base() -> str | None:
     """Return the management API base URL if remote mode is active.
 
@@ -209,7 +213,13 @@ def download_model(
 
 
 def get_download_status(model_id: str) -> dict[str, Any]:
-    """Poll remote download status (no-op in local mode)."""
+    """Poll remote download status (no-op in local mode).
+
+    In local mode, download_model() runs synchronously (blocks until done), so
+    there is no ongoing status to poll — return "local" to signal N/A.
+    In remote mode, downloads run in a background thread on the remote machine;
+    this polls the mgmt API /models/download_status/{model_id} endpoint for progress.
+    """
     mgmt = _mgmt_base()
     if mgmt:
         try:
@@ -292,7 +302,11 @@ def get_model_presets(model_id: str, hf_token: str | None = None) -> dict[str, A
         with open(config_path) as f:
             cfg = _json.load(f)
 
-        # Context / sequence length
+        # HF models store context length under different field names depending on
+        # architecture. Priority order: max_position_embeddings (standard) →
+        # n_ctx (GPT-style) → seq_length → max_sequence_length (fallback).
+        # Cap at 131072 even if the model claims higher — that is the practical
+        # vllm-mlx limit and avoids requesting more KV cache than the engine supports.
         ctx = (
             cfg.get("max_position_embeddings")
             or cfg.get("n_ctx")
@@ -318,7 +332,11 @@ def get_model_presets(model_id: str, hf_token: str | None = None) -> dict[str, A
         if rope:
             presets["rope_scaling"] = rope
 
-        # Vision / multimodal detection
+        # Vision capability is detected from three independent sources because
+        # different model cards use different conventions:
+        # 1. model_type / architecture keywords (llava, qwen2_vl, paligemma, etc.)
+        # 2. architecture field from HF config.json
+        # 3. Model ID string keywords (last-resort heuristic)
         vision_types = {"llava", "idefics", "pali", "qwen2_vl", "pixtral",
                         "gemma3", "gemma4", "internvl", "cogvlm", "phi3_v", "mipha"}
         arch_lower = (archs[0] if archs else "").lower()
@@ -329,7 +347,9 @@ def get_model_presets(model_id: str, hf_token: str | None = None) -> dict[str, A
         ):
             presets["is_vision"] = True
 
-        # Quantisation bits from model ID
+        # Quantization is inferred from the model ID (e.g., "llama2-7b-4bit")
+        # rather than config.json because model_type rarely encodes quantization.
+        # This is a UI prefill heuristic; it does not affect server startup or loading.
         name_lower = model_id.lower()
         for bits, patterns in {4: ["4bit", "4-bit", "q4"], 8: ["8bit", "8-bit", "q8"],
                                 3: ["3bit", "3-bit"], 6: ["6bit", "6-bit"]}.items():
@@ -379,8 +399,11 @@ def get_total_ram_gb() -> float:
 
 
 def estimate_size_from_name(model_id: str) -> float | None:
-    """
-    Estimate model weight size in GB from its name alone (no API call).
+    """Estimate model VRAM requirement from the model ID string.
+
+    Used before download to show memory-fit warnings without requiring an API call
+    or downloading metadata. Accuracy is ~70-80% for common quantizations.
+    Heuristic only — never used to block a download, just to inform the user.
 
     Parses parameter count (e.g. 7B, 13B, 72B) and quantization (4bit, 8bit…)
     from the model ID to produce a rough byte estimate.  Returns None when the

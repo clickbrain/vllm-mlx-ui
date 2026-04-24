@@ -157,17 +157,23 @@ def main() -> None:
     try:
         from vllm_mlx.dashboard.server_manager import _load_local_config, UI_PID_FILE, STATE_DIR
         STATE_DIR.mkdir(parents=True, exist_ok=True)
-        cfg = _load_local_config()
+        cfg = _load_local_config()  # server_manager._load_local_config: reads ~/.vllm_mlx_ui/server_config.json without contacting the remote mgmt API (safe to call before Streamlit starts).
         ui_host = cfg.get("ui_host", "127.0.0.1")
         ui_port_pref = int(cfg.get("ui_port", 8501))
         mgmt_port_pref = int(cfg.get("mgmt_port", 8502))
     except Exception:
+        # Graceful degradation: corrupted or missing config falls back to hardcoded
+        # defaults so the app still starts. A broken config file should never prevent
+        # the dashboard from launching.
         from pathlib import Path as _Path
         UI_PID_FILE = _Path.home() / ".vllm_mlx_ui" / "ui.pid"
         ui_host = "127.0.0.1"
         ui_port_pref = 8501
         mgmt_port_pref = 8502
 
+    # Prevent port conflicts: terminate any previously-running instance before binding.
+    # macOS does not immediately release sockets after SIGKILL; killing first prevents
+    # "address already in use" errors on the mgmt API port.
     # Stop any existing vllm-mlx-ui instances (by name + port) before starting.
     import time as _time
 
@@ -248,6 +254,12 @@ def main() -> None:
         from vllm_mlx.dashboard.server_manager import (
             AUTO_START_FLAG, load_config, start_server, get_server_status,
         )
+        # Two-path auto-start:
+        # 1. AUTO_START_FLAG file: set by update_checker.relaunch() for post-upgrade
+        #    one-time auto-start. Consumed (deleted) here so it only fires once.
+        # 2. startup_model_behavior setting: user preference for normal restarts.
+        #    "auto" = start immediately, "ask" = prompt, "none" = do nothing.
+        # The flag takes priority so upgrades always auto-start regardless of preference.
         if AUTO_START_FLAG.exists():
             AUTO_START_FLAG.unlink(missing_ok=True)
             _cfg = load_config()

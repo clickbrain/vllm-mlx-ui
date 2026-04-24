@@ -73,6 +73,9 @@ app.add_middleware(_PermissiveHeadersMiddleware)
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
 # Cache the API key with a short TTL to avoid a disk read on every request.
+# 30s TTL: short enough that disabling the key takes effect within half a
+# minute; long enough to avoid stat() syscalls on every request (which runs
+# in tight loops during streaming and fragment auto-refresh).
 # The cache is invalidated automatically when the key changes (TTL ≤ 30 s).
 _auth_key_cache: dict[str, Any] = {"key": None, "ts": 0.0}
 _AUTH_KEY_TTL = 30.0  # seconds
@@ -159,8 +162,11 @@ def get_config(_: None = Depends(_check_auth)) -> dict:
 
 @app.post("/config")
 def set_config(data: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
-    # Strip local-only connectivity keys (defense-in-depth) so a misconfigured
-    # client cannot overwrite the remote machine's own network settings.
+    # Defense-in-depth: strip connectivity keys before persisting.
+    # A misconfigured or stale client might submit the full config including
+    # remote_mgmt_url. If the server saved that, it would try to proxy every
+    # subsequent load_config() call back to itself — infinite loop.
+    # server_manager._LOCAL_ONLY_KEYS defines the exact keys to strip.
     from .server_manager import _LOCAL_ONLY_KEYS
     filtered = {k: v for k, v in data.items() if k not in _LOCAL_ONLY_KEYS}
     sm.save_config(filtered)
@@ -217,6 +223,9 @@ def download_model(req: DownloadRequest, _: None = Depends(_check_auth)) -> dict
             with _download_lock:
                 _download_status[model_id] = {"status": "error", "error": str(exc)}
 
+    # Run download in a background thread so the HTTP response returns immediately.
+    # The client polls GET /models/download_status/{model_id} for progress.
+    # _download_lock prevents duplicate concurrent downloads of the same model.
     threading.Thread(target=_do_download, daemon=True).start()
     return {"ok": True, "message": f"Download started for {model_id}", "status": "downloading"}
 
@@ -272,6 +281,12 @@ def delete_benchmark(result_id: int, _: None = Depends(_check_auth)) -> dict:
 # automatically stops the server, reloads with the new model and optimal
 # settings, waits for it to be healthy, then forwards the request.
 
+# Guards _hot_swap_if_needed() against concurrent swap attempts.
+# Without the lock, two simultaneous requests for a different model would
+# both detect the mismatch and both call stop_server() + start_server(),
+# causing a race that leaves the server in an undefined state.
+# Threads that lose the lock re-verify inside (step 5 above) — if the
+# winning thread already swapped to the right model, losers skip.
 _swap_lock = threading.Lock()
 
 
@@ -279,12 +294,24 @@ _HF_REPO_RE = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?/[a-zA-Z0-9]
 
 
 def _hot_swap_if_needed(requested_model: str) -> None:
-    """Reload the inference server if the requested model differs from loaded.
+    """Auto-swap the loaded model when an OpenAI client requests a different one.
 
-    Security: only allows swapping to a model that is already cached on this
-    machine.  Requests for uncached model IDs are silently ignored — the current
-    model stays loaded.  This prevents a remote client from triggering an
-    arbitrary download.
+    Called by the /v1/chat/completions and /v1/completions proxy endpoints to
+    support clients that specify a model ID in their request.
+
+    Security: only swaps to models already cached locally. Uncached model IDs
+    are silently ignored (no download is triggered).
+
+    Steps:
+      1. Normalise the requested model ID.
+      2. No-op if requested model is already loaded.
+      3. No-op if requested model is not in the local cache.
+      4. Acquire _swap_lock (prevents concurrent swap attempts).
+      5. Re-verify under lock (another thread may have swapped already).
+      6. Fetch model presets (context length, max_tokens) for the new model.
+      7. Stop current server, start new server, wait up to 120s for health.
+
+    The 120s / 2s-poll timeout covers large models that take 60-90s to load.
     """
     # Basic format validation — must look like org/repo
     if not _HF_REPO_RE.match(requested_model):

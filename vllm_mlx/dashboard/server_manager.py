@@ -174,13 +174,22 @@ def _in_streamlit() -> bool:
 # ── Remote management helpers ────────────────────────────────────────────────
 
 def _mgmt_base(config: dict[str, Any] | None = None) -> str | None:
-    """Return the management API base URL if remote mode is active.
+    """Return the management API base URL if remote mode is active, else None.
 
-    Returns None (forcing local mode) when:
-    - The code is NOT running inside a Streamlit browser session (e.g. the
-      mgmt API server itself, CLI tools, tests). Remote mode is a UI concept
-      and must never recurse from the mgmt server back to itself.
-    - The UI session has the connection toggle set to "local".
+    CRITICAL RECURSION GUARD: this function is called by load_config() to
+    decide whether to fetch config from the remote mgmt API or from disk.
+    If the mgmt server itself calls load_config() (which it does on every
+    request), _mgmt_base() MUST return None or an infinite loop results:
+      mgmt_server endpoint → load_config() → _mgmt_base() → remote HTTP →
+      mgmt_server endpoint → load_config() → ...
+
+    Returns None (forcing local disk read) when ANY condition holds:
+    - Not inside an active Streamlit browser session (e.g., called from
+      mgmt_server uvicorn threads, CLI tools, tests)
+    - UI session has the connection toggle set to "local"
+    - remote_mgmt_url is not configured
+
+    All three must be true to return the remote URL.
     """
     # Remote mode only makes sense inside an active Streamlit browser session.
     # If we're not in Streamlit (e.g. called from uvicorn/mgmt_server, a CLI
@@ -216,7 +225,12 @@ def _ensure_state_dir() -> Path:
 
 
 def _load_local_config() -> dict[str, Any]:
-    """Load config from disk only — no remote fetch. Used to read connectivity settings."""
+    """Load config from disk only — no remote fetch. Used to read connectivity settings.
+
+    NOTE: This function reads from disk ONLY and never contacts the remote mgmt API.
+    Used by mgmt_server.py to read config without triggering _mgmt_base() recursion.
+    _ui.py and benchmarks use load_config() instead, which may fetch from remote.
+    """
     _ensure_state_dir()
     if CONFIG_FILE.exists():
         try:
@@ -239,8 +253,9 @@ def load_config() -> dict[str, Any]:
         except Exception:
             pass
 
-    # Cache remote config in Streamlit session state (10 s TTL) to avoid an
-    # extra HTTP round-trip on every Streamlit rerun / fragment refresh.
+    # 10s TTL avoids repeated HTTP calls during fast Streamlit reruns (fragment
+    # auto-refresh fires every 5s). Short enough that config changes propagate
+    # quickly; long enough to save round-trips on consecutive page renders.
     # Only access session_state when we're actually inside a Streamlit context
     # to avoid ScriptRunContext warnings from the mgmt API process.
     mgmt = _mgmt_base(local)
@@ -278,6 +293,11 @@ def load_config() -> dict[str, Any]:
     return local
 
 
+# Keys that control how the LOCAL client reaches the REMOTE machine.
+# These must NEVER be synced to the remote machine — e.g., sending
+# remote_mgmt_url="http://192.168.1.42:8502" to 192.168.1.42 would make
+# it call itself on every load_config(), creating an infinite loop.
+# set_config() on the mgmt server filters these out (mgmt_server.py).
 _LOCAL_ONLY_KEYS = frozenset({
     "remote_server_url", "remote_mgmt_url", "mgmt_api_key",
     "ui_host", "ui_port", "mgmt_port",
@@ -347,7 +367,9 @@ def get_server_url(config: dict[str, Any] | None = None) -> str:
     if config is None:
         config = load_config()
 
-    # Only use remote_server_url when the UI is explicitly in remote mode.
+    # Check connection_mode toggle, not just whether remote_server_url exists.
+    # A user may have saved remote settings but explicitly disabled remote mode.
+    # The toggle is their intent; the saved URL is just data.
     _use_remote = True
     if _in_streamlit():
         try:
@@ -430,10 +452,10 @@ def _build_command(config: dict[str, Any]) -> list[str]:
         cmd += ["--api-key", config["api_key"]]
     if config.get("continuous_batching"):
         cmd += ["--continuous-batching"]
-    # Only pass token limit flags when the user has changed them from the
-    # default (32768).  But when we DO pass one, always pass both together
-    # so vllm-mlx never mixes our override with its own internal default.
-    # Clamp so max_request_tokens >= max_tokens regardless of stale configs.
+    # Only override token limits when the user explicitly changed them from defaults.
+    # max_tokens and max_request_tokens both default to 32768 in the engine.
+    # When both are passed, max_request_tokens must >= max_tokens — the engine
+    # enforces this invariant and will error if violated.
     _max_tok = config.get("max_tokens", 32768)
     _max_req = config.get("max_request_tokens", 32768)
     if _max_req < _max_tok:
@@ -570,7 +592,10 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
         )
     PID_FILE.write_text(str(proc.pid))
 
-    # Give it a moment to fail fast (bad model path, port conflict, etc.)
+    # Fail-fast check: if vllm exits immediately (bad model ID, port conflict,
+    # corrupted weights), detect it within 3s and return a useful error with logs.
+    # If still alive after 3s, assume it is loading (can take 1-2 minutes for
+    # large models) and return success — the UI polls health separately.
     for _ in range(6):
         time.sleep(0.5)
         if not _is_process_alive(proc.pid):
@@ -638,6 +663,10 @@ def get_metrics(api_key: str = "") -> dict | None:
     """
     config = load_config()
     mgmt = _mgmt_base(config)
+    # In local mode, call the inference server's /v1/status directly — bypasses
+    # the mgmt API (which would just proxy it anyway, adding latency).
+    # In remote mode, route through mgmt API because the caller may not have
+    # direct network access to the inference server port.
     if mgmt:
         try:
             r = _http.get(f"{mgmt}/metrics", headers=_mgmt_headers(config), timeout=3)

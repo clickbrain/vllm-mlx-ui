@@ -103,6 +103,10 @@ def pre_flight_check(
             "warning": None,
         }
 
+    # safety_margin=0.80: use at most 80% of available unified memory.
+    # The 1.25x multiplier accounts for KV cache + runtime overhead
+    # (~25% of model weights is a conservative estimate).
+    # Conservative by design — better to warn than to OOM mid-benchmark.
     # Rough heuristic: model weights + ~25% for KV cache / overhead
     required_gb = model_gb * 1.25
     will_fit = required_gb <= available_gb * safety_margin
@@ -149,6 +153,11 @@ def _clear_memory(callback: "Callable[[str], None] | None" = None) -> None:
     time.sleep(1.5)
 
 
+# Preamble runs in the benchmark subprocess BEFORE the benchmark module loads.
+# Clearing MLX cache here (not in the parent process) is intentional:
+# the clear happens before the model is loaded, so we maximize available VRAM.
+# Using -c flag (not a shell script) prevents shell injection and gives precise
+# control over the subprocess environment.
 # Inline preamble run inside the benchmark subprocess — clears MLX cache before
 # the model is loaded, then hands off to the real benchmark module.
 _BENCH_PREAMBLE = (
@@ -214,6 +223,11 @@ def run_benchmark(
 
     raw_output = "".join(output_lines)
 
+    # Metal OOM messages vary across macOS and mlx versions; check multiple
+    # patterns to catch all known forms:
+    # - Native Metal allocator errors ("Metal", "allocation failed")
+    # - mlx allocator exceptions ("MemoryError", "out of memory")
+    # - Standard C++ bad_alloc propagated up from Metal ("std::bad_alloc")
     # Detect Metal out-of-memory crash — give a specific error code so the
     # UI can show an actionable message instead of a generic failure.
     _OOM_SIGNALS = (
