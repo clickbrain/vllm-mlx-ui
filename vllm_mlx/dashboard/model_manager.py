@@ -626,6 +626,7 @@ def check_model_fit(
     model_id: str,
     hf_token: str | None = None,
     use_api: bool = False,
+    total_gb: float | None = None,
 ) -> dict[str, Any]:
     """
     Check whether a model will fit in unified memory before downloading.
@@ -639,7 +640,7 @@ def check_model_fit(
       source      : "api" | "name" | "unknown"
       tip         : actionable advice string
     """
-    total_gb = get_total_ram_gb()
+    total_gb_val = total_gb if total_gb is not None else get_total_ram_gb()
     model_gb: float | None = None
     source = "unknown"
 
@@ -653,27 +654,27 @@ def check_model_fit(
         if model_gb is not None:
             source = "name"
 
-    if model_gb is None or total_gb == 0:
+    if model_gb is None or total_gb_val == 0:
         return {
             "fit_level": None,
             "emoji": "❓",
             "label": "Unknown — couldn't estimate model size",
             "model_gb": None,
-            "total_ram_gb": total_gb,
+            "total_ram_gb": total_gb_val,
             "source": "unknown",
             "tip": "Paste the full model ID in the Download by ID tab for an accurate check.",
         }
 
-    fit = _score_fit(model_gb, total_gb)
+    fit = _score_fit(model_gb, total_gb_val)
     tips = {
-        FIT_PERFECT:   f"This model uses ~{model_gb:.1f} GB of your {total_gb:.0f} GB — plenty of headroom.",
-        FIT_GOOD:      f"This model uses ~{model_gb:.1f} GB of your {total_gb:.0f} GB — will run well.",
+        FIT_PERFECT:   f"This model uses ~{model_gb:.1f} GB of your {total_gb_val:.0f} GB — plenty of headroom.",
+        FIT_GOOD:      f"This model uses ~{model_gb:.1f} GB of your {total_gb_val:.0f} GB — will run well.",
         FIT_MARGINAL:  (
-            f"This model needs ~{model_gb:.1f} GB of your {total_gb:.0f} GB. "
+            f"This model needs ~{model_gb:.1f} GB of your {total_gb_val:.0f} GB. "
             "Close other apps before loading. Consider a more-quantized variant."
         ),
         FIT_TOO_TIGHT: (
-            f"This model needs ~{model_gb:.1f} GB but you only have {total_gb:.0f} GB total. "
+            f"This model needs ~{model_gb:.1f} GB but you only have {total_gb_val:.0f} GB total. "
             "It will likely crash with a Metal out-of-memory error. "
             "Choose a smaller model or a lower-bit quantization."
         ),
@@ -683,7 +684,7 @@ def check_model_fit(
         "emoji": _FIT_EMOJI[fit],
         "label": _FIT_LABEL[fit],
         "model_gb": round(model_gb, 1),
-        "total_ram_gb": round(total_gb, 0),
+        "total_ram_gb": round(total_gb_val, 0),
         "source": source,
         "tip": tips[fit],
     }

@@ -1235,9 +1235,11 @@ def page_models() -> None:
 
     # ── Download Queue Panel ──────────────────────────────────────────────────
     _local_queue = mm.download_manager.get_queue()
-    if _local_queue:
+    _remote_dl_tracking = st.session_state.get("_remote_dl_tracking", {})
+    if _local_queue or _remote_dl_tracking:
         st.subheader("⬇️ Download Queue")
         _any_active = False
+        _remote_active = False
         _prev_done = set(st.session_state.get("_dl_queue_done", set()))
         _cur_done: set[str] = set()
         for _qi in _local_queue:
@@ -1281,10 +1283,45 @@ def page_models() -> None:
         if _newly_done:
             _fire_fireworks()
         st.session_state["_dl_queue_done"] = _cur_done
-        if st.button("🧹 Clear finished", key="_clear_dl_queue"):
+        if _local_queue and st.button("🧹 Clear finished", key="_clear_dl_queue"):
             mm.download_manager.clear_finished()
             st.rerun()
-        if _any_active:
+        # Remote downloads (Studio-side)
+        if _remote_dl_tracking:
+            for _rid, _rst in list(_remote_dl_tracking.items()):
+                if _rst in ("downloading", "queued"):
+                    _rs = mm.get_download_status(_rid)
+                    _rstat = _rs.get("status", "unknown")
+                    _remote_dl_tracking[_rid] = _rstat
+                    if _rstat in ("downloading", "queued"):
+                        _remote_active = True
+                    _rshort = _rid.split("/")[-1]
+                    _rc1, _rc2, _rc3 = st.columns([4, 2, 4])
+                    _rc1.write(f"**{_rshort}** *(Studio)*")
+                    _rc1.caption(_rid)
+                    _badge_color = {"queued": "#6366f1", "downloading": "#f59e0b",
+                                    "done": "#10b981", "error": "#ef4444"}.get(_rstat, "#6b7280")
+                    _rc2.markdown(
+                        f"<span style='background:{_badge_color};color:#fff;padding:2px 8px;"
+                        f"border-radius:4px;font-size:.8rem'>{_rstat}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    _bdl = _rs.get("bytes_downloaded", 0)
+                    _btot = _rs.get("total_bytes", 0)
+                    if _rstat == "downloading":
+                        if _btot > 0:
+                            _rpct = min(_bdl / _btot, 0.99)
+                            _rc3.progress(_rpct)
+                            _rc3.caption(f"{_bdl / 1e9:.2f} / {_btot / 1e9:.2f} GB")
+                        elif _bdl > 0:
+                            _rc3.caption(f"{_bdl / 1e9:.2f} GB downloaded")
+                    elif _rstat == "done":
+                        if _remote_dl_tracking.get(_rid) != "done_celebrated":
+                            _fire_fireworks()
+                            _remote_dl_tracking[_rid] = "done_celebrated"
+                    elif _rstat == "error":
+                        _rc3.error(_rs.get("error") or "Unknown error", icon="❌")
+        if _any_active or _remote_active:
             st.markdown('<meta http-equiv="refresh" content="3">', unsafe_allow_html=True)
         st.divider()
 
@@ -1634,6 +1671,7 @@ def page_models() -> None:
                     col.markdown(f"**{label}**")
             st.divider()
 
+            _total_ram_gb = mm.get_total_ram_gb()
             for r in filtered:
                 if _is_hf_wide:
                     rc = st.columns([4, 1, 1, 1, 1, 1, 1, 1])
@@ -1649,7 +1687,7 @@ def page_models() -> None:
                 bits_val = r.get("_bits")
                 rc[3].write(f"`{bits_val}-bit`" if bits_val else "—")
                 # Fit badge — fast name-only estimate, no API call
-                _fit = mm.check_model_fit(r["id"], use_api=False)
+                _fit = mm.check_model_fit(r["id"], use_api=False, total_gb=_total_ram_gb)
                 if _fit["fit_level"]:
                     _fit_label = (
                         f"{_fit['emoji']} {_fit['model_gb']:.0f} GB"
@@ -1675,6 +1713,9 @@ def page_models() -> None:
                             _hf_tok = st.session_state.get("hf_token") or None
                             if _is_remote():
                                 ok, msg = mm.download_model(r["id"], hf_token=_hf_tok)
+                                if ok:
+                                    _remote_dls = st.session_state.setdefault("_remote_dl_tracking", {})
+                                    _remote_dls[r["id"]] = "downloading"
                             else:
                                 ok = mm.download_manager.enqueue(r["id"], _hf_tok)
                                 msg = "Added to download queue" if ok else "Already in queue"
@@ -1711,7 +1752,8 @@ def page_models() -> None:
 
             # ── Fit check card ──────────────────────────────────────────────
             with st.spinner("Checking model size against your RAM…"):
-                _fit = mm.check_model_fit(direct_id.strip(), hf_token=token, use_api=True)
+                _total_ram_gb = mm.get_total_ram_gb()
+                _fit = mm.check_model_fit(direct_id.strip(), hf_token=token, use_api=True, total_gb=_total_ram_gb)
 
             fit_bg = {
                 mm.FIT_PERFECT:   "rgba(34,197,94,0.15)",
@@ -1758,6 +1800,8 @@ def page_models() -> None:
                     if _is_remote():
                         ok, msg = mm.download_model(direct_id.strip(), hf_token=token)
                         if ok:
+                            _remote_dls = st.session_state.setdefault("_remote_dl_tracking", {})
+                            _remote_dls[direct_id.strip()] = "downloading"
                             st.success(f"✅ Download started: {msg}")
                         else:
                             st.error(msg)
