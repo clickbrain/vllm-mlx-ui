@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
 
 STATE_DIR = Path.home() / ".vllm_mlx_ui"
 PID_FILE = STATE_DIR / "server.pid"
@@ -26,6 +27,50 @@ CONFIG_FILE = STATE_DIR / "server_config.json"
 LOG_FILE = STATE_DIR / "server.log"
 AUTO_START_FLAG = STATE_DIR / "auto_start_after_relaunch.flag"
 RELAUNCH_FLAG   = STATE_DIR / "relaunch_pending.flag"
+
+# ── Persistent HTTP session ────────────────────────────────────────────────────
+# A single Session is reused across all remote API calls so TCP connections stay
+# alive (HTTP keep-alive) and are never re-opened unnecessarily.  This is the
+# primary fix for slow remote-mode response times: without keep-alive every call
+# re-does mDNS resolution + TCP handshake + TLS (if HTTPS) which can take 1-3 s.
+_http = requests.Session()
+_http.mount("http://", HTTPAdapter(max_retries=0, pool_connections=4, pool_maxsize=8))
+_http.mount("https://", HTTPAdapter(max_retries=0, pool_connections=4, pool_maxsize=8))
+
+
+def _force_ipv4_url(url: str) -> str:
+    """Replace a .local mDNS hostname with its IPv4 address.
+
+    macOS mDNS advertises both IPv6 link-local (fe80::…) and IPv4 addresses for
+    .local hostnames.  Python's requests tries IPv6 first; link-local IPv6 lacks
+    a scope ID so the connection always fails and waits for the timeout before
+    falling back to IPv4.  Resolving once to IPv4 and caching the result makes
+    the first call instant and subsequent calls reuse the keep-alive connection.
+    """
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if not host.endswith(".local"):
+        return url
+    try:
+        addrs = socket.getaddrinfo(host, parsed.port or 80, socket.AF_INET, socket.SOCK_STREAM)
+        if addrs:
+            ipv4 = addrs[0][4][0]
+            port_part = f":{parsed.port}" if parsed.port else ""
+            return urlunparse(parsed._replace(netloc=f"{ipv4}{port_part}"))
+    except Exception:
+        pass
+    return url
+
+
+_resolved_urls: dict[str, str] = {}  # cache: original_url → ipv4_url
+
+
+def _mgmt_url(base: str) -> str:
+    """Return an IPv4-resolved version of the mgmt base URL (cached)."""
+    if base not in _resolved_urls:
+        _resolved_urls[base] = _force_ipv4_url(base)
+    return _resolved_urls[base]
 
 TOOL_CALL_PARSERS = [
     "",
@@ -111,7 +156,10 @@ def _mgmt_base(config: dict[str, Any] | None = None) -> str | None:
     if config is None:
         config = load_config()
     url = config.get("remote_mgmt_url", "").strip()
-    return url.rstrip("/") if url else None
+    if not url:
+        return None
+    raw = url.rstrip("/")
+    return _mgmt_url(raw)  # IPv4-resolved, cached
 
 
 def _mgmt_headers(config: dict[str, Any] | None = None) -> dict[str, str]:
@@ -149,10 +197,20 @@ def load_config() -> dict[str, Any]:
             local = {**DEFAULT_CONFIG, **saved}
         except Exception:
             pass
+
+    # Cache remote config in Streamlit session state (10 s TTL) to avoid an
+    # extra HTTP round-trip on every Streamlit rerun / fragment refresh.
     mgmt = _mgmt_base(local)
     if mgmt:
         try:
-            r = requests.get(f"{mgmt}/config", headers=_mgmt_headers(local), timeout=3)
+            import streamlit as _st
+            cached = _st.session_state.get("_cfg_cache")
+            if cached and time.monotonic() - cached.get("_cfg_ts", 0) < 10:
+                return cached
+        except Exception:
+            pass
+        try:
+            r = _http.get(f"{mgmt}/config", headers=_mgmt_headers(local), timeout=3)
             if r.status_code == 200:
                 remote_cfg = r.json()
                 # Preserve local UI/connectivity settings so we don't overwrite
@@ -161,7 +219,14 @@ def load_config() -> dict[str, Any]:
                              "ui_host", "ui_port", "mgmt_port"):
                     if keep in local:
                         remote_cfg[keep] = local[keep]
-                return {**DEFAULT_CONFIG, **remote_cfg}
+                result = {**DEFAULT_CONFIG, **remote_cfg}
+                try:
+                    import streamlit as _st
+                    result["_cfg_ts"] = time.monotonic()
+                    _st.session_state["_cfg_cache"] = result
+                except Exception:
+                    pass
+                return result
         except Exception:
             pass  # Fall back to local config silently
     return local
@@ -171,11 +236,17 @@ def save_config(config: dict[str, Any]) -> None:
     _ensure_state_dir()
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
+    # Invalidate the config cache so the next load_config() fetches fresh data.
+    try:
+        import streamlit as _st
+        _st.session_state.pop("_cfg_cache", None)
+    except Exception:
+        pass
     mgmt = _mgmt_base(config)
     if mgmt:
         try:
-            requests.post(f"{mgmt}/config", json=config,
-                          headers=_mgmt_headers(config), timeout=5)
+            _http.post(f"{mgmt}/config", json=config,
+                       headers=_mgmt_headers(config), timeout=5)
         except Exception:
             pass  # Best effort; local save already succeeded
 
@@ -225,7 +296,7 @@ def get_server_url(config: dict[str, Any] | None = None) -> str:
             url = remote.rstrip("/")
             if url.endswith("/v1"):
                 url = url[:-3]
-            return url
+            return _mgmt_url(url)  # IPv4-resolved, cached
 
     # Local mode: connect to the server on this machine.
     host = config.get("host", "127.0.0.1")
@@ -240,7 +311,7 @@ def check_health(config: dict[str, Any] | None = None) -> tuple[bool, dict]:
     """Returns (is_healthy, health_data). Never raises."""
     try:
         url = get_server_url(config)
-        r = requests.get(f"{url}/health", timeout=2)
+        r = _http.get(f"{url}/health", timeout=2)
         if r.status_code == 200:
             return True, r.json()
     except Exception:
@@ -254,7 +325,7 @@ def get_server_status() -> dict[str, Any]:
     mgmt = _mgmt_base(cfg)
     if mgmt:
         try:
-            r = requests.get(f"{mgmt}/status", headers=_mgmt_headers(cfg), timeout=3)
+            r = _http.get(f"{mgmt}/status", headers=_mgmt_headers(cfg), timeout=3)
             if r.status_code == 200:
                 return r.json()
             return {"running": False, "healthy": False, "pid": None, "health": {}, "error": f"Mgmt API {r.status_code}"}
@@ -393,8 +464,8 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
     if mgmt:
         try:
             # Push config to remote first so it starts with latest settings
-            requests.post(f"{mgmt}/config", json=config, headers=_mgmt_headers(config), timeout=5)
-            r = requests.post(f"{mgmt}/start", headers=_mgmt_headers(config), timeout=10)
+            _http.post(f"{mgmt}/config", json=config, headers=_mgmt_headers(config), timeout=5)
+            r = _http.post(f"{mgmt}/start", headers=_mgmt_headers(config), timeout=10)
             d = r.json()
             return d.get("ok", False), d.get("message", str(r.status_code))
         except Exception as e:
@@ -446,7 +517,7 @@ def stop_server() -> tuple[bool, str]:
     mgmt = _mgmt_base(cfg)
     if mgmt:
         try:
-            r = requests.post(f"{mgmt}/stop", headers=_mgmt_headers(cfg), timeout=10)
+            r = _http.post(f"{mgmt}/stop", headers=_mgmt_headers(cfg), timeout=10)
             d = r.json()
             return d.get("ok", False), d.get("message", str(r.status_code))
         except Exception as e:
@@ -478,7 +549,7 @@ def get_logs(last_n_lines: int = 150) -> str:
     mgmt = _mgmt_base(cfg)
     if mgmt:
         try:
-            r = requests.get(f"{mgmt}/logs", params={"lines": last_n_lines},
+            r = _http.get(f"{mgmt}/logs", params={"lines": last_n_lines},
                              headers=_mgmt_headers(cfg), timeout=5)
             return r.json().get("logs", "")
         except Exception as e:
@@ -499,7 +570,7 @@ def get_metrics(api_key: str = "") -> dict | None:
     mgmt = _mgmt_base(config)
     if mgmt:
         try:
-            r = requests.get(f"{mgmt}/metrics", headers=_mgmt_headers(config), timeout=3)
+            r = _http.get(f"{mgmt}/metrics", headers=_mgmt_headers(config), timeout=3)
             if r.status_code == 200:
                 return r.json()
         except Exception:
@@ -512,7 +583,7 @@ def get_metrics(api_key: str = "") -> dict | None:
     if key:
         headers["Authorization"] = f"Bearer {key}"
     try:
-        r = requests.get(f"{url}/v1/status", headers=headers, timeout=3)
+        r = _http.get(f"{url}/v1/status", headers=headers, timeout=3)
         if r.status_code == 200:
             return r.json()
     except Exception:
@@ -528,7 +599,7 @@ def get_cache_stats(api_key: str = "") -> dict | None:
     mgmt = _mgmt_base(config)
     if mgmt:
         try:
-            r = requests.get(f"{mgmt}/cache/stats", headers=_mgmt_headers(config), timeout=3)
+            r = _http.get(f"{mgmt}/cache/stats", headers=_mgmt_headers(config), timeout=3)
             if r.status_code == 200:
                 return r.json()
         except Exception:
@@ -540,7 +611,7 @@ def get_cache_stats(api_key: str = "") -> dict | None:
     if key:
         headers["Authorization"] = f"Bearer {key}"
     try:
-        r = requests.get(f"{url}/v1/cache/stats", headers=headers, timeout=2)
+        r = _http.get(f"{url}/v1/cache/stats", headers=headers, timeout=2)
         if r.status_code == 200:
             return r.json()
     except Exception:
@@ -556,7 +627,7 @@ def clear_cache(cache_type: str = "all", api_key: str = "") -> tuple[bool, str]:
     mgmt = _mgmt_base(config)
     if mgmt:
         try:
-            r = requests.delete(
+            r = _http.delete(
                 f"{mgmt}/cache/{cache_type}", headers=_mgmt_headers(config), timeout=5
             )
             if r.status_code in (200, 204):
@@ -572,7 +643,7 @@ def clear_cache(cache_type: str = "all", api_key: str = "") -> tuple[bool, str]:
         headers["Authorization"] = f"Bearer {key}"
     endpoint = "/v1/cache/prefix" if cache_type == "prefix" else "/v1/cache"
     try:
-        r = requests.delete(f"{url}{endpoint}", headers=headers, timeout=5)
+        r = _http.delete(f"{url}{endpoint}", headers=headers, timeout=5)
         return r.status_code in (200, 204), r.json().get("status", "ok")
     except Exception as e:
         return False, str(e)
@@ -588,7 +659,7 @@ def get_memory_stats() -> dict:
     mgmt = _mgmt_base(cfg)
     if mgmt:
         try:
-            r = requests.get(f"{mgmt}/memory/stats", headers=_mgmt_headers(cfg), timeout=5)
+            r = _http.get(f"{mgmt}/memory/stats", headers=_mgmt_headers(cfg), timeout=5)
             if r.status_code == 200:
                 return r.json()
         except Exception:
@@ -715,7 +786,7 @@ def force_release_memory() -> dict:
     mgmt = _mgmt_base(cfg)
     if mgmt:
         try:
-            r = requests.post(f"{mgmt}/memory/release", headers=_mgmt_headers(cfg), timeout=30)
+            r = _http.post(f"{mgmt}/memory/release", headers=_mgmt_headers(cfg), timeout=30)
             if r.status_code == 200:
                 return r.json()
         except Exception as e:
