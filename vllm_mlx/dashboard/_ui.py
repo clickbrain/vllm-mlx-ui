@@ -424,8 +424,7 @@ def _swap_model(new_model_id: str) -> None:
     if status["running"]:
         with st.spinner("Stopping server…"):
             sm.stop_server()
-            import time as _time
-            _time.sleep(2)
+            time.sleep(2)
 
     # Try to fetch optimal settings for the new model
     presets: dict = {}

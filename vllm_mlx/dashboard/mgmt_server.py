@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from typing import Any
 
 import uvicorn
@@ -281,13 +282,12 @@ def _hot_swap_if_needed(requested_model: str) -> None:
 
         cfg["model"] = requested_model
         sm.stop_server()
-        import time as _time
-        _time.sleep(2)
+        time.sleep(2)
         sm.start_server(cfg)
 
         # Wait up to 120 s for the server to become healthy
         for _ in range(60):
-            _time.sleep(2)
+            time.sleep(2)
             status = sm.get_server_status()
             if status.get("healthy"):
                 break
@@ -297,17 +297,22 @@ def _hot_swap_if_needed(requested_model: str) -> None:
 async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) -> Any:
     """
     Proxy for /v1/chat/completions.
-    If the requested model differs from the loaded one, the server is
-    automatically reloaded with the new model before forwarding.
+    If auto_model_switch is enabled and the requested model differs from the
+    loaded one, the server is automatically reloaded with the new model before
+    forwarding. Hot-swap runs in a thread so it does not block the event loop.
 
     Enable this proxy by pointing your OpenAI client at:
       http://<this-machine-ip>:8502/v1/chat/completions
     """
+    import asyncio
     import httpx
 
     requested_model = request.get("model", "").strip()
     if requested_model:
-        _hot_swap_if_needed(requested_model)
+        cfg_check = sm.load_config()
+        if cfg_check.get("auto_model_switch", False):
+            await asyncio.to_thread(_hot_swap_if_needed, requested_model)
+
 
     cfg = sm.load_config()
     target = sm.get_server_url(cfg)

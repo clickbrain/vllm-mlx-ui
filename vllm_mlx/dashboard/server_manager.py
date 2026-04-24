@@ -791,14 +791,19 @@ def _release_system_heap() -> list[str]:
     except Exception as e:
         notes.append(f"malloc_zone_pressure_relief skipped: {e}")
 
-    # MLX Metal buffer cache — releases GPU-side cached allocations back to
-    # the unified memory pool.
+    # MLX Metal buffer cache — only clear if MLX is already loaded in this
+    # process. Importing mlx.core when it isn't loaded triggers Metal GPU
+    # framework initialization (~200-500 MB of unified memory allocation),
+    # which would INCREASE memory rather than freeing it.
     try:
-        import mlx.core as _mx
-        _mx.clear_cache()
-        notes.append("MLX Metal buffer cache cleared")
+        import sys as _sys
+        if "mlx.core" in _sys.modules:
+            _sys.modules["mlx.core"].clear_cache()
+            notes.append("MLX Metal buffer cache cleared")
+        else:
+            notes.append("MLX not loaded in this process — Metal cache skip")
     except Exception:
-        notes.append("MLX not loaded — Metal cache skip")
+        notes.append("MLX cache clear skipped")
 
     # `purge`: flushes inactive file-backed pages (disk cache), freeing RAM for
     # active use.  Requires sudo so it will fail silently in most cases, but
