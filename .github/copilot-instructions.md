@@ -1,5 +1,18 @@
 # vllm-mlx Copilot Instructions
 
+## Project Context: Kilroy Forge
+This repo is used for two things:
+1. **Kilroy Forge Dashboard** (`vllm_mlx/dashboard/`) — Streamlit UI distributed via Homebrew from `clickbrain/vllm-mlx-ui`. **This is the primary active work.**
+2. **Inference Engine** (`vllm_mlx/` except dashboard/) — upstream MLX inference server from `waybarrios/vllm-mlx`.
+
+**Deploy workflow (dashboard changes):**
+```bash
+bash scripts/validate_dashboard.sh                                              # must pass all 15 checks
+rsync -a --delete /Users/bradn/Documents/dev/vllm-mlx/ /tmp/vllm-mlx-ui-repo/ --exclude='.git'
+cd /tmp/vllm-mlx-ui-repo && git add -A && git commit -m "..." && git push      # push to clickbrain/vllm-mlx-ui
+```
+**Never push to `waybarrios/vllm-mlx` (upstream engine — pull only).**
+
 ## Build & Install
 
 ```bash
