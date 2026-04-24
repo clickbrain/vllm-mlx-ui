@@ -12,11 +12,7 @@ Features:
 - Support for LLM and multimodal models
 """
 
-try:
-    from importlib.metadata import version as _pkg_version, PackageNotFoundError
-    __version__ = _pkg_version("vllm-mlx")
-except Exception:
-    __version__ = "0.3.0"  # fallback when package is not installed (e.g. editable dev mode)
+__version__ = "0.2.9"
 
 # All imports are lazy to allow usage on non-Apple Silicon platforms
 # (e.g., CI running on Linux) where mlx_lm is not available.
