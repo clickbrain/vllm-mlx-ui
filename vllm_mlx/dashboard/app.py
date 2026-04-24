@@ -221,25 +221,18 @@ def main() -> None:
     if _kill_process_on_port(ui_port_pref):
         _port_cleared = True
         print(f"[vllm-mlx] Cleared stale process on port {ui_port_pref}", file=sys.stderr)
-    if _port_cleared:
-        _time.sleep(1.0)
 
-    # Auto-select free ports — exclude each from the other to prevent collision
-    mgmt_port = _find_free_port(mgmt_port_pref, exclude={ui_port_pref})
-    ui_port_int = _find_free_port(ui_port_pref, exclude={mgmt_port})
-    ui_port = str(ui_port_int)
-    if mgmt_port != mgmt_port_pref:
-        print(f"[vllm-mlx] ⚠️  Port {mgmt_port_pref} busy — management API will use port {mgmt_port}")
-        try:
-            from vllm_mlx.dashboard.server_manager import _load_local_config, CONFIG_FILE
-            import json as _json
-            _cfg_save = _load_local_config()
-            _cfg_save["mgmt_port"] = mgmt_port
-            CONFIG_FILE.write_text(_json.dumps(_cfg_save, indent=2))
-        except Exception:
-            pass
-    if ui_port_int != ui_port_pref:
-        print(f"[vllm-mlx] ⚠️  Port {ui_port_pref} busy — dashboard will use port {ui_port_int}")
+    # Wait up to 5 seconds for the OS to release the sockets (handles TIME_WAIT)
+    if _port_cleared:
+        for _wait_attempt in range(5):
+            _time.sleep(1.0)
+            if not _find_free_port(ui_port_pref, exclude={mgmt_port_pref}) != ui_port_pref \
+               and not _find_free_port(mgmt_port_pref, exclude={ui_port_pref}) != mgmt_port_pref:
+                break  # both ports now free
+
+    mgmt_port = mgmt_port_pref
+    ui_port = str(ui_port_pref)
+    ui_port_int = ui_port_pref
 
     # Write our PID so the Shutdown button and future startups can find us
     try:
