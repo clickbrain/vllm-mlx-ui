@@ -27,6 +27,14 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
+# Suppress Streamlit's "missing ScriptRunContext" warnings that are emitted by
+# fragment auto-refresh threads (AnyIO worker threads). Streamlit itself marks
+# these as ignorable but they flood the terminal on every 5-second refresh.
+import logging as _logging
+_logging.getLogger(
+    "streamlit.runtime.scriptrunner_utils.script_run_context"
+).setLevel(_logging.ERROR)
+
 from vllm_mlx.dashboard import benchmark_runner as br
 from vllm_mlx.dashboard import model_manager as mm
 from vllm_mlx.dashboard import server_manager as sm
