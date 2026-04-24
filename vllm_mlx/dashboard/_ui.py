@@ -2503,10 +2503,11 @@ def page_settings() -> None:
         remote_server_url = st.text_input(
             "Inference server URL",
             value=_cfg_rs.get("remote_server_url", ""),
-            placeholder="http://192.168.1.42:8000",
+            placeholder="http://192.168.1.42:8000/v1",
             help=(
-                "Base URL of the vllm-mlx inference server — do NOT include /v1. "
-                "**Use an IP address** (e.g. http://192.168.1.42:8000) rather than a "
+                "Base URL of the vllm-mlx inference server. "
+                "You can include `/v1` or leave it off — both work. "
+                "**Use an IP address** (e.g. http://192.168.1.42:8000/v1) rather than a "
                 ".local hostname for the fastest, most reliable connection. "
                 "Find the IP on the server machine: Settings → Connection Info."
             ),

@@ -353,9 +353,10 @@ ifconfig | awk '/^[a-z]/{iface=$1} /inet /{print iface, $2}'
 
 On the client Mac, open the dashboard → **⚙️ Settings → 🔗 Remote Server** and enter:
 ```
-Inference server URL:  http://192.168.x.x:8000
+Inference server URL:  http://192.168.x.x:8000/v1
 Management API URL:    http://192.168.x.x:8502
 ```
+> `/v1` is optional in the inference URL — the dashboard strips it automatically if present.
 
 After saving, a green ✅ appears if the connection works. If you entered a `.local` hostname, the settings page will show you the resolved IPv4 address and suggest switching to it.
 
@@ -375,7 +376,7 @@ If you're connecting two Macs with a Thunderbolt cable, configure static IPs on 
 - Subnet Mask: `255.255.255.0`
 - Router: *(leave blank)*
 
-Then use `http://192.168.200.1:8000` and `http://192.168.200.1:8502` in Settings.
+Then use `http://192.168.200.1:8000/v1` and `http://192.168.200.1:8502` in Settings.
 
 > **Why Thunderbolt over Wi-Fi?** Thunderbolt Bridge is a direct 40 Gbps link between the two machines — no router, no Wi-Fi contention. Inference responses stream with < 1 ms network latency instead of the typical 5–20 ms over Wi-Fi.
 
