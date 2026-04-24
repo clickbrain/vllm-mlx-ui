@@ -134,10 +134,13 @@ def _kill_process_on_port(port: int) -> bool:
     return True
 
 
-def _find_free_port(preferred: int, max_attempts: int = 20) -> int:
-    """Return preferred port if free, otherwise the next free port above it."""
+def _find_free_port(preferred: int, exclude: set[int] | None = None, max_attempts: int = 20) -> int:
+    """Return preferred port if free (and not in exclude), otherwise the next free port above it."""
     import socket as _socket
+    exclude = exclude or set()
     for port in range(preferred, preferred + max_attempts):
+        if port in exclude:
+            continue
         with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
             try:
                 s.bind(("", port))
@@ -221,9 +224,9 @@ def main() -> None:
     if _port_cleared:
         _time.sleep(1.0)
 
-    # Auto-select free ports (handles port conflicts gracefully)
-    mgmt_port = _find_free_port(mgmt_port_pref)
-    ui_port_int = _find_free_port(ui_port_pref)
+    # Auto-select free ports — exclude each from the other to prevent collision
+    mgmt_port = _find_free_port(mgmt_port_pref, exclude={ui_port_pref})
+    ui_port_int = _find_free_port(ui_port_pref, exclude={mgmt_port})
     ui_port = str(ui_port_int)
     if mgmt_port != mgmt_port_pref:
         print(f"[vllm-mlx] ⚠️  Port {mgmt_port_pref} busy — management API will use port {mgmt_port}")
