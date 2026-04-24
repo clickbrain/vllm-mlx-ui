@@ -828,22 +828,27 @@ def _release_system_heap() -> list[str]:
 
 def force_release_memory() -> dict:
     """
-    Comprehensive memory release for Apple Silicon unified memory.
+    Release memory from orphaned/crashed processes and compress the system heap.
     In remote mode, proxies to the remote machine's management API.
 
-    Steps (in order of impact):
-    1. Stop the inference server if running
-    2. Find and terminate orphaned vllm_mlx / benchmark subprocesses
-    3. Find and terminate any OTHER Python processes using > 1 GB
-       (excluding the UI process itself)
-    4. General macOS heap compression: malloc_zone_pressure_relief,
-       MLX Metal cache clear, Python GC, optional purge
+    This does NOT stop the intentionally-running inference server. To unload
+    a model and reclaim its memory, use stop_server() explicitly (or the
+    Stop Server button in the UI).
+
+    Steps:
+    1. Find and terminate ORPHANED vllm_mlx / benchmark subprocesses.
+       These are processes that should not exist — leftover from crashes or
+       previous sessions. The active inference server (tracked by PID_FILE)
+       is explicitly protected and never killed.
+    2. General macOS heap compression: malloc_zone_pressure_relief (compacts
+       all malloc zones and returns free chunks to the OS), Python GC, MLX
+       Metal cache clear (only if MLX is already loaded), optional purge.
 
     Returns a dict:
       before        : memory stats before cleanup
       after         : memory stats after cleanup
       freed_gb      : estimated GB freed (OS accounting may lag slightly)
-      server_stopped: bool
+      server_stopped: always False (server is never stopped by this function)
       procs_killed  : list[dict] — pid, mem_gb, cmd for each terminated process
       heap_notes    : list[str] — what the general heap release attempted
       warnings      : list[str]
@@ -867,29 +872,24 @@ def force_release_memory() -> dict:
 
     before = get_memory_stats()
     warnings: list[str] = []
-    server_stopped = False
     procs_killed: list[dict] = []
 
-    # ── 1. Stop inference server ──────────────────────────────────────────────
-    try:
-        status = get_server_status()
-        if status.get("running"):
-            ok, msg = stop_server()
-            server_stopped = ok
-            if not ok:
-                warnings.append(f"Could not stop server: {msg}")
-            else:
-                time.sleep(1.5)
-    except Exception as e:
-        warnings.append(f"Server stop check failed: {e}")
-
-    # ── 2 & 3. Terminate heavy Python processes ───────────────────────────────
-    # Kill vllm-specific processes unconditionally; kill other Python processes
-    # if they're using ≥ 1 GB (they are orphaned or stuck after a crash).
+    # ── 1. Terminate ORPHANED vllm processes ─────────────────────────────────
+    # Kill only vllm processes that are NOT the active inference server.
+    # The active server PID is recorded in PID_FILE; we protect it along
+    # with our own process chain so we never kill anything intentional.
     own_pid = _os.getpid()
-
-    # Collect parent-process chain so we never kill app.py or the shell
     _protected_pids: set[int] = {own_pid}
+
+    # Protect the active inference server if one is running
+    try:
+        if PID_FILE.exists():
+            _active_pid = int(PID_FILE.read_text().strip())
+            _protected_pids.add(_active_pid)
+    except Exception:
+        pass
+
+    # Protect the full parent-process chain (app.py, shell, etc.)
     try:
         import psutil as _ps
         _p = _ps.Process(own_pid)
@@ -910,19 +910,16 @@ def force_release_memory() -> dict:
                 pid = proc.info["pid"]
                 if pid in _protected_pids:
                     continue
-                name = (proc.info.get("name") or "").lower()
                 cmdline = " ".join(proc.info.get("cmdline") or [])
                 mem_gb = (proc.info.get("memory_info") or type("", (), {"rss": 0})()).rss / (1024 ** 3)
-
                 is_vllm = any(m in cmdline for m in _VLLM_MARKERS)
-
                 if is_vllm:
                     _os.kill(pid, signal.SIGTERM)
                     procs_killed.append({
                         "pid": pid,
                         "mem_gb": round(mem_gb, 1),
                         "cmd": cmdline[:120],
-                        "reason": "vllm",
+                        "reason": "orphaned vllm",
                     })
             except (psutil.NoSuchProcess, psutil.AccessDenied, ProcessLookupError):
                 pass
@@ -935,11 +932,11 @@ def force_release_memory() -> dict:
                 except (ProcessLookupError, PermissionError):
                     pass
     except ImportError:
-        warnings.append("psutil not available — cannot scan for large processes")
+        warnings.append("psutil not available — cannot scan for orphaned processes")
     except Exception as e:
         warnings.append(f"Process scan failed: {e}")
 
-    # ── 4. General heap compression ───────────────────────────────────────────
+    # ── 2. General heap compression ───────────────────────────────────────────
     heap_notes = _release_system_heap()
 
     # Allow OS memory accounting to settle
@@ -952,7 +949,7 @@ def force_release_memory() -> dict:
         "before": before,
         "after": after,
         "freed_gb": freed,
-        "server_stopped": server_stopped,
+        "server_stopped": False,
         "procs_killed": procs_killed,
         "heap_notes": heap_notes,
         "warnings": warnings,
