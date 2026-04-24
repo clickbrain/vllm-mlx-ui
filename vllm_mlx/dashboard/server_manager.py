@@ -135,6 +135,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "mgmt_api_key": "",        # optional shared secret for the management API
     # Startup behavior: "auto" = load last model, "ask" = show picker, "none" = manual
     "startup_model_behavior": "auto",
+    # Auto model switch (proxy hot-swap) — local feature, not synced to remote
+    "auto_model_switch": True,
+    # Last used connection mode — "local" or "remote". Persisted so the UI
+    # restores the correct target on browser refresh / app restart.
+    "connection_mode": "local",
 }
 
 
@@ -162,17 +167,24 @@ def _in_streamlit() -> bool:
 def _mgmt_base(config: dict[str, Any] | None = None) -> str | None:
     """Return the management API base URL if remote mode is active.
 
-    Returns None (forcing local mode) when the UI session has the connection
-    toggle set to "local", even if a remote_mgmt_url is configured.
+    Returns None (forcing local mode) when:
+    - The code is NOT running inside a Streamlit browser session (e.g. the
+      mgmt API server itself, CLI tools, tests). Remote mode is a UI concept
+      and must never recurse from the mgmt server back to itself.
+    - The UI session has the connection toggle set to "local".
     """
-    # Respect the UI's local/remote mode toggle when running inside Streamlit.
-    if _in_streamlit():
-        try:
-            import streamlit as _st
-            if _st.session_state.get("connection_mode", "local") == "local":
-                return None
-        except Exception:
-            pass
+    # Remote mode only makes sense inside an active Streamlit browser session.
+    # If we're not in Streamlit (e.g. called from uvicorn/mgmt_server, a CLI
+    # tool, or a test), always return None to prevent infinite recursion where
+    # the mgmt API's own load_config() tries to fetch from itself.
+    if not _in_streamlit():
+        return None
+    try:
+        import streamlit as _st
+        if _st.session_state.get("connection_mode", "local") == "local":
+            return None
+    except Exception:
+        return None
     if config is None:
         config = load_config()
     url = config.get("remote_mgmt_url", "").strip()
@@ -260,6 +272,9 @@ _LOCAL_ONLY_KEYS = frozenset({
     "remote_server_url", "remote_mgmt_url", "mgmt_api_key",
     "ui_host", "ui_port", "mgmt_port",
     "_firewall_requested", "_firewall_configured",
+    "auto_model_switch",
+    "connection_mode",        # last-used connection target (local/remote)
+    "startup_model_behavior", # startup UX preference
 })
 
 

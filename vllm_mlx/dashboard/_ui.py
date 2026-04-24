@@ -100,6 +100,13 @@ section[data-testid="stSidebar"] [data-baseweb="select"] span {
 # Session-state initialisation
 # ---------------------------------------------------------------------------
 def _init_state() -> None:
+    # Restore the last-used connection mode from disk so browser refreshes
+    # and app restarts don't silently revert to local mode.
+    try:
+        _persisted_mode = sm._load_local_config().get("connection_mode", "local")
+    except Exception:
+        _persisted_mode = "local"
+
     defaults: dict[str, Any] = {
         "page": "📊 Overview",
         "metrics_history": [],
@@ -113,9 +120,8 @@ def _init_state() -> None:
         "chats": {},
         "active_chat_id": None,
         # "local" or "remote" — controls which backend all API calls target.
-        # Defaults to "local"; switches to "remote" only when user explicitly
-        # toggles AND a remote_mgmt_url is configured in settings.
-        "connection_mode": "local",
+        # Restored from disk so the user's last choice persists across refreshes.
+        "connection_mode": _persisted_mode,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -2955,6 +2961,15 @@ with st.sidebar:
         _new_mode = "remote" if _mode_choice.startswith("🌐") else "local"
         if _new_mode != st.session_state.connection_mode:
             st.session_state.connection_mode = _new_mode
+            # Persist so the choice survives browser refreshes and app restarts.
+            try:
+                import json as _json_mode
+                _mode_cfg = sm._load_local_config()
+                _mode_cfg["connection_mode"] = _new_mode
+                sm.CONFIG_FILE.write_text(_json_mode.dumps(_mode_cfg, indent=2))
+                st.session_state.pop("_cfg_cache", None)
+            except Exception:
+                pass
             st.rerun()
     else:
         st.markdown(
