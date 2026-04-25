@@ -60,7 +60,8 @@ async function releaseMemory() {
     const freed = r?.freed_gb ?? 0
     memReleaseMsg.value = freed > 0.05 ? `Freed ${freed.toFixed(1)} GB` : 'Done (no orphans found)'
   } catch (err) {
-    memReleaseMsg.value = 'Failed'
+    const msg = err instanceof Error ? err.message : String(err)
+    memReleaseMsg.value = `Failed: ${msg}`
     console.error('Release memory failed', err)
   }
   setTimeout(() => { memReleaseMsg.value = '' }, 3500)
