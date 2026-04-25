@@ -260,12 +260,24 @@ function bestModelForUseCase(_useCase: string): string | null {
 }
 
 .section-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
-  color: var(--tx-muted);
+  color: var(--si-400);
   margin-bottom: var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.section-label::before {
+  content: '';
+  display: block;
+  width: 3px;
+  height: 11px;
+  background: var(--si-500);
+  border-radius: 2px;
+  flex-shrink: 0;
 }
 
 /* Configure */

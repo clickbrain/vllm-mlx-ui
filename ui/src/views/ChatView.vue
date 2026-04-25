@@ -187,8 +187,8 @@ function clear() { messages.value = []; error.value = '' }
 
 .send-btn {
   position: absolute;
-  bottom: var(--space-2);
-  right: var(--space-2);
+  bottom: var(--space-3);
+  right: var(--space-3);
 }
 
 .server-warn { font-size: 12px; color: var(--cu-400); }

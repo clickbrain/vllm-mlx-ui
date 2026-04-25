@@ -51,11 +51,23 @@ onMounted(() => { open.value = props.defaultOpen ?? false })
 .collapsible-header:hover { background: var(--bg-elevated); }
 
 .collapsible-title {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
-  color: var(--tx-muted);
+  color: var(--si-400);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.collapsible-title::before {
+  content: '';
+  display: block;
+  width: 3px;
+  height: 11px;
+  background: var(--si-500);
+  border-radius: 2px;
+  flex-shrink: 0;
 }
 
 .chevron {
