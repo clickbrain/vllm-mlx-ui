@@ -41,12 +41,22 @@ export const useUpdatesStore = defineStore('updates', () => {
     error.value = ''
     try {
       const data = await api.post<{ message?: string }>('/updates/install', {})
-      installMessage.value = data.message ?? 'Upgrade started...'
+      installMessage.value = data.message ?? 'Upgrade started. The server will restart in ~30s.'
     } catch (e: any) {
       error.value = e.message ?? 'Failed to start upgrade'
       installing.value = false
+      return
     }
-    // Note: installing stays true — app will restart, page will reload
+    // After 35s, start polling /health every 2s; reload when it responds
+    setTimeout(async () => {
+      const poll = setInterval(async () => {
+        try {
+          await api.get('/health')
+          clearInterval(poll)
+          window.location.reload()
+        } catch { /* still restarting */ }
+      }, 2000)
+    }, 35000)
   }
 
   return { packages, anyUpdate, installMethod, checking, installing, installMessage, error, checkUpdates, installUpdates }

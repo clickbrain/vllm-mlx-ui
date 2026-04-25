@@ -695,10 +695,10 @@ async function doClearCache(type: string) {
   white-space: pre-wrap;
   word-break: break-all;
   line-height: 1.55;
-  max-height: 320px;
+  max-height: 300px;
   overflow-y: auto;
   background: var(--bg-canvas);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   padding: var(--space-3);
 }
 </style>

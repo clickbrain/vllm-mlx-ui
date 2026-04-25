@@ -131,7 +131,8 @@ def stop(_: None = Depends(_check_auth)) -> dict:
 
 @app.get("/logs")
 def logs(lines: int = 200, _: None = Depends(_check_auth)) -> dict:
-    return {"logs": sm.get_logs(lines)}
+    raw = sm.get_logs(lines)
+    return {"lines": raw.splitlines() if isinstance(raw, str) else list(raw)}
 
 
 @app.get("/metrics")
@@ -736,71 +737,71 @@ def check_for_updates(force: bool = False, _: None = Depends(_check_auth)) -> di
 
 @app.post("/updates/install")
 def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
-    """Start an upgrade and restart after it completes."""
+    """Start an upgrade and self-restart after it completes."""
+    import sys as _sys
     import threading as _thr
     import subprocess as _sp
     from vllm_mlx.dashboard import update_checker as _uc
     cmd = _uc.upgrade_command()
 
     def _do_upgrade():
+        import time as _t
         try:
             _sp.run(cmd, timeout=300, check=False)
         except Exception:
             pass
-        try:
-            from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG, AUTO_START_FLAG, UI_PID_FILE
-            AUTO_START_FLAG.touch()
-            RELAUNCH_FLAG.touch()
-            pid = int(UI_PID_FILE.read_text().strip())
-            _os_mod.kill(pid, _signal_mod.SIGTERM)
-        except Exception:
-            pass
+        # Give the HTTP response time to be sent before replacing the process.
+        _t.sleep(2)
+        _os_mod.execv(_sys.executable, [_sys.executable] + _sys.argv)
+
     _thr.Thread(target=_do_upgrade, daemon=True).start()
-    return {"ok": True, "message": "Upgrade started. The app will restart automatically when complete."}
+    return {"ok": True, "message": "Upgrade started. The server will restart in ~30s."}
 
 
 @app.get("/network/interfaces")
 def network_interfaces(_: None = Depends(_check_auth)) -> list:
-    """Return all local network interfaces with friendly labels."""
+    """Return all local network interfaces with friendly labels from networksetup."""
     import socket as _socket
     import subprocess as _sp
+
+    _SKIP_PREFIXES = ("lo", "utun", "llw", "awdl", "anpi")
+
+    # Build device → Hardware Port label map using networksetup
+    device_label: dict[str, str] = {}
+    try:
+        ns_out = _sp.check_output(
+            ["networksetup", "-listallhardwareports"],
+            text=True, stderr=_sp.DEVNULL,
+        )
+        port_name = ""
+        for line in ns_out.splitlines():
+            line = line.strip()
+            if line.startswith("Hardware Port:"):
+                port_name = line.split(":", 1)[1].strip()
+            elif line.startswith("Device:") and port_name:
+                device = line.split(":", 1)[1].strip()
+                device_label[device] = port_name
+                port_name = ""
+    except Exception:
+        pass
+
     addrs: list[dict] = []
     seen: set[str] = set()
 
-    iface_labels: dict[str, str] = {}
-    try:
-        out = _sp.check_output(["ifconfig", "-l"], text=True, stderr=_sp.DEVNULL).strip()
-        for iface in out.split():
-            try:
-                r = _sp.check_output(["ipconfig", "getifaddr", iface], text=True, stderr=_sp.DEVNULL).strip()
-                if r:
-                    label = iface
-                    if iface.startswith("en0"):
-                        label = "Wi-Fi / Ethernet"
-                    elif iface.startswith("en"):
-                        label = f"Network ({iface})"
-                    elif "bridge" in iface.lower():
-                        label = "Thunderbolt Bridge"
-                    elif "utun" in iface or "lo" in iface:
-                        continue
-                    iface_labels[r] = label
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    try:
-        hostname = _socket.gethostname()
-        all_ips = _socket.getaddrinfo(hostname, None, _socket.AF_INET)
-        for item in all_ips:
-            ip = item[4][0]
-            if ip.startswith("127.") or ip in seen:
-                continue
-            seen.add(ip)
-            label = iface_labels.get(ip, "Network")
-            addrs.append({"ip": ip, "label": label})
-    except Exception:
-        pass
+    for device, label in device_label.items():
+        if any(device.startswith(p) for p in _SKIP_PREFIXES):
+            continue
+        try:
+            ip = _sp.check_output(
+                ["ipconfig", "getifaddr", device],
+                text=True, stderr=_sp.DEVNULL,
+            ).strip()
+        except Exception:
+            ip = ""
+        if not ip or ip in seen:
+            continue
+        seen.add(ip)
+        addrs.append({"ip": ip, "label": label})
 
     try:
         local_name = _socket.gethostname()
@@ -852,3 +853,12 @@ def start_mgmt_server_thread(host: str = "0.0.0.0", port: int = 8502) -> threadi
     t = threading.Thread(target=start_mgmt_server, args=(host, port), daemon=True)
     t.start()
     return t
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="vllm-mlx management server")
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8502)
+    args = parser.parse_args()
+    start_mgmt_server(host=args.host, port=args.port)

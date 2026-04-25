@@ -166,28 +166,13 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
     def _check_vllm():
         vllm_installed = _installed_version("vllm-mlx")
         vllm_latest = _github_latest_tag("waybarrios", "vllm-mlx")
-        # The engine is bundled inside the vllm-mlx-ui package — it cannot be
-        # upgraded independently.  Show the installed and upstream versions for
-        # information but never flag this row as an actionable update (doing so
-        # would show "update available" permanently even after updating, because
-        # the brew install command can't pull a newer engine on its own).
+        update_available = _version_gt(vllm_latest, vllm_installed)
         return PackageInfo(
             name="vllm-mlx (inference engine)",
             installed=vllm_installed,
             latest=vllm_latest if vllm_latest != "unknown" else vllm_installed,
-            update_available=False,
+            update_available=update_available,
             url="https://github.com/waybarrios/vllm-mlx/releases",
-        )
-
-    def _check_mlxlm():
-        inst = _installed_version("mlx-lm")
-        latest = _pypi_latest("mlx-lm")
-        return PackageInfo(
-            name="mlx-lm",
-            installed=inst,
-            latest=latest,
-            update_available=_version_gt(latest, inst),
-            url="https://pypi.org/project/mlx-lm/#history",
         )
 
     def _check_hfhub():
@@ -202,7 +187,7 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
         )
 
     # Run all checks in parallel — total wait is max(individual timeouts) ≈ 3s
-    checkers = [_check_ui, _check_vllm, _check_mlxlm, _check_hfhub]
+    checkers = [_check_ui, _check_vllm, _check_hfhub]
     results: list[PackageInfo] = [None] * len(checkers)  # type: ignore[list-item]
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {pool.submit(fn): i for i, fn in enumerate(checkers)}
@@ -232,7 +217,7 @@ def upgrade_command() -> list[str]:
         "sh", "-c",
         f"{pip} install --upgrade "
         f"git+https://github.com/clickbrain/vllm-mlx-ui.git#egg=vllm-mlx[ui] "
-        f"&& {pip} install --upgrade mlx-lm huggingface-hub",
+        f"&& {pip} install --upgrade huggingface-hub",
     ]
 
 

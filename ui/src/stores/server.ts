@@ -116,8 +116,8 @@ export const useServerStore = defineStore('server', () => {
 
   async function fetchLogs(lines = 200): Promise<string[]> {
     try {
-      const r = await api.get<{ logs: string[] }>(`/logs?lines=${lines}`)
-      return r.logs ?? []
+      const r = await api.get<{ lines: string[] }>(`/logs?lines=${lines}`)
+      return r.lines ?? []
     } catch { return [] }
   }
 
