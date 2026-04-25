@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useServerStore } from '@/stores/server'
 import { useMachinesStore } from '@/stores/machines'
+import { api } from '@/api/client'
 
 const route = useRoute()
 const serverStore = useServerStore()
 const machinesStore = useMachinesStore()
 
-// Memory arc gauge
 const memPct = computed(() => serverStore.memory?.percent ?? 0)
 const arcFillColor = computed(() => memPct.value > 75 ? 'var(--cu-500)' : 'var(--si-500)')
 const arcDashOffset = computed(() => {
@@ -17,19 +17,20 @@ const arcDashOffset = computed(() => {
 })
 const memUsedGb = computed(() => serverStore.memory?.used_gb.toFixed(1) ?? '—')
 const memTotalGb = computed(() => serverStore.memory?.total_gb.toFixed(0) ?? '—')
-const loadedModel = computed(() => serverStore.status?.model ?? null)
-
-// Machine switcher
-const showAddForm = ref(false)
+const loadedModel = computed(() => serverStore.modelId)
 
 function selectMachine(id: string) {
   machinesStore.setActive(id)
 }
 
-// Nav active state
 const isActive = (path: string): boolean => {
   if (path === '/serve') return route.path === '/serve' || route.path === '/'
   return route.path.startsWith(path)
+}
+
+async function releaseMemory() {
+  try { await api.post('/memory/release') }
+  catch (err) { console.error('Release memory failed', err) }
 }
 </script>
 
@@ -40,8 +41,53 @@ const isActive = (path: string): boolean => {
       <span class="logo-mark">vm</span><span class="logo-accent">UI</span>
     </div>
 
-    <!-- Machine Switcher -->
-    <div class="sidebar-section">
+    <!-- Nav — PRIMARY: above the gauge -->
+    <nav class="sidebar-nav">
+      <RouterLink to="/serve" class="nav-item" :class="{ active: isActive('/serve') }">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
+          <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
+        </svg>
+        <span>Serve</span>
+      </RouterLink>
+
+      <RouterLink to="/models" class="nav-item" :class="{ active: isActive('/models') }">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
+          <path d="M4.25 2A2.25 2.25 0 002 4.25v2.5A2.25 2.25 0 004.25 9h2.5A2.25 2.25 0 009 6.75v-2.5A2.25 2.25 0 006.75 2h-2.5zm0 9A2.25 2.25 0 002 13.25v2.5A2.25 2.25 0 004.25 18h2.5A2.25 2.25 0 009 15.75v-2.5A2.25 2.25 0 006.75 11h-2.5zm6.5-9A2.25 2.25 0 008.5 4.25v2.5A2.25 2.25 0 0010.75 9h2.5A2.25 2.25 0 0015.5 6.75v-2.5A2.25 2.25 0 0013.25 2h-2.5zm0 9a2.25 2.25 0 00-2.25 2.25v2.5A2.25 2.25 0 0010.75 18h2.5a2.25 2.25 0 002.25-2.25v-2.5a2.25 2.25 0 00-2.25-2.25h-2.5z" />
+        </svg>
+        <span>Models</span>
+      </RouterLink>
+
+      <RouterLink to="/settings" class="nav-item" :class="{ active: isActive('/settings') }">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
+          <path fill-rule="evenodd" d="M7.84 1.804A1 1 0 018.82 1h2.36a1 1 0 01.98.804l.331 1.652a6.993 6.993 0 011.929 1.115l1.598-.54a1 1 0 011.186.447l1.18 2.044a1 1 0 01-.205 1.251l-1.267 1.113a7.047 7.047 0 010 2.228l1.267 1.113a1 1 0 01.206 1.25l-1.18 2.045a1 1 0 01-1.187.447l-1.598-.54a6.993 6.993 0 01-1.929 1.115l-.33 1.652a1 1 0 01-.98.804H8.82a1 1 0 01-.98-.804l-.331-1.652a6.993 6.993 0 01-1.929-1.115l-1.598.54a1 1 0 01-1.186-.447l-1.18-2.044a1 1 0 01.205-1.251l1.267-1.114a7.05 7.05 0 010-2.227L1.821 7.773a1 1 0 01-.206-1.25l1.18-2.045a1 1 0 011.187-.447l1.598.54A6.993 6.993 0 017.51 3.456l.33-1.652zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
+        </svg>
+        <span>Settings</span>
+      </RouterLink>
+
+      <div class="nav-divider" />
+
+      <RouterLink to="/chat" class="nav-item nav-item-util" :class="{ active: isActive('/chat') }">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
+          <path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd" />
+          <path d="M15 7h1a2 2 0 012 2v5.5a.5.5 0 01-.5.5H15V7z" />
+        </svg>
+        <span>Test Chat</span>
+      </RouterLink>
+    </nav>
+
+    <!-- Memory Arc Gauge -->
+    <div class="sidebar-section gauge-section">
+      <svg viewBox="0 0 120 72" xmlns="http://www.w3.org/2000/svg" class="arc-svg" aria-label="Memory usage gauge">
+        <path d="M 10 65 A 50 50 0 0 1 110 65" fill="none" stroke="var(--arc-track)" stroke-width="9" stroke-linecap="round" />
+        <path d="M 10 65 A 50 50 0 0 1 110 65" fill="none" :stroke="arcFillColor" stroke-width="9" stroke-linecap="round" stroke-dasharray="157" :stroke-dashoffset="arcDashOffset" class="arc-fill" />
+        <text x="60" y="50" text-anchor="middle" font-family="var(--font-mono)" font-size="17" font-weight="700" fill="var(--tx-primary)">{{ memUsedGb }}</text>
+        <text x="60" y="62" text-anchor="middle" font-size="9.5" fill="var(--tx-muted)">of {{ memTotalGb }} GB</text>
+      </svg>
+      <div v-if="loadedModel" class="gauge-model-name">{{ loadedModel }}</div>
+    </div>
+
+    <!-- Fleet -->
+    <div class="sidebar-section fleet-section">
       <div class="section-label">Fleet</div>
       <div class="machine-list">
         <button
@@ -55,98 +101,27 @@ const isActive = (path: string): boolean => {
           <span class="machine-name">{{ m.name }}</span>
           <span v-if="m.type === 'remote'" class="machine-host">{{ m.host }}</span>
         </button>
-      </div>
-      <button class="add-machine-btn" @click="showAddForm = !showAddForm">
-        <span>+ Add machine</span>
-      </button>
-      <div v-if="showAddForm" class="add-machine-placeholder">
-        <p class="placeholder-note">Machine configuration form — coming next</p>
+        <div v-if="machinesStore.machines.length <= 1" class="fleet-hint">
+          Add machines in Settings →
+        </div>
       </div>
     </div>
-
-    <!-- Memory Arc Gauge — signature element -->
-    <div class="sidebar-section gauge-section">
-      <svg viewBox="0 0 120 72" xmlns="http://www.w3.org/2000/svg" class="arc-svg" aria-label="Memory usage gauge">
-        <!-- Track -->
-        <path
-          d="M 10 65 A 50 50 0 0 1 110 65"
-          fill="none"
-          stroke="var(--arc-track)"
-          stroke-width="9"
-          stroke-linecap="round"
-        />
-        <!-- Fill -->
-        <path
-          d="M 10 65 A 50 50 0 0 1 110 65"
-          fill="none"
-          :stroke="arcFillColor"
-          stroke-width="9"
-          stroke-linecap="round"
-          stroke-dasharray="157"
-          :stroke-dashoffset="arcDashOffset"
-          class="arc-fill"
-        />
-        <!-- Usage text -->
-        <text
-          x="60" y="50"
-          text-anchor="middle"
-          font-family="var(--font-mono)"
-          font-size="17"
-          font-weight="700"
-          fill="var(--tx-primary)"
-        >{{ memUsedGb }}</text>
-        <text
-          x="60" y="62"
-          text-anchor="middle"
-          font-size="9.5"
-          fill="var(--tx-muted)"
-        >of {{ memTotalGb }} GB</text>
-      </svg>
-      <div v-if="loadedModel" class="gauge-model-name">{{ loadedModel }}</div>
-    </div>
-
-    <!-- Nav -->
-    <nav class="sidebar-nav">
-      <RouterLink to="/serve" class="nav-item" :class="{ active: isActive('/serve') }">
-        <!-- Home icon -->
-        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
-          <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
-        </svg>
-        <span>Serve</span>
-      </RouterLink>
-
-      <RouterLink to="/models" class="nav-item" :class="{ active: isActive('/models') }">
-        <!-- Layers icon -->
-        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
-          <path d="M4.25 2A2.25 2.25 0 002 4.25v2.5A2.25 2.25 0 004.25 9h2.5A2.25 2.25 0 009 6.75v-2.5A2.25 2.25 0 006.75 2h-2.5zm0 9A2.25 2.25 0 002 13.25v2.5A2.25 2.25 0 004.25 18h2.5A2.25 2.25 0 009 15.75v-2.5A2.25 2.25 0 006.75 11h-2.5zm6.5-9A2.25 2.25 0 008.5 4.25v2.5A2.25 2.25 0 0010.75 9h2.5A2.25 2.25 0 0015.5 6.75v-2.5A2.25 2.25 0 0013.25 2h-2.5zm0 9a2.25 2.25 0 00-2.25 2.25v2.5A2.25 2.25 0 0010.75 18h2.5a2.25 2.25 0 002.25-2.25v-2.5a2.25 2.25 0 00-2.25-2.25h-2.5z" />
-        </svg>
-        <span>Models</span>
-      </RouterLink>
-
-      <RouterLink to="/settings" class="nav-item" :class="{ active: isActive('/settings') }">
-        <!-- Cog icon -->
-        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
-          <path fill-rule="evenodd" d="M7.84 1.804A1 1 0 018.82 1h2.36a1 1 0 01.98.804l.331 1.652a6.993 6.993 0 011.929 1.115l1.598-.54a1 1 0 011.186.447l1.18 2.044a1 1 0 01-.205 1.251l-1.267 1.113a7.047 7.047 0 010 2.228l1.267 1.113a1 1 0 01.206 1.25l-1.18 2.045a1 1 0 01-1.187.447l-1.598-.54a6.993 6.993 0 01-1.929 1.115l-.33 1.652a1 1 0 01-.98.804H8.82a1 1 0 01-.98-.804l-.331-1.652a6.993 6.993 0 01-1.929-1.115l-1.598.54a1 1 0 01-1.186-.447l-1.18-2.044a1 1 0 01.205-1.251l1.267-1.114a7.05 7.05 0 010-2.227L1.821 7.773a1 1 0 01-.206-1.25l1.18-2.045a1 1 0 011.187-.447l1.598.54A6.993 6.993 0 017.51 3.456l.33-1.652zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
-        </svg>
-        <span>Settings</span>
-      </RouterLink>
-
-      <div class="nav-divider" />
-
-      <RouterLink to="/chat" class="nav-item nav-item-util" :class="{ active: isActive('/chat') }">
-        <!-- Chat icon -->
-        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
-          <path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd" />
-          <path d="M15 7h1a2 2 0 012 2v5.5a.5.5 0 01-.5.5H15V7z" />
-        </svg>
-        <span>Test Chat</span>
-      </RouterLink>
-    </nav>
 
     <!-- Footer -->
     <div class="sidebar-footer">
       <span class="footer-version">v0.1.0</span>
-      <span class="footer-dot" :class="serverStore.isRunning ? 'running' : 'stopped'" />
+      <div class="footer-actions">
+        <button
+          class="release-btn"
+          title="Release memory (stops server, clears MLX cache)"
+          @click="releaseMemory"
+        >
+          <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
+            <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
+          </svg>
+        </button>
+        <span class="footer-dot" :class="serverStore.isRunning ? 'running' : 'stopped'" />
+      </div>
     </div>
   </aside>
 </template>
@@ -232,33 +207,16 @@ const isActive = (path: string): boolean => {
 .machine-name { flex: 1; font-weight: 500; }
 .machine-host { font-size: 11px; color: var(--tx-muted); font-family: var(--font-mono); }
 
-.add-machine-btn {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  padding: 4px var(--space-2);
-  margin-top: var(--space-1);
-  background: transparent;
-  border: none;
-  color: var(--tx-muted);
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  border-radius: var(--r-md);
-  transition: color var(--transition-fast), background var(--transition-fast);
+.fleet-section {
+  flex-shrink: 0;
+  max-height: 180px;
+  overflow-y: auto;
 }
-.add-machine-btn:hover { color: var(--tx-secondary); background: var(--bg-elevated); }
 
-.add-machine-placeholder {
-  margin-top: var(--space-2);
-  padding: var(--space-3);
-  background: var(--bg-elevated);
-  border: 1px solid var(--bd-default);
-  border-radius: var(--r-md);
-}
-.placeholder-note {
+.fleet-hint {
   font-size: 11px;
   color: var(--tx-muted);
+  padding: var(--space-1) var(--space-2);
   font-style: italic;
 }
 
@@ -348,6 +306,28 @@ const isActive = (path: string): boolean => {
   font-size: 11px;
   color: var(--tx-muted);
   font-family: var(--font-mono);
+}
+
+.footer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.release-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--tx-muted);
+  cursor: pointer;
+  padding: 3px 5px;
+  display: flex;
+  align-items: center;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.release-btn:hover {
+  color: var(--tx-secondary);
+  border-color: var(--bd-default);
 }
 
 .footer-dot {

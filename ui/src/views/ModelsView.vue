@@ -7,12 +7,15 @@ import DownloadQueueCard from '@/components/models/DownloadQueueCard.vue'
 import HFSearchResult from '@/components/models/HFSearchResult.vue'
 import BenchmarkPanel from '@/components/models/BenchmarkPanel.vue'
 import AppButton from '@/components/shared/AppButton.vue'
+import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 
 const modelsStore = useModelsStore()
 
 const tabs = ['Library', 'Find', 'Benchmark'] as const
 type TabName = typeof tabs[number]
 const activeTab = ref<TabName>('Library')
+
+const confirmModal = ref<{ modelId: string; message: string } | null>(null)
 
 // Library filter + sort + text search
 const libraryFilter = ref<'all' | 'active'>('all')
@@ -50,7 +53,16 @@ async function handleLoad(modelId: string) {
 }
 
 async function handleDelete(modelId: string) {
-  if (!confirm(`Remove ${modelId} from local cache? This cannot be undone.`)) return
+  confirmModal.value = {
+    modelId,
+    message: `Remove ${modelId.split('/').pop()} from local cache? This cannot be undone.`
+  }
+}
+
+async function doDelete() {
+  if (!confirmModal.value) return
+  const modelId = confirmModal.value.modelId
+  confirmModal.value = null
   try { await modelsStore.deleteModel(modelId) }
   catch (err) { console.error('Delete failed', err) }
 }
@@ -202,6 +214,16 @@ onMounted(() => { modelsStore.fetchModels() })
     <div v-else-if="activeTab === 'Benchmark'" class="tab-content">
       <BenchmarkPanel />
     </div>
+
+    <ConfirmModal
+      v-if="confirmModal"
+      title="Remove Model"
+      :message="confirmModal.message"
+      confirm-label="Remove"
+      :destructive="true"
+      @confirm="doDelete"
+      @cancel="confirmModal = null"
+    />
   </div>
 </template>
 
@@ -215,6 +237,12 @@ onMounted(() => { modelsStore.fetchModels() })
 .view-header {
   display: flex;
   align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-canvas);
+  padding-bottom: var(--space-1);
+  margin-bottom: calc(-1 * var(--space-1));
 }
 
 .tab-content {
@@ -227,7 +255,6 @@ onMounted(() => { modelsStore.fetchModels() })
 .library-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
 }
 
@@ -428,7 +455,8 @@ onMounted(() => { modelsStore.fetchModels() })
 
 /* Library search + sort */
 .lib-search-wrap {
-  flex: 1;
+  width: 180px;
+  flex: none;
 }
 
 .lib-search-input {

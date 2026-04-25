@@ -3,12 +3,14 @@ import { ref, reactive } from 'vue'
 import { useMachinesStore } from '@/stores/machines'
 import type { Machine } from '@/stores/machines'
 import AppButton from '@/components/shared/AppButton.vue'
+import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 
 const machinesStore = useMachinesStore()
 
 const showAddForm = ref(false)
 const form = reactive({ name: '', host: '', port: 8502, type: 'remote' as 'remote' | 'local' })
 const formError = ref('')
+const confirmRemove = ref<Machine | null>(null)
 
 function submitAdd() {
   if (!form.name.trim()) { formError.value = 'Name is required'; return }
@@ -21,7 +23,13 @@ function submitAdd() {
 
 function removeConfirm(m: Machine) {
   if (m.type === 'local') return
-  if (confirm(`Remove "${m.name}"?`)) machinesStore.removeMachine(m.id)
+  confirmRemove.value = m
+}
+
+function doRemove() {
+  if (!confirmRemove.value) return
+  machinesStore.removeMachine(confirmRemove.value.id)
+  confirmRemove.value = null
 }
 </script>
 
@@ -143,6 +151,16 @@ function removeConfirm(m: Machine) {
         <span class="coming-soon">Coming soon</span>
       </div>
     </section>
+
+    <ConfirmModal
+      v-if="confirmRemove"
+      title="Remove Machine"
+      :message="`Remove &quot;${confirmRemove.name}&quot; from your fleet?`"
+      confirm-label="Remove"
+      :destructive="true"
+      @confirm="doRemove"
+      @cancel="confirmRemove = null"
+    />
   </div>
 </template>
 

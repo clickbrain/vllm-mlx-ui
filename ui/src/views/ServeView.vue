@@ -15,6 +15,7 @@ let stopPolling: (() => void) | null = null
 onMounted(() => {
   stopPolling = serverStore.startPolling()
   modelsStore.fetchModels()
+  refreshLogs()
 })
 onUnmounted(() => { stopPolling?.() })
 
@@ -118,6 +119,9 @@ async function handleModelSwitch(e: Event) {
           :loading="serverStore.loading"
           @click="serverStore.stopServer()"
         >■ Stop</AppButton>
+        <AppButton variant="ghost" size="sm" title="Release memory" @click="serverStore.releaseMemory()">
+          ↺ Memory
+        </AppButton>
       </div>
     </div>
 
@@ -200,7 +204,8 @@ async function handleModelSwitch(e: Event) {
 }
 .header-actions {
   display: flex;
-  gap: var(--space-2);
+  align-items: flex-end;
+  gap: var(--space-3);
 }
 
 .page-title {
@@ -291,10 +296,6 @@ async function handleModelSwitch(e: Event) {
 }
 
 /* Model picker */
-.header-actions {
-  align-items: center;
-}
-
 .model-picker-wrap {
   display: flex;
   flex-direction: column;

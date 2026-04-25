@@ -133,12 +133,17 @@ export const useServerStore = defineStore('server', () => {
     return () => clearInterval(id)
   }
 
+  async function releaseMemory() {
+    try { await api.post('/memory/release') }
+    catch { /* silent */ }
+  }
+
   return {
     status, metrics, memory, config, loading, error,
     isRunning, memoryPercent, underPressure,
     modelId, uptimeSeconds, tps, baseUrl,
     fetchStatus, fetchMetrics, fetchConfig, fetchMemory,
-    startServer, stopServer, fetchLogs, startPolling,
+    startServer, stopServer, fetchLogs, startPolling, releaseMemory,
   }
 })
 
