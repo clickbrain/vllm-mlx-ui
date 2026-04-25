@@ -72,7 +72,10 @@ async function handleDownload(modelId: string) {
   catch (err) { console.error('Download failed', err) }
 }
 
-onMounted(() => { modelsStore.fetchModels() })
+onMounted(() => {
+  modelsStore.actionError = null
+  modelsStore.fetchModels()
+})
 </script>
 
 <template>

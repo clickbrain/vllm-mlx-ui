@@ -84,6 +84,9 @@ async function releaseMemory() {
         <text x="60" y="62" text-anchor="middle" font-size="9.5" fill="var(--tx-muted)">of {{ memTotalGb }} GB</text>
       </svg>
       <div v-if="loadedModel" class="gauge-model-name">{{ loadedModel }}</div>
+      <button class="release-mem-btn" title="Stop server and release MLX memory" @click="releaseMemory">
+        ↺ Release Memory
+      </button>
     </div>
 
     <!-- Fleet -->
@@ -312,6 +315,23 @@ async function releaseMemory() {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.release-mem-btn {
+  margin-top: var(--space-2);
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  color: var(--tx-muted);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.release-mem-btn:hover {
+  color: var(--tx-secondary);
+  border-color: var(--bd-emphasis);
 }
 
 .release-btn {

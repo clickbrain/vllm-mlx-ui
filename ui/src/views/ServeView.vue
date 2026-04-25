@@ -72,6 +72,35 @@ async function handleModelSwitch(e: Event) {
     switchingModel.value = false
   }
 }
+
+// Config edit mode
+const editMode = ref(false)
+const editPort = ref(8080)
+const editContextSize = ref(4096)
+const editMaxTokens = ref(2048)
+const saveError = ref<string | null>(null)
+
+function enterEditMode() {
+  editPort.value = serverStore.config?.port ?? 8080
+  editContextSize.value = serverStore.config?.context_size ?? 4096
+  editMaxTokens.value = serverStore.config?.max_tokens ?? 2048
+  saveError.value = null
+  editMode.value = true
+}
+
+async function saveConfig() {
+  saveError.value = null
+  try {
+    await serverStore.saveConfig({
+      port: editPort.value,
+      context_size: editContextSize.value,
+      max_tokens: editMaxTokens.value,
+    })
+    editMode.value = false
+  } catch (err) {
+    saveError.value = String(err)
+  }
+}
 </script>
 
 <template>
@@ -119,9 +148,6 @@ async function handleModelSwitch(e: Event) {
           :loading="serverStore.loading"
           @click="serverStore.stopServer()"
         >■ Stop</AppButton>
-        <AppButton variant="ghost" size="sm" title="Release memory" @click="serverStore.releaseMemory()">
-          ↺ Memory
-        </AppButton>
       </div>
     </div>
 
@@ -149,26 +175,45 @@ async function handleModelSwitch(e: Event) {
         <MetricCard label="Memory %" :value="memPct" unit="%" :warnAbove="75" isPercent />
         <MetricCard label="Uptime" :value="uptime" />
       </div>
+      <div class="release-mem-row">
+        <AppButton variant="secondary" size="sm" @click="serverStore.releaseMemory()">
+          ↺ Release Memory
+        </AppButton>
+      </div>
     </section>
 
     <!-- Server Configuration -->
     <CollapsibleSection title="Server Configuration">
       <div class="config-body">
+        <div v-if="saveError" class="error-banner" style="margin-bottom: var(--space-3)">
+          ⚠ {{ saveError }}
+          <button class="error-dismiss" @click="saveError = null">✕</button>
+        </div>
         <div class="config-row">
           <span class="config-label">Model</span>
           <span class="config-value mono">{{ serverStore.config?.model ?? '—' }}</span>
         </div>
         <div class="config-row">
           <span class="config-label">Port</span>
-          <span class="config-value mono">{{ serverStore.config?.port ?? 8080 }}</span>
+          <span v-if="!editMode" class="config-value mono">{{ serverStore.config?.port ?? 8080 }}</span>
+          <input v-else v-model.number="editPort" type="number" class="config-input" />
         </div>
         <div class="config-row">
           <span class="config-label">Context size</span>
-          <span class="config-value mono">{{ serverStore.config?.context_size ?? '—' }}</span>
+          <span v-if="!editMode" class="config-value mono">{{ serverStore.config?.context_size ?? '—' }}</span>
+          <input v-else v-model.number="editContextSize" type="number" class="config-input" />
         </div>
         <div class="config-row">
           <span class="config-label">Max tokens</span>
-          <span class="config-value mono">{{ serverStore.config?.max_tokens ?? '—' }}</span>
+          <span v-if="!editMode" class="config-value mono">{{ serverStore.config?.max_tokens ?? '—' }}</span>
+          <input v-else v-model.number="editMaxTokens" type="number" class="config-input" />
+        </div>
+        <div class="config-actions">
+          <AppButton v-if="!editMode" variant="ghost" size="sm" @click="enterEditMode">Edit</AppButton>
+          <template v-else>
+            <AppButton variant="ghost" size="sm" @click="editMode = false; saveError = null">Cancel</AppButton>
+            <AppButton variant="primary" size="sm" @click="saveConfig">Save</AppButton>
+          </template>
         </div>
       </div>
     </CollapsibleSection>
@@ -352,6 +397,36 @@ async function handleModelSwitch(e: Event) {
   border-radius: 50%;
   animation: spin .6s linear infinite;
   flex-shrink: 0;
+}
+
+.config-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  padding-top: var(--space-3);
+}
+
+.config-input {
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  color: var(--tx-primary);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  padding: 4px 8px;
+  width: 120px;
+  transition: border-color var(--transition-fast);
+}
+.config-input:focus {
+  outline: none;
+  border-color: var(--bd-focus);
+  box-shadow: 0 0 0 3px rgba(91, 106, 208, .12);
+}
+
+.release-mem-row {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: var(--space-2);
 }
 
 /* Error banner */

@@ -41,6 +41,12 @@ const modelId = computed(() => serverStore.modelId)
 async function send() {
   const text = input.value.trim()
   if (!text || sending.value) return
+
+  if (!serverStore.isRunning) {
+    error.value = 'The inference server is not running. Start it on the Serve page first.'
+    return
+  }
+
   messages.value.push({ role: 'user', content: text })
   input.value = ''
   sending.value = true
@@ -60,7 +66,12 @@ async function send() {
     const reply = data?.choices?.[0]?.message?.content ?? '(no response)'
     messages.value.push({ role: 'assistant', content: reply })
   } catch (e) {
-    error.value = `Request failed: ${e}`
+    const msg = String(e)
+    if (msg.includes('502') || msg.includes('Load failed')) {
+      error.value = 'The inference server is not responding. Make sure it is started on the Serve page.'
+    } else {
+      error.value = `Request failed: ${msg}`
+    }
   } finally {
     sending.value = false
     await scrollToBottom()
@@ -124,6 +135,9 @@ function deleteChat(id: string) {
       <div class="chat-body">
         <div class="messages" ref="messagesEl">
           <div v-if="!messages.length" class="empty-state">
+            <div v-if="!modelId" class="server-warning">
+              ⚠ No model loaded — start the server on the Serve page first.
+            </div>
             <p class="empty-title">Ready to test</p>
             <p class="empty-sub">Send a message to verify your inference endpoint is responding correctly.</p>
           </div>
@@ -268,6 +282,18 @@ function deleteChat(id: string) {
   height: 100%;
   padding: var(--space-8);
   text-align: center;
+}
+
+.server-warning {
+  padding: var(--space-2) var(--space-4);
+  background: rgba(239, 68, 68, .08);
+  border: 1px solid rgba(239, 68, 68, .25);
+  border-radius: var(--r-md);
+  font-size: 12px;
+  color: var(--cr-300, #f87171);
+  text-align: center;
+  width: 100%;
+  max-width: 380px;
 }
 
 .empty-title {

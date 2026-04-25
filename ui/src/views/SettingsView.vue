@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useMachinesStore } from '@/stores/machines'
 import type { Machine } from '@/stores/machines'
 import AppButton from '@/components/shared/AppButton.vue'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
+import { api } from '@/api/client'
 
 const machinesStore = useMachinesStore()
 
@@ -11,6 +12,37 @@ const showAddForm = ref(false)
 const form = reactive({ name: '', host: '', port: 8502, type: 'remote' as 'remote' | 'local' })
 const formError = ref('')
 const confirmRemove = ref<Machine | null>(null)
+
+const diskUsedGb = ref<number | null>(null)
+const editCachePath = ref(false)
+const cachePathInput = ref('~/.cache/huggingface/hub')
+const savedCachePath = ref('~/.cache/huggingface/hub')
+
+onMounted(async () => {
+  try {
+    const cfg = await api.get<{ model_cache_dir?: string }>('/config')
+    const p = cfg.model_cache_dir ?? '~/.cache/huggingface/hub'
+    cachePathInput.value = p
+    savedCachePath.value = p
+  } catch { /* silent */ }
+  try {
+    const r = await api.get<{ size_gb: number }>('/models/cache_size')
+    diskUsedGb.value = r.size_gb
+  } catch { /* silent */ }
+})
+
+async function saveCachePath() {
+  try {
+    await api.post('/config', { model_cache_dir: cachePathInput.value })
+    savedCachePath.value = cachePathInput.value
+    editCachePath.value = false
+  } catch { /* silent */ }
+}
+
+function cancelCachePath() {
+  cachePathInput.value = savedCachePath.value
+  editCachePath.value = false
+}
 
 function submitAdd() {
   if (!form.name.trim()) { formError.value = 'Name is required'; return }
@@ -128,16 +160,23 @@ function doRemove() {
         <div class="pref-row">
           <div class="pref-info">
             <span class="pref-label">Model cache path</span>
-            <span class="pref-desc mono">~/.cache/huggingface/hub</span>
+            <span v-if="!editCachePath" class="pref-desc mono">{{ savedCachePath }}</span>
+            <input v-else v-model="cachePathInput" class="field-input cache-path-input" type="text" />
           </div>
-          <AppButton variant="ghost" size="sm">Change…</AppButton>
+          <div v-if="!editCachePath" class="pref-actions">
+            <AppButton variant="ghost" size="sm" @click="editCachePath = true">Change…</AppButton>
+          </div>
+          <div v-else class="pref-actions">
+            <AppButton variant="ghost" size="sm" @click="cancelCachePath">Cancel</AppButton>
+            <AppButton variant="primary" size="sm" @click="saveCachePath">Save</AppButton>
+          </div>
         </div>
         <div class="pref-row">
           <div class="pref-info">
             <span class="pref-label">Disk used by models</span>
             <span class="pref-desc">Calculated from cached model directories.</span>
           </div>
-          <span class="pref-value mono">—</span>
+          <span class="pref-value mono">{{ diskUsedGb !== null ? diskUsedGb.toFixed(1) + ' GB' : '—' }}</span>
         </div>
       </div>
     </section>
@@ -229,6 +268,8 @@ function doRemove() {
 .toggle input:checked ~ .toggle-track { background: var(--si-500); border-color: var(--si-600); }
 .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: white; transition: transform var(--transition-base); }
 .toggle input:checked ~ .toggle-track .toggle-thumb { transform: translateX(16px); }
+.pref-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
+.cache-path-input { width: 280px; }
 .kilroy-placeholder { opacity: .55; }
 .coming-soon { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--tx-muted); border: 1px solid var(--bd-default); border-radius: var(--r-pill); padding: 3px 10px; flex-shrink: 0; margin-top: 2px; }
 </style>

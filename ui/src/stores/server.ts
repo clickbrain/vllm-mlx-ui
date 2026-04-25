@@ -121,6 +121,11 @@ export const useServerStore = defineStore('server', () => {
     } catch { return [] }
   }
 
+  async function saveConfig(updates: Partial<ServerConfig>) {
+    await api.post('/config', { ...config.value, ...updates })
+    await fetchConfig()
+  }
+
   function startPolling(intervalMs = 3000): () => void {
     fetchStatus()
     fetchMemory()
@@ -128,6 +133,7 @@ export const useServerStore = defineStore('server', () => {
     const id = setInterval(() => {
       fetchStatus()
       fetchMemory()
+      fetchConfig()
       if (isRunning.value) fetchMetrics()
     }, intervalMs)
     return () => clearInterval(id)
@@ -143,7 +149,7 @@ export const useServerStore = defineStore('server', () => {
     isRunning, memoryPercent, underPressure,
     modelId, uptimeSeconds, tps, baseUrl,
     fetchStatus, fetchMetrics, fetchConfig, fetchMemory,
-    startServer, stopServer, fetchLogs, startPolling, releaseMemory,
+    startServer, stopServer, fetchLogs, startPolling, releaseMemory, saveConfig,
   }
 })
 

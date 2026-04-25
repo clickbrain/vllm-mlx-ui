@@ -19,32 +19,44 @@ from typing import Any, Callable
 import requests as _requests
 
 # ── Fit-level constants (llmfit-inspired) ─────────────────────────────────────
-FIT_PERFECT  = "perfect"   # model uses < 50 % of unified memory
-FIT_GOOD     = "good"      # 50–70 %
+FIT_PERFECT = "perfect"  # model uses < 50 % of unified memory
+FIT_GOOD = "good"  # 50–70 %
 FIT_MARGINAL = "marginal"  # 70–85 %
 FIT_TOO_TIGHT = "too_tight"  # > 85 %
 
 _FIT_EMOJI = {
-    FIT_PERFECT:   "🟢",
-    FIT_GOOD:      "🟡",
-    FIT_MARGINAL:  "🟠",
+    FIT_PERFECT: "🟢",
+    FIT_GOOD: "🟡",
+    FIT_MARGINAL: "🟠",
     FIT_TOO_TIGHT: "🔴",
 }
 _FIT_LABEL = {
-    FIT_PERFECT:   "Perfect fit",
-    FIT_GOOD:      "Good fit",
-    FIT_MARGINAL:  "Marginal — memory will be tight",
+    FIT_PERFECT: "Perfect fit",
+    FIT_GOOD: "Good fit",
+    FIT_MARGINAL: "Marginal — memory will be tight",
     FIT_TOO_TIGHT: "Won't fit — likely OOM crash",
 }
 
 # Bytes per parameter for common quantizations
 _BITS_PER_QUANT: dict[str, float] = {
-    "2bit": 0.25, "2-bit": 0.25, "q2": 0.25,
-    "3bit": 0.375, "3-bit": 0.375, "q3": 0.375,
-    "4bit": 0.50,  "4-bit": 0.50,  "q4": 0.50,
-    "6bit": 0.75,  "6-bit": 0.75,  "q6": 0.75,
-    "8bit": 1.00,  "8-bit": 1.00,  "q8": 1.00,
-    "fp16": 2.00,  "bf16": 2.00,   "fp32": 4.00,
+    "2bit": 0.25,
+    "2-bit": 0.25,
+    "q2": 0.25,
+    "3bit": 0.375,
+    "3-bit": 0.375,
+    "q3": 0.375,
+    "4bit": 0.50,
+    "4-bit": 0.50,
+    "q4": 0.50,
+    "6bit": 0.75,
+    "6-bit": 0.75,
+    "q6": 0.75,
+    "8bit": 1.00,
+    "8-bit": 1.00,
+    "q8": 1.00,
+    "fp16": 2.00,
+    "bf16": 2.00,
+    "fp32": 4.00,
 }
 
 
@@ -60,10 +72,12 @@ def _mgmt_base() -> str | None:
     Returns None when the UI session has the connection toggle set to "local".
     """
     from . import server_manager as sm
+
     if not sm._in_streamlit():
         return None
     try:
         import streamlit as _st
+
         if _st.session_state.get("connection_mode", "local") == "local":
             return None
     except Exception:
@@ -77,6 +91,7 @@ def _mgmt_base() -> str | None:
 
 def _mgmt_headers() -> dict[str, str]:
     from . import server_manager as sm
+
     cfg = sm._load_local_config()
     key = cfg.get("mgmt_api_key", "").strip()
     return {"X-Api-Key": key} if key else {}
@@ -95,6 +110,7 @@ def search_mlx_models(query: str = "", limit: int = 50) -> list[dict[str, Any]]:
             sort="downloads",
         )
         import inspect
+
         sig = inspect.signature(api.list_models)
         if "direction" in sig.parameters:
             kwargs["direction"] = -1
@@ -131,7 +147,9 @@ def get_cached_models() -> list[dict[str, Any]]:
     mgmt = _mgmt_base()
     if mgmt:
         try:
-            r = _requests.get(f"{mgmt}/models/cached", headers=_mgmt_headers(), timeout=10)
+            r = _requests.get(
+                f"{mgmt}/models/cached", headers=_mgmt_headers(), timeout=10
+            )
             return r.json() if r.status_code == 200 else []
         except Exception:
             return []
@@ -140,8 +158,16 @@ def get_cached_models() -> list[dict[str, Any]]:
 
         # Extensions that indicate real model weights are present
         WEIGHT_SUFFIXES = {
-            ".safetensors", ".bin", ".pt", ".pth", ".gguf",
-            ".npz", ".ggml", ".q4_0", ".q4_1", ".q8_0",
+            ".safetensors",
+            ".bin",
+            ".pt",
+            ".pth",
+            ".gguf",
+            ".npz",
+            ".ggml",
+            ".q4_0",
+            ".q4_1",
+            ".q8_0",
         }
         MIN_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB — metadata stubs are always tiny
 
@@ -189,8 +215,12 @@ def download_model(
     if mgmt:
         try:
             payload: dict[str, Any] = {"model_id": model_id, "token": hf_token or ""}
-            r = _requests.post(f"{mgmt}/models/download", json=payload,
-                               headers=_mgmt_headers(), timeout=15)
+            r = _requests.post(
+                f"{mgmt}/models/download",
+                json=payload,
+                headers=_mgmt_headers(),
+                timeout=15,
+            )
             d = r.json()
             return d.get("ok", False), d.get("message", str(r.status_code))
         except Exception as e:
@@ -201,6 +231,7 @@ def download_model(
 
     try:
         from huggingface_hub import snapshot_download
+
         local_dir = snapshot_download(
             repo_id=model_id,
             local_files_only=False,
@@ -213,12 +244,15 @@ def download_model(
             os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
 
 
-def download_model_local(model_id: str, hf_token: str | None = None) -> tuple[bool, str]:
+def download_model_local(
+    model_id: str, hf_token: str | None = None
+) -> tuple[bool, str]:
     """Download directly to local HF cache (no remote routing). Used by DownloadManager."""
     if hf_token:
         os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
     try:
         from huggingface_hub import snapshot_download
+
         local_dir = snapshot_download(repo_id=model_id, local_files_only=False)
         return True, f"Downloaded to {local_dir}"
     except Exception as e:
@@ -260,17 +294,22 @@ class DownloadManager:
         """Add to queue. Returns False if already queued or downloading."""
         with self._lock:
             for item in self._queue:
-                if item["model_id"] == model_id and item["status"] in ("queued", "downloading"):
+                if item["model_id"] == model_id and item["status"] in (
+                    "queued",
+                    "downloading",
+                ):
                     return False
-            self._queue.append({
-                "model_id": model_id,
-                "hf_token": hf_token,
-                "status": "queued",
-                "pct": 0.0,
-                "bytes_dl": 0,
-                "total_bytes": 0,
-                "error": None,
-            })
+            self._queue.append(
+                {
+                    "model_id": model_id,
+                    "hf_token": hf_token,
+                    "status": "queued",
+                    "pct": 0.0,
+                    "bytes_dl": 0,
+                    "total_bytes": 0,
+                    "error": None,
+                }
+            )
         self._ensure_worker()
         return True
 
@@ -280,7 +319,9 @@ class DownloadManager:
 
     def clear_finished(self) -> None:
         with self._lock:
-            self._queue = [i for i in self._queue if i["status"] not in ("done", "error")]
+            self._queue = [
+                i for i in self._queue if i["status"] not in ("done", "error")
+            ]
 
     def has_active(self) -> bool:
         with self._lock:
@@ -308,13 +349,14 @@ class DownloadManager:
                 size_gb = get_hf_model_size_gb(model_id, hf_token)
                 if size_gb:
                     with self._lock:
-                        item["total_bytes"] = int(size_gb * 1024 ** 3)
+                        item["total_bytes"] = int(size_gb * 1024**3)
             except Exception:
                 pass
 
             # Monitor bytes-in-cache while downloading
             def _monitor(it: dict) -> None:
                 import time as _t
+
                 while True:
                     with self._lock:
                         if it["status"] != "downloading":
@@ -327,6 +369,7 @@ class DownloadManager:
                     _t.sleep(2)
 
             import threading as _th
+
             _th.Thread(target=_monitor, args=(item,), daemon=True).start()
 
             try:
@@ -356,8 +399,11 @@ def get_download_status(model_id: str) -> dict[str, Any]:
     mgmt = _mgmt_base()
     if mgmt:
         try:
-            r = _requests.get(f"{mgmt}/models/download_status/{model_id}",
-                              headers=_mgmt_headers(), timeout=5)
+            r = _requests.get(
+                f"{mgmt}/models/download_status/{model_id}",
+                headers=_mgmt_headers(),
+                timeout=5,
+            )
             return r.json() if r.status_code == 200 else {"status": "unknown"}
         except Exception:
             return {"status": "error"}
@@ -369,8 +415,9 @@ def delete_model(model_id: str) -> tuple[bool, str]:
     mgmt = _mgmt_base()
     if mgmt:
         try:
-            r = _requests.delete(f"{mgmt}/models/{model_id}",
-                                 headers=_mgmt_headers(), timeout=15)
+            r = _requests.delete(
+                f"{mgmt}/models/{model_id}", headers=_mgmt_headers(), timeout=15
+            )
             if r.status_code == 200:
                 return True, f"Deleted {model_id}"
             return False, f"API error {r.status_code}: {r.text}"
@@ -398,12 +445,15 @@ def get_cache_total_size() -> float:
     mgmt = _mgmt_base()
     if mgmt:
         try:
-            r = _requests.get(f"{mgmt}/models/cache_size", headers=_mgmt_headers(), timeout=5)
+            r = _requests.get(
+                f"{mgmt}/models/cache_size", headers=_mgmt_headers(), timeout=5
+            )
             return float(r.json().get("size_gb", 0.0))
         except Exception:
             return 0.0
     try:
         from huggingface_hub import scan_cache_dir
+
         cache_info = scan_cache_dir()
         return round(cache_info.size_on_disk / (1024**3), 2)
     except Exception:
@@ -470,13 +520,27 @@ def get_model_presets(model_id: str, hf_token: str | None = None) -> dict[str, A
         # 1. model_type / architecture keywords (llava, qwen2_vl, paligemma, etc.)
         # 2. architecture field from HF config.json
         # 3. Model ID string keywords (last-resort heuristic)
-        vision_types = {"llava", "idefics", "pali", "qwen2_vl", "pixtral",
-                        "gemma3", "gemma4", "internvl", "cogvlm", "phi3_v", "mipha"}
+        vision_types = {
+            "llava",
+            "idefics",
+            "pali",
+            "qwen2_vl",
+            "pixtral",
+            "gemma3",
+            "gemma4",
+            "internvl",
+            "cogvlm",
+            "phi3_v",
+            "mipha",
+        }
         arch_lower = (archs[0] if archs else "").lower()
         if (
             any(x in model_type.lower() for x in vision_types)
             or any(x in arch_lower for x in {"vision", "llava", "vl", "pixtral"})
-            or any(x in model_id.lower() for x in {"-vl-", "-vision", "llava", "idefics", "pixtral"})
+            or any(
+                x in model_id.lower()
+                for x in {"-vl-", "-vision", "llava", "idefics", "pixtral"}
+            )
         ):
             presets["is_vision"] = True
 
@@ -484,8 +548,12 @@ def get_model_presets(model_id: str, hf_token: str | None = None) -> dict[str, A
         # rather than config.json because model_type rarely encodes quantization.
         # This is a UI prefill heuristic; it does not affect server startup or loading.
         name_lower = model_id.lower()
-        for bits, patterns in {4: ["4bit", "4-bit", "q4"], 8: ["8bit", "8-bit", "q8"],
-                                3: ["3bit", "3-bit"], 6: ["6bit", "6-bit"]}.items():
+        for bits, patterns in {
+            4: ["4bit", "4-bit", "q4"],
+            8: ["8bit", "8-bit", "q8"],
+            3: ["3bit", "3-bit"],
+            6: ["6bit", "6-bit"],
+        }.items():
             if any(p in name_lower for p in patterns):
                 presets["bits"] = bits
                 break
@@ -522,6 +590,7 @@ def get_hf_cache_dir() -> str:
 
 # ── Memory fit helpers ─────────────────────────────────────────────────────────
 
+
 def get_total_ram_gb() -> float:
     """Return total system RAM in GB.
 
@@ -531,14 +600,17 @@ def get_total_ram_gb() -> float:
     mgmt = _mgmt_base()
     if mgmt:
         try:
-            r = _requests.get(f"{mgmt}/memory/stats", headers=_mgmt_headers(), timeout=5)
+            r = _requests.get(
+                f"{mgmt}/memory/stats", headers=_mgmt_headers(), timeout=5
+            )
             if r.status_code == 200:
                 return float(r.json().get("total_gb", 0.0))
         except Exception:
             pass
     try:
         import psutil
-        return psutil.virtual_memory().total / (1024 ** 3)
+
+        return psutil.virtual_memory().total / (1024**3)
     except Exception:
         return 0.0
 
@@ -593,14 +665,15 @@ def get_hf_model_size_gb(model_id: str, hf_token: str | None = None) -> float | 
         os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
     try:
         from huggingface_hub import HfApi
+
         api = HfApi()
         info = api.model_info(model_id, files_metadata=True)
         weight_exts = {".safetensors", ".npz", ".bin", ".pt", ".pth", ".gguf"}
         total = 0
-        for f in (info.siblings or []):
+        for f in info.siblings or []:
             if Path(f.rfilename).suffix.lower() in weight_exts:
                 total += getattr(f, "size", 0) or 0
-        return total / (1024 ** 3) if total > 0 else None
+        return total / (1024**3) if total > 0 else None
     except Exception:
         return None
     finally:
@@ -667,9 +740,9 @@ def check_model_fit(
 
     fit = _score_fit(model_gb, total_gb_val)
     tips = {
-        FIT_PERFECT:   f"This model uses ~{model_gb:.1f} GB of your {total_gb_val:.0f} GB — plenty of headroom.",
-        FIT_GOOD:      f"This model uses ~{model_gb:.1f} GB of your {total_gb_val:.0f} GB — will run well.",
-        FIT_MARGINAL:  (
+        FIT_PERFECT: f"This model uses ~{model_gb:.1f} GB of your {total_gb_val:.0f} GB — plenty of headroom.",
+        FIT_GOOD: f"This model uses ~{model_gb:.1f} GB of your {total_gb_val:.0f} GB — will run well.",
+        FIT_MARGINAL: (
             f"This model needs ~{model_gb:.1f} GB of your {total_gb_val:.0f} GB. "
             "Close other apps before loading. Consider a more-quantized variant."
         ),
@@ -697,6 +770,7 @@ def search_hf_models(
 ) -> list[dict]:
     """Search all of HuggingFace Hub (not just mlx-community) via REST API."""
     import urllib.parse
+
     params: dict[str, Any] = {
         "sort": "downloads",
         "direction": "-1",
@@ -706,7 +780,9 @@ def search_hf_models(
     }
     if query.strip():
         params["search"] = query.strip()
-    if tags:
+    if tags and "mlx" in tags:
+        params["author"] = "mlx-community"
+    elif tags:
         params["filter"] = ",".join(tags)
     url = "https://huggingface.co/api/models?" + urllib.parse.urlencode(params)
     try:
@@ -718,14 +794,16 @@ def search_hf_models(
             if not model_id:
                 continue
             model_tags = list(m.get("tags") or [])
-            results.append({
-                "id": model_id,
-                "downloads": m.get("downloads", 0) or 0,
-                "likes": m.get("likes", 0) or 0,
-                "tags": model_tags,
-                "last_modified": str(m.get("lastModified") or ""),
-                "is_mlx": "mlx" in [t.lower() for t in model_tags],
-            })
+            results.append(
+                {
+                    "id": model_id,
+                    "downloads": m.get("downloads", 0) or 0,
+                    "likes": m.get("likes", 0) or 0,
+                    "tags": model_tags,
+                    "last_modified": str(m.get("lastModified") or ""),
+                    "is_mlx": "mlx" in [t.lower() for t in model_tags],
+                }
+            )
         return results
     except Exception as e:
         return [{"error": str(e)}]
