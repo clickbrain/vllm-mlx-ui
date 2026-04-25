@@ -123,80 +123,86 @@ function formatDate(ts: string): string {
 
 <template>
   <div class="benchmark-panel">
-    <!-- Configure state -->
+    <!-- Configure state: two-column layout -->
     <template v-if="!modelsStore.benchmarkResults">
-      <div class="configure-section">
-        <div class="section-label">Select Models</div>
-        <div v-if="cachedModels.length === 0" class="empty-hint">
-          No cached models. Download models in the Library tab first.
+      <div class="configure-columns">
+        <!-- Left: Configuration -->
+        <div class="configure-section config-col">
+          <div class="section-label">Configuration</div>
+          <div class="config-grid">
+            <div class="config-field full-width">
+              <label class="field-label">Prompt</label>
+              <textarea
+                v-model="config.prompt"
+                class="config-textarea"
+                rows="4"
+              />
+            </div>
+            <div class="config-field">
+              <label class="field-label">Runs per model</label>
+              <input
+                v-model.number="config.runs"
+                type="number"
+                min="1"
+                max="20"
+                class="config-input"
+              />
+            </div>
+            <div class="config-field">
+              <label class="field-label">Max tokens</label>
+              <input
+                v-model.number="config.max_tokens"
+                type="number"
+                min="64"
+                max="2048"
+                class="config-input"
+              />
+            </div>
+          </div>
+          <div class="run-row">
+            <AppButton
+              variant="primary"
+              :loading="modelsStore.benchmarking"
+              :disabled="selectedModels.length === 0 || modelsStore.benchmarking"
+              @click="runBenchmark"
+            >
+              <template v-if="modelsStore.benchmarking">Running…</template>
+              <template v-else>▶ Run Benchmark</template>
+            </AppButton>
+            <span v-if="selectedModels.length > 0 && !modelsStore.benchmarking" class="bench-selected">
+              {{ selectedModels.length }} selected
+            </span>
+            <span v-if="modelsStore.benchmarking" class="bench-progress">
+              Running {{ selectedModels.length }} model{{ selectedModels.length > 1 ? 's' : '' }}…
+            </span>
+          </div>
         </div>
-        <div v-else class="model-checklist">
-          <label
-            v-for="model in cachedModels"
-            :key="model.id"
-            class="model-check-item"
-          >
-            <input
-              type="checkbox"
-              :value="model.id"
-              :checked="selectedModels.includes(model.id)"
-              class="check-input"
-              @change="toggleModel(model.id)"
-            />
-            <span class="check-name">{{ model.name || model.id.split('/').pop() }}</span>
-            <span class="check-quant">{{ model.quantization }}</span>
-            <span class="check-size">{{ model.size_gb.toFixed(1) }} GB</span>
-          </label>
-        </div>
-      </div>
 
-      <div class="configure-section">
-        <div class="section-label">Configuration</div>
-        <div class="config-grid">
-          <div class="config-field full-width">
-            <label class="field-label">Prompt</label>
-            <textarea
-              v-model="config.prompt"
-              class="config-textarea"
-              rows="3"
-            />
+        <!-- Right: Model list -->
+        <div class="configure-section models-col">
+          <div class="section-label">Select Models</div>
+          <div v-if="cachedModels.length === 0" class="empty-hint">
+            No cached models. Download models in the Library tab first.
           </div>
-          <div class="config-field">
-            <label class="field-label">Runs per model</label>
-            <input
-              v-model.number="config.runs"
-              type="number"
-              min="1"
-              max="20"
-              class="config-input"
-            />
-          </div>
-          <div class="config-field">
-            <label class="field-label">Max tokens</label>
-            <input
-              v-model.number="config.max_tokens"
-              type="number"
-              min="64"
-              max="2048"
-              class="config-input"
-            />
+          <div v-else class="model-checklist">
+            <label
+              v-for="model in cachedModels"
+              :key="model.id"
+              class="model-check-item"
+            >
+              <input
+                type="checkbox"
+                :value="model.id"
+                :checked="selectedModels.includes(model.id)"
+                class="check-input"
+                @change="toggleModel(model.id)"
+              />
+              <span class="check-name">{{ model.name || model.id.split('/').pop() }}</span>
+              <span class="check-quant">{{ model.quantization }}</span>
+              <span class="check-size">{{ model.size_gb.toFixed(1) }} GB</span>
+            </label>
           </div>
         </div>
-      </div>
-
-      <div class="run-row">
-        <AppButton
-          variant="primary"
-          :loading="modelsStore.benchmarking"
-          :disabled="selectedModels.length === 0 || modelsStore.benchmarking"
-          @click="runBenchmark"
-        >
-          <template v-if="modelsStore.benchmarking">Running…</template>
-          <template v-else>Run Benchmark</template>
-        </AppButton>
-        <span v-if="modelsStore.benchmarking" class="bench-progress">
-          Running {{ selectedModels.length }} model{{ selectedModels.length > 1 ? 's' : '' }}…
-        </span>
       </div>
     </template>
 
@@ -297,7 +303,21 @@ function formatDate(ts: string): string {
   flex-shrink: 0;
 }
 
-/* Configure */
+/* Configure — two-column layout */
+.configure-columns {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+/* Stack on narrow screens */
+@media (max-width: 800px) {
+  .configure-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
 .configure-section {
   background: var(--bg-surface);
   border: 1px solid var(--bd-default);
@@ -401,6 +421,12 @@ function formatDate(ts: string): string {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.bench-selected {
+  font-size: var(--text-sm);
+  color: var(--si-400);
 }
 
 .bench-progress {

@@ -14,6 +14,7 @@ const updatesStore = useUpdatesStore()
 
 const showShutdownConfirm = ref(false)
 const shuttingDown = ref(false)
+const memReleaseMsg = ref('')
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 const memPct = computed(() => {
@@ -51,8 +52,16 @@ const isActive = (path: string): boolean => {
 }
 
 async function releaseMemory() {
-  try { await api.post('/memory/release') }
-  catch (err) { console.error('Release memory failed', err) }
+  memReleaseMsg.value = 'Releasing…'
+  try {
+    const r = await api.post<{ freed_gb: number }>('/memory/release')
+    const freed = r?.freed_gb ?? 0
+    memReleaseMsg.value = freed > 0.05 ? `Freed ${freed.toFixed(1)} GB` : 'Done (no orphans found)'
+  } catch (err) {
+    memReleaseMsg.value = 'Failed'
+    console.error('Release memory failed', err)
+  }
+  setTimeout(() => { memReleaseMsg.value = '' }, 3500)
 }
 
 async function doShutdown() {
@@ -117,6 +126,7 @@ async function doShutdown() {
       <button class="release-mem-btn" title="Stop server and release MLX memory" @click="releaseMemory">
         ↺ Release Memory
       </button>
+      <span v-if="memReleaseMsg" class="release-mem-msg">{{ memReleaseMsg }}</span>
     </div>
 
     <!-- Fleet -->
@@ -376,6 +386,14 @@ async function doShutdown() {
 .release-mem-btn:hover {
   color: var(--tx-secondary);
   border-color: var(--bd-emphasis);
+}
+
+.release-mem-msg {
+  margin-top: var(--space-1);
+  font-size: 10.5px;
+  color: var(--si-400);
+  text-align: center;
+  min-height: 14px;
 }
 
 .release-btn {
