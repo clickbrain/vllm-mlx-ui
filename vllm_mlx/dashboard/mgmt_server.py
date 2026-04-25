@@ -516,48 +516,132 @@ def _hot_swap_if_needed(requested_model: str) -> None:
                 break
 
 
+def _needs_hot_swap(requested_model: str) -> bool:
+    """Return True if requested_model differs from the currently loaded model
+    and is available in the local cache.  Does NOT acquire _swap_lock."""
+    if not _HF_REPO_RE.match(requested_model):
+        return False
+    cfg = sm.load_config()
+    if cfg.get("model", "").strip() == requested_model:
+        return False
+    cached_ids = {m["id"] for m in mm.get_cached_models()}
+    return requested_model in cached_ids
+
+
+def _sse_delta(content: str) -> str:
+    """Format a single assistant content delta as an SSE data line."""
+    import json as _j
+    payload = {
+        "object": "chat.completion.chunk",
+        "choices": [{"index": 0, "delta": {"role": "assistant", "content": content}, "finish_reason": None}],
+    }
+    return f"data: {_j.dumps(payload)}\n\n"
+
+
 @app.post("/v1/chat/completions")
 async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) -> Any:
     """
     Proxy for /v1/chat/completions.
-    If auto_model_switch is enabled and the requested model differs from the
-    loaded one, the server is automatically reloaded with the new model before
-    forwarding. Hot-swap runs in a thread so it does not block the event loop.
 
-    Enable this proxy by pointing your OpenAI client at:
-      http://<this-machine-ip>:8502/v1/chat/completions
+    Auto model-switch behaviour (when auto_model_switch is enabled):
+      If the requested model differs from the currently loaded one, the proxy
+      immediately opens an SSE stream and sends the user a "switching model"
+      notification so their chat client shows live feedback instead of a blank
+      wait.  Periodic heartbeat comments keep the connection alive during the
+      60-120 s load time.  Once the server is healthy the original request is
+      forwarded and streamed back as normal.
+
+    For requests that do NOT require a model switch the proxy passes through
+    verbatim, respecting the client's stream preference.
     """
     import asyncio
     import httpx
 
     requested_model = request.get("model", "").strip()
-    if requested_model:
-        cfg_check = sm.load_config()
-        if cfg_check.get("auto_model_switch", False):
-            await asyncio.to_thread(_hot_swap_if_needed, requested_model)
-
+    cfg_check = sm.load_config()
+    auto_switch = cfg_check.get("auto_model_switch", False)
+    needs_switch = bool(requested_model and auto_switch and _needs_hot_swap(requested_model))
 
     cfg = sm.load_config()
     target = sm.get_server_url(cfg)
-    headers: dict[str, str] = {"Content-Type": "application/json"}
+    req_headers: dict[str, str] = {"Content-Type": "application/json"}
     key = cfg.get("api_key", "").strip()
     if key:
-        headers["Authorization"] = f"Bearer {key}"
+        req_headers["Authorization"] = f"Bearer {key}"
 
+    if needs_switch:
+        # ── Model-switch path ────────────────────────────────────────────────
+        # Always respond as SSE so we can push the notification immediately.
+        # The client will see the "switching" message in their chat bubble
+        # before the model has even started loading.
+        from fastapi.responses import StreamingResponse
+
+        async def _switch_and_respond():
+            # 1. Immediate notification — appears in the client chat right away
+            notice = (
+                f"⏳ Switching model to **{requested_model}** — "
+                "please wait while it loads…"
+            )
+            yield _sse_delta(notice)
+
+            # 2. Run the hot-swap in a background thread; emit SSE heartbeat
+            #    comments every 5 s so the HTTP connection stays alive.
+            swap_done = asyncio.Event()
+            swap_error: list[str] = []
+
+            async def _do_swap() -> None:
+                try:
+                    await asyncio.to_thread(_hot_swap_if_needed, requested_model)
+                except Exception as exc:
+                    swap_error.append(str(exc))
+                finally:
+                    swap_done.set()
+
+            asyncio.create_task(_do_swap())
+
+            while not swap_done.is_set():
+                try:
+                    await asyncio.wait_for(swap_done.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"  # SSE comment — keeps connection alive
+
+            if swap_error:
+                yield _sse_delta(f"\n\n❌ Model switch failed: {swap_error[0]}")
+                yield "data: [DONE]\n\n"
+                return
+
+            # 3. Model is loaded — append a separator then stream the real reply
+            yield _sse_delta("\n\n")
+
+            cfg2 = sm.load_config()
+            target2 = sm.get_server_url(cfg2)
+            # Force streaming so we can pipe bytes straight through
+            req2 = {**request, "stream": True}
+
+            try:
+                async with httpx.AsyncClient(timeout=300) as _client:
+                    async with _client.stream(
+                        "POST", f"{target2}/v1/chat/completions",
+                        json=req2, headers=req_headers,
+                    ) as resp:
+                        async for chunk in resp.aiter_bytes():
+                            yield chunk
+            except Exception as exc:
+                yield _sse_delta(f"\n\n❌ Request failed after model switch: {exc}")
+                yield "data: [DONE]\n\n"
+
+        return StreamingResponse(_switch_and_respond(), media_type="text/event-stream")
+
+    # ── Normal path (no model switch needed) ────────────────────────────────
     try:
         if request.get("stream"):
-            # Stream the response back.
-            # The httpx client must be created INSIDE the generator — if it were
-            # created in the outer async-with block, Python would close it when
-            # this coroutine returns the StreamingResponse, before FastAPI has a
-            # chance to iterate the generator body.
             from fastapi.responses import StreamingResponse
 
             async def _stream():
                 async with httpx.AsyncClient(timeout=300) as _client:
                     async with _client.stream(
                         "POST", f"{target}/v1/chat/completions",
-                        json=request, headers=headers,
+                        json=request, headers=req_headers,
                     ) as resp:
                         async for chunk in resp.aiter_bytes():
                             yield chunk
@@ -567,7 +651,7 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
             async with httpx.AsyncClient(timeout=300) as client:
                 resp = await client.post(
                     f"{target}/v1/chat/completions",
-                    json=request, headers=headers,
+                    json=request, headers=req_headers,
                 )
                 return resp.json()
     except Exception as exc:

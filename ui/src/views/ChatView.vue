@@ -280,7 +280,7 @@ function deleteChat(id: string) {
             class="message"
             :class="msg.role"
           >
-            <div class="message-bubble">{{ msg.content }}</div>
+            <div class="message-bubble" :class="{ streaming: msg.streaming }">{{ msg.content }}</div>
           </div>
         </div>
 
@@ -570,7 +570,15 @@ function deleteChat(id: string) {
 .chat-params {
   border-top: 1px solid var(--bd-subtle);
   padding: var(--space-2) var(--space-4);
+  flex-shrink: 0;
 }
+
+.params-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 .params-toggle {
   display: flex;
   align-items: center;
@@ -585,16 +593,67 @@ function deleteChat(id: string) {
   transition: color var(--transition-fast);
 }
 .params-toggle:hover { color: var(--tx-secondary); }
+
+.params-chevron {
+  transition: transform .15s ease;
+  color: var(--tx-muted);
+}
+.params-chevron.open { transform: rotate(180deg); }
+
+.stream-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  margin-left: auto;
+}
+.stream-check { accent-color: var(--si-500); width: 13px; height: 13px; cursor: pointer; }
+.stream-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--tx-muted);
+  user-select: none;
+}
+
+.optimal-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--tx-secondary);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+  white-space: nowrap;
+}
+.optimal-btn:hover:not(:disabled) { border-color: var(--si-500); color: var(--si-300); }
+.optimal-btn:disabled { opacity: .4; cursor: default; }
+
 .params-body {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding-top: var(--space-2);
+  padding-top: var(--space-3);
 }
+
+.params-row {
+  display: flex;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
+
 .param-item {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 180px;
 }
 .param-label {
   font-size: 11px;
@@ -602,7 +661,7 @@ function deleteChat(id: string) {
   letter-spacing: .05em;
   text-transform: uppercase;
   color: var(--tx-muted);
-  width: 68px;
+  width: 76px;
   flex-shrink: 0;
 }
 .param-range {
@@ -627,6 +686,36 @@ function deleteChat(id: string) {
   font-size: 12px;
   padding: 3px 8px;
 }
+.param-hint {
+  font-size: 10.5px;
+  color: var(--tx-muted);
+  white-space: nowrap;
+}
+
+.advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--tx-muted);
+  cursor: pointer;
+  padding: 2px 0;
+  transition: color var(--transition-fast);
+}
+.advanced-toggle:hover { color: var(--tx-secondary); }
+
+.message-bubble.streaming::after {
+  content: '▋';
+  display: inline-block;
+  color: var(--si-400);
+  animation: blink .8s step-end infinite;
+  margin-left: 1px;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
 
 .textarea-wrap {
   position: relative;
