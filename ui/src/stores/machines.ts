@@ -50,5 +50,26 @@ export const useMachinesStore = defineStore('machines', () => {
     activeMachineId.value = id
   }
 
-  return { machines, activeMachineId, activeMachine, addMachine, removeMachine, setActive }
+  async function pingMachine(machine: Machine): Promise<boolean> {
+    try {
+      const res = await fetch(`http://${machine.host}:${machine.port}/health`, {
+        signal: AbortSignal.timeout(3000),
+      })
+      return res.ok
+    } catch {
+      return false
+    }
+  }
+
+  async function refreshOnlineStatus() {
+    for (const machine of machines.value) {
+      if (machine.type === 'local') {
+        machine.online = true
+      } else {
+        machine.online = await pingMachine(machine)
+      }
+    }
+  }
+
+  return { machines, activeMachineId, activeMachine, addMachine, removeMachine, setActive, pingMachine, refreshOnlineStatus }
 })

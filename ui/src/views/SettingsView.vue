@@ -6,6 +6,7 @@ import { useServerStore } from '@/stores/server'
 import { useUpdatesStore } from '@/stores/updates'
 import AppButton from '@/components/shared/AppButton.vue'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
+import CollapsibleSection from '@/components/shared/CollapsibleSection.vue'
 import { api } from '@/api/client'
 
 const machinesStore = useMachinesStore()
@@ -403,6 +404,42 @@ async function doRestart() {
           </label>
         </div>
       </div>
+      <div class="pref-collapsible-wrap">
+        <CollapsibleSection title="Firewall &amp; Remote Access">
+          <ol class="firewall-steps">
+            <li class="firewall-step">
+              <span class="step-num">1</span>
+              <span class="step-text">Open <strong>System Settings</strong> → <strong>Privacy &amp; Security</strong> → <strong>Firewall</strong></span>
+            </li>
+            <li class="firewall-step">
+              <span class="step-num">2</span>
+              <span class="step-text">Click the <strong>lock icon</strong> and enter your admin password to make changes</span>
+            </li>
+            <li class="firewall-step">
+              <span class="step-num">3</span>
+              <span class="step-text">Click <strong>Firewall Options…</strong></span>
+            </li>
+            <li class="firewall-step">
+              <span class="step-num">4</span>
+              <span class="step-text">Click <strong>+</strong> and add <span class="step-code">python3</span> (or the vllm-mlx executable) from your Python environment</span>
+            </li>
+            <li class="firewall-step">
+              <span class="step-num">5</span>
+              <span class="step-text">Set the entry to <strong>Allow incoming connections</strong> and click OK</span>
+            </li>
+          </ol>
+          <div class="firewall-notes">
+            <div class="firewall-note-item">
+              <span class="note-bullet">→</span>
+              <span>If you enabled <span class="step-code">--host 0.0.0.0</span> and remote clients still can't connect, try temporarily disabling the firewall to confirm it's the cause, then re-enable and adjust the rules.</span>
+            </div>
+            <div class="firewall-note-item">
+              <span class="note-bullet">→</span>
+              <span>Port to allow: <span class="step-code">8502</span> (management dashboard) and the inference port configured in Settings → Network → Port. Both must be reachable for remote access.</span>
+            </div>
+          </div>
+        </CollapsibleSection>
+      </div>
     </section>
 
     <!-- Maintenance -->
@@ -537,4 +574,78 @@ async function doRestart() {
 .update-install-row { padding: var(--space-3) var(--space-5); border-top: 1px solid var(--bd-subtle); display: flex; align-items: center; gap: var(--space-3); }
 .install-message { font-size: var(--text-sm); color: var(--si-300); }
 .update-error { padding: var(--space-3) var(--space-5); font-size: 12px; color: var(--cr-400); }
+
+/* Firewall guide */
+.pref-collapsible-wrap {
+  padding: 0 var(--space-5) var(--space-5);
+  border-top: 1px solid var(--bd-subtle);
+  padding-top: var(--space-4);
+}
+
+.firewall-steps {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--bg-canvas, var(--bg-base));
+  border: 1px solid var(--bd-subtle);
+  border-radius: var(--r-md);
+}
+
+.firewall-step {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.step-num {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--si-300);
+  min-width: 18px;
+  line-height: 1.6;
+  flex-shrink: 0;
+}
+
+.step-text {
+  font-size: 13px;
+  color: var(--tx-secondary);
+  line-height: 1.55;
+}
+
+.step-code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--tx-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-subtle);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+}
+
+.firewall-notes {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.firewall-note-item {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  font-size: 12px;
+  color: var(--tx-muted);
+  line-height: 1.55;
+}
+
+.note-bullet {
+  color: var(--si-300);
+  font-size: 12px;
+  line-height: 1.55;
+  flex-shrink: 0;
+}
 </style>

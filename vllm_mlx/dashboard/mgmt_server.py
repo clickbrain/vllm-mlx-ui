@@ -292,6 +292,48 @@ class LoadModelRequest(BaseModel):
     model_id: str
 
 
+@app.get("/models/presets")
+def model_presets(model_id: str, _: None = Depends(_check_auth)) -> dict:
+    """
+    Return recommended inference settings for a model.
+    Fetches config.json from HuggingFace and derives optimal chat parameters.
+    """
+    if not model_id.strip():
+        raise HTTPException(status_code=400, detail="model_id is required")
+    try:
+        presets = mm.get_model_presets(model_id.strip())
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    # Derive recommended chat settings from model type hint
+    model_type = presets.get("model_type_hint", "").lower()
+    arch = presets.get("architecture", "").lower()
+    hint = model_type + " " + arch
+
+    # Defaults that work well for most instruct models
+    recommended: dict[str, Any] = {
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "top_k": 0,
+        "min_p": 0.0,
+        "repetition_penalty": 1.0,
+        "max_tokens": presets.get("max_tokens", 2048),
+    }
+
+    if any(x in hint for x in ("qwen3", "qwen2")):
+        recommended.update({"temperature": 0.6, "top_p": 0.9, "top_k": 20, "min_p": 0.0})
+    elif "deepseek" in hint:
+        recommended.update({"temperature": 0.6, "top_p": 0.95, "top_k": 0})
+    elif "llama" in hint or "mistral" in hint:
+        recommended.update({"temperature": 0.6, "top_p": 0.9, "top_k": 0})
+    elif "gemma" in hint:
+        recommended.update({"temperature": 1.0, "top_p": 0.95, "top_k": 64})
+    elif "phi" in hint:
+        recommended.update({"temperature": 0.0, "top_p": 1.0, "top_k": 0})
+
+    return {**presets, "recommended": recommended}
+
+
 @app.post("/server/load")
 def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
     """Update the configured model; restart the server if it is currently running."""

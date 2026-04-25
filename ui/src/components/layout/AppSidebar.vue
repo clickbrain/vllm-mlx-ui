@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useServerStore } from '@/stores/server'
 import { useMachinesStore } from '@/stores/machines'
@@ -14,6 +14,7 @@ const updatesStore = useUpdatesStore()
 
 const showShutdownConfirm = ref(false)
 const shuttingDown = ref(false)
+let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 const memPct = computed(() => {
   const mem = serverStore.memory
@@ -32,6 +33,12 @@ const loadedModel = computed(() => serverStore.modelId)
 onMounted(() => {
   // best-effort — don't block render
   updatesStore.checkUpdates().catch(() => {})
+  machinesStore.refreshOnlineStatus()
+  refreshInterval = setInterval(() => machinesStore.refreshOnlineStatus(), 30000)
+})
+
+onUnmounted(() => {
+  if (refreshInterval) clearInterval(refreshInterval)
 })
 
 function selectMachine(id: string) {
@@ -126,9 +133,6 @@ async function doShutdown() {
           <span class="machine-name">{{ m.name }}</span>
           <span v-if="m.type === 'remote'" class="machine-host">{{ m.host }}</span>
         </button>
-        <div v-if="machinesStore.machines.length <= 1" class="fleet-hint">
-          Add machines in Settings →
-        </div>
       </div>
     </div>
 

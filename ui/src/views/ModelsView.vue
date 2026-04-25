@@ -42,10 +42,6 @@ async function doSearch() {
   await modelsStore.searchHF(searchInput.value.trim(), mlxOnly.value)
 }
 
-function handleSearchKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter') doSearch()
-}
-
 // LibCard action handlers
 async function handleLoad(modelId: string) {
   try { await modelsStore.loadModel(modelId) }
@@ -163,7 +159,7 @@ onMounted(() => {
           type="text"
           class="search-input"
           placeholder="Search HuggingFace… (empty = top downloads)"
-          @keydown="handleSearchKeydown"
+          @keydown.enter="doSearch"
         />
         <div class="scope-toggle">
           <button

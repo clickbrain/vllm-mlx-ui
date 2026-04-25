@@ -126,6 +126,19 @@ function connectionUrl(ip: string) {
   return `http://${ip}:${serverPort.value}/v1`
 }
 
+const OPENAI_PATHS = [
+  { tag: 'Base URL',         path: '/v1' },
+  { tag: 'Chat',             path: '/v1/chat/completions' },
+  { tag: 'Completions',      path: '/v1/completions' },
+  { tag: 'Models',           path: '/v1/models' },
+  { tag: 'Embeddings',       path: '/v1/embeddings' },
+]
+
+function openAiEndpoints(ip: string) {
+  const base = `http://${ip}:${serverPort.value}`
+  return OPENAI_PATHS.map(ep => ({ tag: ep.tag, path: ep.path, url: base + ep.path }))
+}
+
 async function copyUrl(url: string) {
   try {
     await navigator.clipboard.writeText(url)
@@ -242,17 +255,25 @@ async function doClearCache(type: string) {
         <div v-if="localOnly" class="conn-warning">
           ⚠ Server is only reachable from this Mac. Change listen address in Settings → Network &amp; Access to allow remote connections.
         </div>
-        <p class="conn-note">Use these URLs to connect Cursor, Continue, LM Studio, or any OpenAI-compatible client.</p>
-        <div v-if="networkInterfaces.length" class="conn-list">
-          <div v-for="iface in networkInterfaces" :key="iface.ip" class="conn-row">
-            <div class="conn-label">{{ iface.label }}</div>
-            <div class="conn-url-wrap">
-              <code class="conn-url">{{ connectionUrl(iface.ip) }}</code>
-              <button
-                class="copy-btn"
-                :class="{ copied: copiedUrl === connectionUrl(iface.ip) }"
-                @click="copyUrl(connectionUrl(iface.ip))"
-              >{{ copiedUrl === connectionUrl(iface.ip) ? '✓ Copied' : 'Copy' }}</button>
+        <p class="conn-note">Copy any URL to use with Cursor, Continue, LM Studio, or any OpenAI-compatible client.</p>
+
+        <div v-if="networkInterfaces.length" class="conn-ifaces">
+          <div v-for="iface in networkInterfaces" :key="iface.ip" class="conn-iface-block">
+            <div class="conn-iface-label">{{ iface.label }} — {{ iface.ip }}</div>
+            <div class="conn-endpoint-table">
+              <div
+                v-for="ep in openAiEndpoints(iface.ip)"
+                :key="ep.path"
+                class="conn-endpoint-row"
+              >
+                <span class="ep-tag">{{ ep.tag }}</span>
+                <code class="ep-url">{{ ep.url }}</code>
+                <button
+                  class="copy-btn"
+                  :class="{ copied: copiedUrl === ep.url }"
+                  @click="copyUrl(ep.url)"
+                >{{ copiedUrl === ep.url ? '✓' : 'Copy' }}</button>
+              </div>
             </div>
           </div>
         </div>
@@ -553,7 +574,7 @@ async function doClearCache(type: string) {
   border: 1px solid rgba(245,158,11,.25);
   border-radius: var(--r-md);
   font-size: 12px;
-  color: #f59e0b;
+  color: var(--cu-400);
 }
 
 .conn-note {
@@ -561,56 +582,77 @@ async function doClearCache(type: string) {
   color: var(--tx-muted);
 }
 
-.conn-list {
+/* Per-interface block */
+.conn-ifaces {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.conn-iface-block {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
 
-.conn-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.conn-label {
+.conn-iface-label {
   font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
+  font-weight: 700;
   letter-spacing: .06em;
-  color: var(--tx-muted);
+  text-transform: uppercase;
+  color: var(--si-400);
 }
 
-.conn-url-wrap {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.conn-url {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--tx-primary);
+/* Endpoint table */
+.conn-endpoint-table {
   background: var(--bg-canvas);
   border: 1px solid var(--bd-default);
-  border-radius: var(--r-md);
-  padding: 4px 10px;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.conn-endpoint-row {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--bd-subtle);
+}
+.conn-endpoint-row:last-child { border-bottom: none; }
+
+.ep-tag {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--tx-muted);
+  white-space: nowrap;
+}
+
+.ep-url {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--tx-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .copy-btn {
   padding: 3px 10px;
   background: var(--bg-elevated);
   border: 1px solid var(--bd-default);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   font-size: 11px;
   font-family: inherit;
   color: var(--tx-secondary);
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
   white-space: nowrap;
+  flex-shrink: 0;
 }
-.copy-btn:hover { background: var(--bg-canvas); color: var(--tx-primary); }
-.copy-btn.copied { color: var(--ph-400, #4ade80); border-color: rgba(74,222,128,.3); }
+.copy-btn:hover { border-color: var(--bd-emphasis); color: var(--tx-primary); }
+.copy-btn.copied { color: var(--ph-400); border-color: rgba(74,222,128,.3); }
 
 .conn-empty { font-size: 12px; color: var(--tx-muted); font-style: italic; }
 
