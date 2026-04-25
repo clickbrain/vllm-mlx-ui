@@ -1970,6 +1970,82 @@ async def cache_stats():
         return {"error": "Cache stats not available (mlx_vlm not loaded)"}
 
 
+@app.post("/v1/memory/release", dependencies=[Depends(verify_api_key)])
+async def release_memory():
+    """Release MLX Metal buffer cache and compress the process heap.
+
+    Runs inside the inference server process where the model and Metal
+    allocations live.  Does NOT unload the model — weights stay in RAM.
+    To fully free model memory, stop the server via POST /v1/stop or the
+    dashboard Stop button.
+
+    Returns estimated GB freed (based on psutil RSS before/after).
+    """
+    import ctypes
+    import gc
+    import os as _os
+
+    import psutil
+
+    before_rss = psutil.Process(_os.getpid()).memory_info().rss
+
+    notes: list[str] = []
+
+    # 1. Python GC — break reference cycles first
+    gc.collect()
+    gc.collect()
+    notes.append("Python GC (2 passes)")
+
+    # 2. MLX Metal buffer cache — clear freed buffers from past computations.
+    #    This is the most impactful step: Metal keeps a pool of freed buffers
+    #    to speed up re-allocation; clear_cache() returns them to the OS.
+    try:
+        import mlx.core as mx
+        mx.clear_cache()
+        notes.append("MLX Metal buffer cache cleared")
+    except Exception as e:
+        notes.append(f"MLX cache clear skipped: {e}")
+
+    # 3. Prefix KV cache (continuous batching)
+    if _engine is not None and hasattr(_engine, "clear_prefix_cache"):
+        try:
+            _engine.clear_prefix_cache()
+            notes.append("Prefix KV cache cleared")
+        except Exception as e:
+            notes.append(f"Prefix cache clear skipped: {e}")
+
+    # 4. Multimodal caches (mlx-vlm only)
+    try:
+        from mlx_vlm.utils import clear_multimodal_kv_cache, clear_pixel_values_cache
+        clear_multimodal_kv_cache()
+        clear_pixel_values_cache()
+        notes.append("Multimodal KV/pixel caches cleared")
+    except ImportError:
+        pass
+    except Exception as e:
+        notes.append(f"Multimodal cache clear skipped: {e}")
+
+    # 5. macOS malloc zone pressure relief — compacts all malloc zones in THIS
+    #    process and returns free chunks to the OS kernel immediately.
+    try:
+        libc = ctypes.CDLL("libSystem.B.dylib", use_errno=True)
+        libc.malloc_zone_pressure_relief.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        libc.malloc_zone_pressure_relief.restype = None
+        libc.malloc_zone_pressure_relief(None, ctypes.c_size_t(0))
+        notes.append("malloc_zone_pressure_relief (all zones)")
+    except Exception as e:
+        notes.append(f"malloc_zone_pressure_relief skipped: {e}")
+
+    # Final GC pass after compaction
+    gc.collect()
+    notes.append("Python GC (final pass)")
+
+    after_rss = psutil.Process(_os.getpid()).memory_info().rss
+    freed_gb = max(0.0, round((before_rss - after_rss) / (1024 ** 3), 2))
+
+    return {"freed_gb": freed_gb, "notes": notes}
+
+
 @app.delete("/v1/cache", dependencies=[Depends(verify_api_key)])
 async def clear_cache():
     """Clear all caches."""

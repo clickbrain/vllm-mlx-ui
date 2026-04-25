@@ -56,15 +56,22 @@ const isActive = (path: string): boolean => {
 async function releaseMemory() {
   memReleaseMsg.value = 'Releasing…'
   try {
-    const r = await api.post<{ freed_gb: number }>('/memory/release')
+    const r = await api.post<{ freed_gb: number; heap_notes?: string[]; warnings?: string[] }>('/memory/release')
     const freed = r?.freed_gb ?? 0
-    memReleaseMsg.value = freed > 0.05 ? `Freed ${freed.toFixed(1)} GB` : 'Done (no orphans found)'
+    const warnings = r?.warnings ?? []
+    if (freed > 0.05) {
+      memReleaseMsg.value = `Freed ${freed.toFixed(1)} GB`
+    } else if (warnings.length && warnings.every(w => w.includes('Could not reach'))) {
+      memReleaseMsg.value = 'Server offline — caches not cleared'
+    } else {
+      memReleaseMsg.value = 'Done — caches cleared'
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     memReleaseMsg.value = `Failed: ${msg}`
     console.error('Release memory failed', err)
   }
-  setTimeout(() => { memReleaseMsg.value = '' }, 3500)
+  setTimeout(() => { memReleaseMsg.value = '' }, 4500)
 }
 
 async function scanForMachines() {

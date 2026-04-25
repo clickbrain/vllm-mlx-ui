@@ -866,21 +866,20 @@ def _release_system_heap() -> list[str]:
 
 def force_release_memory() -> dict:
     """
-    Release memory from orphaned/crashed processes and compress the system heap.
-    In remote mode, proxies to the remote machine's management API.
+    Release memory from the inference server process, orphaned processes, and
+    compress the system heap.  In remote mode, proxies to the remote machine's
+    management API.
 
     This does NOT stop the intentionally-running inference server. To unload
     a model and reclaim its memory, use stop_server() explicitly (or the
     Stop Server button in the UI).
 
     Steps:
-    1. Find and terminate ORPHANED vllm_mlx / benchmark subprocesses.
-       These are processes that should not exist — leftover from crashes or
-       previous sessions. The active inference server (tracked by PID_FILE)
-       is explicitly protected and never killed.
-    2. General macOS heap compression: malloc_zone_pressure_relief (compacts
-       all malloc zones and returns free chunks to the OS), Python GC, MLX
-       Metal cache clear (only if MLX is already loaded), optional purge.
+    1. Call POST /v1/memory/release on the running inference server (if any).
+       This runs mx.clear_cache(), Python GC, and malloc_zone_pressure_relief
+       INSIDE the inference server process where the Metal buffers live.
+    2. Find and terminate ORPHANED vllm_mlx / benchmark subprocesses.
+    3. General macOS heap compression in this (mgmt_server) process.
 
     Returns a dict:
       before        : memory stats before cleanup
@@ -911,8 +910,51 @@ def force_release_memory() -> dict:
     before = get_memory_stats()
     warnings: list[str] = []
     procs_killed: list[dict] = []
+    server_heap_notes: list[str] = []
 
-    # ── 1. Terminate ORPHANED vllm processes ─────────────────────────────────
+    # ── 1. Ask the inference server to release its own Metal + heap memory ────
+    # The model weights and Metal buffer pool live in the inference server
+    # process — malloc_zone_pressure_relief in this process does nothing for
+    # them.  Calling /v1/memory/release runs mx.clear_cache(), GC, and heap
+    # compaction INSIDE that process.
+    cfg_for_release = load_config()
+    _server_url = get_server_url(cfg_for_release)
+    _api_key = cfg_for_release.get("api_key", "")
+    _auth_headers: dict[str, str] = {}
+    if _api_key:
+        _auth_headers["Authorization"] = f"Bearer {_api_key}"
+    try:
+        r = _http.post(
+            f"{_server_url}/v1/memory/release",
+            headers=_auth_headers,
+            timeout=30,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            server_heap_notes = [f"[inference server] {n}" for n in data.get("notes", [])]
+            server_freed = data.get("freed_gb", 0.0)
+            if server_freed > 0:
+                server_heap_notes.insert(0, f"[inference server] freed {server_freed:.2f} GB")
+        elif r.status_code == 404:
+            # Older inference server — fall back to existing cache-clear endpoints
+            server_heap_notes.append("[inference server] /v1/memory/release not available (older build)")
+            for cache_path in ["/v1/cache/prefix", "/v1/cache"]:
+                try:
+                    cr = _http.delete(
+                        f"{_server_url}{cache_path}",
+                        headers=_auth_headers,
+                        timeout=10,
+                    )
+                    if cr.status_code in (200, 204):
+                        server_heap_notes.append(f"[inference server] {cache_path} cleared")
+                except Exception:
+                    pass
+        else:
+            warnings.append(f"Inference server memory release returned HTTP {r.status_code}")
+    except Exception as e:
+        warnings.append(f"Could not reach inference server for memory release: {e}")
+
+    # ── 2. Terminate ORPHANED vllm processes ─────────────────────────────────
     # Kill only vllm processes that are NOT the active inference server.
     # The active server PID is recorded in PID_FILE; we protect it along
     # with our own process chain so we never kill anything intentional.
@@ -983,8 +1025,8 @@ def force_release_memory() -> dict:
     except Exception as e:
         warnings.append(f"Process scan failed: {e}")
 
-    # ── 2. General heap compression ───────────────────────────────────────────
-    heap_notes = _release_system_heap()
+    # ── 3. General heap compression (mgmt_server process) ────────────────────
+    heap_notes = server_heap_notes + _release_system_heap()
 
     # Allow OS memory accounting to settle
     time.sleep(1.0)
