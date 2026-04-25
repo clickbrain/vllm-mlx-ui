@@ -36,6 +36,11 @@ const error = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
 const savedChats = ref<SavedChat[]>(loadSavedChats())
 
+const temperature = ref(0.7)
+const maxTokens = ref(2048)
+const topP = ref(0.9)
+const showParams = ref(false)
+
 const modelId = computed(() => serverStore.modelId)
 
 async function send() {
@@ -58,6 +63,9 @@ async function send() {
       model: modelId.value ?? 'default',
       messages: messages.value.map(m => ({ role: m.role, content: m.content })),
       stream: false,
+      temperature: temperature.value,
+      max_tokens: maxTokens.value,
+      top_p: topP.value,
     }
     const data = await api.post<{ choices: Array<{ message: { content: string } }> }>(
       '/v1/chat/completions',
@@ -152,6 +160,30 @@ function deleteChat(id: string) {
         </div>
 
         <div v-if="error" class="chat-error">{{ error }}</div>
+
+        <!-- Parameters panel -->
+        <div class="chat-params">
+          <button class="params-toggle" @click="showParams = !showParams">
+            <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg>
+            Parameters
+          </button>
+          <div v-if="showParams" class="params-body">
+            <label class="param-item">
+              <span class="param-label">Temp</span>
+              <input type="range" v-model.number="temperature" min="0" max="2" step="0.05" class="param-range" />
+              <span class="param-val">{{ temperature.toFixed(2) }}</span>
+            </label>
+            <label class="param-item">
+              <span class="param-label">Top-P</span>
+              <input type="range" v-model.number="topP" min="0" max="1" step="0.05" class="param-range" />
+              <span class="param-val">{{ topP.toFixed(2) }}</span>
+            </label>
+            <label class="param-item">
+              <span class="param-label">Max tokens</span>
+              <input type="number" v-model.number="maxTokens" min="64" max="32768" step="64" class="param-number" />
+            </label>
+          </div>
+        </div>
 
         <div class="input-row">
           <div class="textarea-wrap">
@@ -351,6 +383,67 @@ function deleteChat(id: string) {
   padding: var(--space-3);
   border-top: 1px solid var(--bd-subtle);
   flex-shrink: 0;
+}
+
+.chat-params {
+  border-top: 1px solid var(--bd-subtle);
+  padding: var(--space-2) var(--space-4);
+}
+.params-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: none;
+  color: var(--tx-muted);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 0;
+  transition: color var(--transition-fast);
+}
+.params-toggle:hover { color: var(--tx-secondary); }
+.params-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+}
+.param-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.param-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--tx-muted);
+  width: 68px;
+  flex-shrink: 0;
+}
+.param-range {
+  flex: 1;
+  accent-color: var(--si-500);
+  height: 3px;
+}
+.param-val {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--tx-secondary);
+  width: 36px;
+  text-align: right;
+}
+.param-number {
+  width: 90px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-sm);
+  color: var(--tx-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 3px 8px;
 }
 
 .textarea-wrap {

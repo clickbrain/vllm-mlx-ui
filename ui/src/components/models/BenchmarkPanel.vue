@@ -114,6 +114,11 @@ function bestModelForUseCase(_useCase: string): string | null {
   const best = results.reduce((a, b) => (a.avg_tps > b.avg_tps ? a : b))
   return best.model_id.split('/').pop() ?? best.model_id
 }
+
+function formatDate(ts: string): string {
+  if (!ts) return '—'
+  try { return new Date(ts).toLocaleString() } catch { return ts }
+}
 </script>
 
 <template>
@@ -246,6 +251,18 @@ function bestModelForUseCase(_useCase: string): string | null {
           <div class="uc-label">Best for {{ selectedUseCase }}</div>
           <div class="uc-model">{{ bestModelForUseCase(selectedUseCase) }}</div>
           <div class="uc-reason">Highest average throughput among benchmarked models.</div>
+        </div>
+      </div>
+
+      <div v-if="modelsStore.benchmarkHistory?.length > 1" class="history-section">
+        <div class="history-label">Previous Runs</div>
+        <div class="history-list">
+          <div v-for="run in modelsStore.benchmarkHistory.slice(1)" :key="run.id" class="history-row">
+            <span class="history-date">{{ formatDate(run.timestamp) }}</span>
+            <span class="history-models">{{ run.model_id.split('/').pop() }}</span>
+            <span class="history-tps">{{ run.avg_tps?.toFixed(1) }} t/s avg</span>
+            <button class="history-del" @click="modelsStore.deleteBenchmarkResult(run.id)" title="Delete">✕</button>
+          </div>
         </div>
       </div>
     </template>
@@ -527,4 +544,77 @@ function bestModelForUseCase(_useCase: string): string | null {
   font-size: var(--text-sm);
   color: var(--tx-tertiary);
 }
+
+/* History */
+.history-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.history-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--tx-muted);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--bd-subtle);
+  background: var(--bg-elevated);
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--bd-subtle);
+  font-size: 12px;
+  transition: background var(--transition-fast);
+}
+.history-row:last-child { border-bottom: none; }
+.history-row:hover { background: var(--bg-elevated); }
+
+.history-date {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--tx-muted);
+  min-width: 140px;
+}
+
+.history-models {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--tx-secondary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-tps {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--si-300);
+  white-space: nowrap;
+}
+
+.history-del {
+  background: none;
+  border: none;
+  color: var(--tx-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: var(--r-sm);
+  transition: color var(--transition-fast);
+  flex-shrink: 0;
+}
+.history-del:hover { color: var(--cr-300, #fca5a5); }
 </style>

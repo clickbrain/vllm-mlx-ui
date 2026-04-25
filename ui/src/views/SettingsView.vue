@@ -28,6 +28,7 @@ const startupBehavior = ref<'auto' | 'ask' | 'none'>('auto')
 // Network & Access
 const listenAllInterfaces = ref(false)
 const inferenceApiKey = ref('')
+const hfToken = ref(localStorage.getItem('vmui_hf_token') ?? '')
 const offlineMode = ref(false)
 
 // Maintenance
@@ -105,6 +106,10 @@ async function saveListenAddress(allInterfaces: boolean) {
 
 async function saveApiKey() {
   try { await api.post('/config', { api_key: inferenceApiKey.value }) } catch { /* silent */ }
+}
+
+function saveHfToken() {
+  localStorage.setItem('vmui_hf_token', hfToken.value.trim())
 }
 
 async function saveOfflineMode(val: boolean) {
@@ -290,6 +295,12 @@ async function doRestart() {
           </div>
           <span class="pref-value mono">{{ diskUsedGb !== null ? diskUsedGb.toFixed(1) + ' GB' : '—' }}</span>
         </div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">Config File</span>
+            <span class="pref-desc mono-path">~/.config/vllm-mlx-ui/config.json</span>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -363,6 +374,21 @@ async function doRestart() {
               type="password"
               placeholder="sk-…  (leave blank to disable)"
               @blur="saveApiKey"
+            />
+          </div>
+        </div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">HuggingFace Access Token</span>
+            <span class="pref-desc">Required for private or gated models. Get yours at huggingface.co/settings/tokens. Stored locally only — never sent to any server.</span>
+          </div>
+          <div class="pref-actions">
+            <input
+              v-model="hfToken"
+              class="field-input field-inline"
+              type="password"
+              placeholder="hf_…"
+              @blur="saveHfToken"
             />
           </div>
         </div>
@@ -481,6 +507,7 @@ async function doRestart() {
 .pref-label { font-size: var(--text-sm); font-weight: 500; color: var(--tx-primary); }
 .pref-desc { font-size: 12px; color: var(--tx-muted); }
 .pref-desc.mono { font-family: var(--font-mono); font-size: 11.5px; }
+.mono-path { font-family: var(--font-mono); font-size: 11.5px; }
 .pref-value { font-size: var(--text-sm); color: var(--tx-secondary); }
 .pref-value.mono { font-family: var(--font-mono); font-size: 12px; }
 .field-inline { width: 260px; }

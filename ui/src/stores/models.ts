@@ -37,6 +37,13 @@ export interface BenchmarkResult {
   runs: number
 }
 
+export interface BenchmarkHistoryEntry {
+  id: number
+  timestamp: string
+  model_id: string
+  avg_tps: number
+}
+
 export interface BenchmarkConfig {
   prompt: string
   runs: number
@@ -68,6 +75,7 @@ export const useModelsStore = defineStore('models', () => {
   const pollIntervals: Record<string, number> = {}
 
   const benchmarkResults = ref<BenchmarkResult[] | null>(null)
+  const benchmarkHistory = ref<BenchmarkHistoryEntry[]>([])
   const benchmarking = ref(false)
   const benchmarkRunning = ref(false)
   const loadingModelId = ref<string | null>(null)
@@ -92,11 +100,12 @@ export const useModelsStore = defineStore('models', () => {
   }
 
   async function downloadModel(modelId: string, token = '') {
+    const hfToken = token || localStorage.getItem('vmui_hf_token') || ''
     // Guard: don't start a duplicate download
     const existing = downloadQueue.value.find(q => q.id === modelId)
     if (existing && (existing.status === 'queued' || existing.status === 'downloading')) return
 
-    await api.post<void>('/models/download', { model_id: modelId, token })
+    await api.post<void>('/models/download', { model_id: modelId, token: hfToken })
     const name = modelId.split('/').pop() ?? modelId
     if (!existing) {
       downloadQueue.value.push({ id: modelId, name, progress: 0, status: 'queued' })
@@ -222,18 +231,29 @@ export const useModelsStore = defineStore('models', () => {
       max_tps: Number(r.max_tps ?? r.avg_tps ?? 0),
       runs: Number(r.runs ?? r.num_runs ?? 1),
     }))
+    benchmarkHistory.value = raw.map((r, idx) => ({
+      id: Number(r.id ?? idx),
+      timestamp: String(r.timestamp ?? r.created_at ?? ''),
+      model_id: String(r.model ?? r.model_id ?? ''),
+      avg_tps: Number(r.avg_tps ?? r.tokens_per_second ?? 0),
+    }))
+  }
+
+  async function deleteBenchmarkResult(id: number) {
+    await api.delete(`/benchmarks/${id}`)
+    await fetchBenchmarkResults()
   }
 
   return {
     models, loading,
     searchQuery, searchResults, searching,
     downloadQueue,
-    benchmarkResults, benchmarking, benchmarkRunning,
+    benchmarkResults, benchmarkHistory, benchmarking, benchmarkRunning,
     loadingModelId, actionError,
     fetchModels, downloadModel, pollDownloadStatus,
     loadModel, deleteModel,
     searchHF,
-    runBenchmark, fetchBenchmarkResults,
+    runBenchmark, fetchBenchmarkResults, deleteBenchmarkResult,
   }
 })
 
