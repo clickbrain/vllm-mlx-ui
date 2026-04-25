@@ -70,6 +70,8 @@ export const useModelsStore = defineStore('models', () => {
   const benchmarkResults = ref<BenchmarkResult[] | null>(null)
   const benchmarking = ref(false)
   const benchmarkRunning = ref(false)
+  const loadingModelId = ref<string | null>(null)
+  const actionError = ref<string | null>(null)
 
   async function fetchModels() {
     loading.value = true
@@ -143,10 +145,19 @@ export const useModelsStore = defineStore('models', () => {
   }
 
   async function loadModel(modelId: string) {
-    await api.post<void>('/server/load', { model_id: modelId })
-    await fetchModels()
-    await serverStore.fetchStatus()
-    await serverStore.fetchConfig()
+    loadingModelId.value = modelId
+    actionError.value = null
+    try {
+      await api.post<void>('/server/load', { model_id: modelId })
+      await fetchModels()
+      await serverStore.fetchStatus()
+      await serverStore.fetchConfig()
+    } catch (e) {
+      actionError.value = String(e)
+      throw e
+    } finally {
+      loadingModelId.value = null
+    }
   }
 
   async function deleteModel(modelId: string) {
@@ -154,12 +165,23 @@ export const useModelsStore = defineStore('models', () => {
     models.value = models.value.filter(m => m.id !== modelId)
   }
 
-  async function searchHF(query: string) {
+  async function searchHF(query: string, mlxOnly = false) {
     searchQuery.value = query
     searching.value = true
+    actionError.value = null
     try {
-      const results = await api.get<HFModel[]>(`/models/search?q=${encodeURIComponent(query)}`)
-      searchResults.value = results.filter(r => !('error' in r))
+      const params = new URLSearchParams()
+      if (query.trim()) params.set('q', query.trim())
+      if (mlxOnly) params.set('tags', 'mlx')
+      params.set('limit', '40')
+      const results = await api.get<Array<HFModel & { error?: string }>>(`/models/search?${params}`)
+      searchResults.value = results.filter(r => !r.error)
+      if (searchResults.value.length === 0 && results.length > 0 && results[0].error) {
+        actionError.value = `Search error: ${results[0].error}`
+      }
+    } catch (e) {
+      actionError.value = String(e)
+      searchResults.value = []
     } finally {
       searching.value = false
     }
@@ -207,6 +229,7 @@ export const useModelsStore = defineStore('models', () => {
     searchQuery, searchResults, searching,
     downloadQueue,
     benchmarkResults, benchmarking, benchmarkRunning,
+    loadingModelId, actionError,
     fetchModels, downloadModel, pollDownloadStatus,
     loadModel, deleteModel,
     searchHF,

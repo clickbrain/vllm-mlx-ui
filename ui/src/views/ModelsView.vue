@@ -14,24 +14,18 @@ const tabs = ['Library', 'Find', 'Benchmark'] as const
 type TabName = typeof tabs[number]
 const activeTab = ref<TabName>('Library')
 
-// Library filter + sort
-const libraryFilter = ref<'all' | 'cached' | 'active'>('all')
-const sortMode = ref<'name' | 'size' | 'recent'>('name')
-const sortModes = ['name', 'size', 'recent'] as const
-
-function cycleSort() {
-  const idx = sortModes.indexOf(sortMode.value)
-  sortMode.value = sortModes[(idx + 1) % sortModes.length]
-}
-
-const sortLabel = computed(() =>
-  ({ name: 'Name ↕', size: 'Size ↕', recent: 'Recent ↕' }[sortMode.value])
-)
+// Library filter + sort + text search
+const libraryFilter = ref<'all' | 'active'>('all')
+const librarySearch = ref('')
+const sortMode = ref<'name' | 'size'>('name')
 
 const filteredModels = computed(() => {
   let list = modelsStore.models
-  if (libraryFilter.value === 'cached') list = list.filter(m => m.cached)
   if (libraryFilter.value === 'active') list = list.filter(m => m.active)
+  if (librarySearch.value.trim()) {
+    const q = librarySearch.value.toLowerCase()
+    list = list.filter(m => m.id.toLowerCase().includes(q))
+  }
   if (sortMode.value === 'name') return [...list].sort((a, b) => a.id.localeCompare(b.id))
   if (sortMode.value === 'size') return [...list].sort((a, b) => b.size_gb - a.size_gb)
   return list
@@ -42,10 +36,7 @@ const searchInput = ref('')
 const mlxOnly = ref(true)
 
 async function doSearch() {
-  const q = searchInput.value.trim()
-  if (!q) return
-  const query = mlxOnly.value ? `${q} mlx` : q
-  await modelsStore.searchHF(query)
+  await modelsStore.searchHF(searchInput.value.trim(), mlxOnly.value)
 }
 
 function handleSearchKeydown(e: KeyboardEvent) {
@@ -55,11 +46,11 @@ function handleSearchKeydown(e: KeyboardEvent) {
 // LibCard action handlers
 async function handleLoad(modelId: string) {
   try { await modelsStore.loadModel(modelId) }
-  catch (err) { console.error('Load failed', err) }
+  catch { /* actionError shown via store */ }
 }
 
 async function handleDelete(modelId: string) {
-  if (!confirm(`Delete ${modelId}?`)) return
+  if (!confirm(`Remove ${modelId} from local cache? This cannot be undone.`)) return
   try { await modelsStore.deleteModel(modelId) }
   catch (err) { console.error('Delete failed', err) }
 }
@@ -89,6 +80,12 @@ onMounted(() => { modelsStore.fetchModels() })
 
     <!-- Library tab -->
     <div v-if="activeTab === 'Library'" class="tab-content">
+      <!-- Error bar -->
+      <div v-if="modelsStore.actionError" class="error-banner">
+        ⚠ {{ modelsStore.actionError }}
+        <button class="error-dismiss" @click="modelsStore.actionError = null">✕</button>
+      </div>
+
       <div class="library-toolbar">
         <div class="filter-chips">
           <button
@@ -98,16 +95,22 @@ onMounted(() => { modelsStore.fetchModels() })
           >All</button>
           <button
             class="filter-chip"
-            :class="{ active: libraryFilter === 'cached' }"
-            @click="libraryFilter = 'cached'"
-          >Cached</button>
-          <button
-            class="filter-chip"
             :class="{ active: libraryFilter === 'active' }"
             @click="libraryFilter = 'active'"
           >Active</button>
         </div>
-        <button class="sort-btn" @click="cycleSort">{{ sortLabel }}</button>
+        <div class="lib-search-wrap">
+          <input
+            v-model="librarySearch"
+            type="text"
+            class="lib-search-input"
+            placeholder="Filter…"
+          />
+        </div>
+        <div class="sort-group">
+          <button class="sort-btn" :class="{ active: sortMode === 'name' }" @click="sortMode = 'name'">Name</button>
+          <button class="sort-btn" :class="{ active: sortMode === 'size' }" @click="sortMode = 'size'">Size</button>
+        </div>
       </div>
 
       <div v-if="modelsStore.loading" class="empty-state">
@@ -130,7 +133,6 @@ onMounted(() => { modelsStore.fetchModels() })
           :quantization="m.quantization"
           :active="m.active"
           :cached="m.cached"
-          @switch="handleLoad(m.id)"
           @load="handleLoad(m.id)"
           @delete="handleDelete(m.id)"
           @download="handleDownload(m.id)"
@@ -145,7 +147,7 @@ onMounted(() => { modelsStore.fetchModels() })
           v-model="searchInput"
           type="text"
           class="search-input"
-          placeholder="Search HuggingFace…"
+          placeholder="Search HuggingFace… (empty = top downloads)"
           @keydown="handleSearchKeydown"
         />
         <div class="scope-toggle">
@@ -163,6 +165,11 @@ onMounted(() => { modelsStore.fetchModels() })
         <AppButton variant="primary" size="sm" :loading="modelsStore.searching" @click="doSearch">
           Search
         </AppButton>
+      </div>
+
+      <div v-if="modelsStore.actionError" class="error-banner">
+        ⚠ {{ modelsStore.actionError }}
+        <button class="error-dismiss" @click="modelsStore.actionError = null">✕</button>
       </div>
 
       <div v-if="modelsStore.searching" class="empty-state">
@@ -186,11 +193,8 @@ onMounted(() => { modelsStore.fetchModels() })
           @download="handleDownload(r.id)"
         />
       </div>
-      <div v-else-if="modelsStore.searchQuery !== ''" class="empty-state">
-        <span class="empty-label">No results found</span>
-      </div>
-      <div v-else class="empty-state">
-        <span class="empty-label">Search for a model to get started</span>
+      <div v-else-if="modelsStore.searchQuery !== '' || modelsStore.searchResults.length === 0 && !modelsStore.actionError" class="empty-state">
+        <span class="empty-label">{{ modelsStore.searchQuery ? 'No results found' : 'Click Search to browse top MLX models' }}</span>
       </div>
     </div>
 
@@ -421,6 +425,78 @@ onMounted(() => { modelsStore.fetchModels() })
 }
 
 .col-action { min-width: 80px; }
+
+/* Library search + sort */
+.lib-search-wrap {
+  flex: 1;
+}
+
+.lib-search-input {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  color: var(--tx-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: 5px 10px;
+  transition: border-color var(--transition-fast);
+}
+
+.lib-search-input::placeholder { color: var(--tx-muted); }
+.lib-search-input:focus {
+  outline: none;
+  border-color: var(--bd-focus);
+  box-shadow: 0 0 0 3px rgba(91, 106, 208, .12);
+}
+
+.sort-group {
+  display: flex;
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.sort-btn {
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  color: var(--tx-muted);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.sort-btn:first-child { border-right: 1px solid var(--bd-default); }
+.sort-btn:hover:not(.active) { background: var(--bg-elevated); color: var(--tx-secondary); }
+.sort-btn.active { background: var(--ac-bg); color: var(--si-300); font-weight: 600; }
+
+/* Error banner */
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: rgba(239, 68, 68, .08);
+  border: 1px solid rgba(239, 68, 68, .25);
+  border-radius: var(--r-md);
+  font-size: var(--text-sm);
+  color: var(--cr-300);
+}
+
+.error-dismiss {
+  background: none;
+  border: none;
+  color: var(--cr-300);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  opacity: 0.7;
+}
+.error-dismiss:hover { opacity: 1; }
 
 /* Spinner */
 @keyframes spin { to { transform: rotate(360deg); } }

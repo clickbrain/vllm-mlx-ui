@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useServerStore } from '@/stores/server'
+import { useModelsStore } from '@/stores/models'
 import StatusPill from '@/components/shared/StatusPill.vue'
 import AppButton from '@/components/shared/AppButton.vue'
 import CollapsibleSection from '@/components/shared/CollapsibleSection.vue'
@@ -8,9 +9,13 @@ import EndpointCard from '@/components/serve/EndpointCard.vue'
 import MetricCard from '@/components/serve/MetricCard.vue'
 
 const serverStore = useServerStore()
+const modelsStore = useModelsStore()
 let stopPolling: (() => void) | null = null
 
-onMounted(() => { stopPolling = serverStore.startPolling() })
+onMounted(() => {
+  stopPolling = serverStore.startPolling()
+  modelsStore.fetchModels()
+})
 onUnmounted(() => { stopPolling?.() })
 
 const status = computed(() => {
@@ -47,6 +52,25 @@ const logs = ref<string[]>([])
 async function refreshLogs() {
   logs.value = await serverStore.fetchLogs(200)
 }
+
+// Model picker
+const switchingModel = ref(false)
+const switchError = ref<string | null>(null)
+
+async function handleModelSwitch(e: Event) {
+  const target = e.target as HTMLSelectElement
+  const newId = target.value
+  if (!newId || newId === serverStore.modelId) return
+  switchingModel.value = true
+  switchError.value = null
+  try {
+    await modelsStore.loadModel(newId)
+  } catch (err) {
+    switchError.value = String(err)
+  } finally {
+    switchingModel.value = false
+  }
+}
 </script>
 
 <template>
@@ -58,6 +82,28 @@ async function refreshLogs() {
         <StatusPill :status="status" />
       </div>
       <div class="header-actions">
+        <!-- Model picker -->
+        <div class="model-picker-wrap">
+          <div class="model-picker-label">Model</div>
+          <div class="model-picker-control">
+            <select
+              class="model-select"
+              :value="serverStore.modelId ?? ''"
+              :disabled="switchingModel"
+              @change="handleModelSwitch"
+            >
+              <option v-if="!serverStore.modelId" value="" disabled>No model loaded</option>
+              <option v-if="serverStore.modelId && !modelsStore.models.find(m => m.id === serverStore.modelId)" :value="serverStore.modelId">
+                {{ serverStore.modelId }}
+              </option>
+              <option v-for="m in modelsStore.models" :key="m.id" :value="m.id">
+                {{ m.id.split('/').pop() }}
+              </option>
+            </select>
+            <div v-if="switchingModel" class="picker-spinner" />
+          </div>
+        </div>
+
         <AppButton
           v-if="!serverStore.isRunning"
           variant="primary"
@@ -73,6 +119,12 @@ async function refreshLogs() {
           @click="serverStore.stopServer()"
         >■ Stop</AppButton>
       </div>
+    </div>
+
+    <!-- Switch error -->
+    <div v-if="switchError" class="error-banner">
+      ⚠ {{ switchError }}
+      <button class="error-dismiss" @click="switchError = null">✕</button>
     </div>
 
     <!-- Connection endpoints -->
@@ -237,6 +289,94 @@ async function refreshLogs() {
   font-style: italic;
   padding-top: var(--space-2);
 }
+
+/* Model picker */
+.header-actions {
+  align-items: center;
+}
+
+.model-picker-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-picker-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--tx-muted);
+}
+
+.model-picker-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.model-select {
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  color: var(--tx-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 5px 28px 5px 10px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7280'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+  min-width: 200px;
+  max-width: 320px;
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: var(--bd-focus);
+  box-shadow: 0 0 0 3px rgba(91, 106, 208, .12);
+}
+
+.model-select:disabled { opacity: 0.6; cursor: not-allowed; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.picker-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--bd-emphasis);
+  border-top-color: var(--si-500);
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Error banner */
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: rgba(239, 68, 68, .08);
+  border: 1px solid rgba(239, 68, 68, .25);
+  border-radius: var(--r-md);
+  font-size: var(--text-sm);
+  color: var(--cr-300);
+}
+
+.error-dismiss {
+  background: none;
+  border: none;
+  color: var(--cr-300);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  opacity: 0.7;
+}
+.error-dismiss:hover { opacity: 1; }
 
 /* Logs */
 .logs-body { min-height: 80px; }

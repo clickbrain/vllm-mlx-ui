@@ -282,9 +282,10 @@ def delete_model(model_id: str, _: None = Depends(_check_auth)) -> dict:
 
 
 @app.get("/models/search")
-def search_models(q: str = "", limit: int = 30, _: None = Depends(_check_auth)) -> list:
-    """Search HuggingFace Hub for models."""
-    return mm.search_hf_models(query=q, limit=limit)
+def search_models(q: str = "", tags: str = "", limit: int = 30, _: None = Depends(_check_auth)) -> list:
+    """Search HuggingFace Hub for models. Pass tags=mlx for MLX-only results."""
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+    return mm.search_hf_models(query=q, tags=tag_list, limit=limit)
 
 
 class LoadModelRequest(BaseModel):
