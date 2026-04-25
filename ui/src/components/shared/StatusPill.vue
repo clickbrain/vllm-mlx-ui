@@ -45,13 +45,13 @@ const label = computed<string>(() => ({
 
 /* Running */
 .status-pill--running {
-  color: var(--ph-400);
-  background: rgba(34, 197, 94, .08);
-  border-color: rgba(34, 197, 94, .20);
+  color: var(--ph-300);
+  background: rgba(34, 197, 94, .06);
+  border-color: rgba(34, 197, 94, .14);
 }
 .status-pill--running .status-pill-dot {
-  background: var(--ph-500);
-  box-shadow: 0 0 0 2px rgba(34, 197, 94, .20);
+  background: var(--ph-400);
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, .15);
 }
 
 /* Stopped */

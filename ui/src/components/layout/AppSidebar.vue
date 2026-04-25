@@ -59,7 +59,7 @@ async function doShutdown() {
       <span class="logo-mark">vm</span><span class="logo-accent">UI</span>
     </div>
 
-    <!-- Nav — PRIMARY: above the gauge -->
+    <!-- Nav — above the gauge -->
     <nav class="sidebar-nav">
       <RouterLink to="/serve" class="nav-item" :class="{ active: isActive('/serve') }">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
@@ -110,8 +110,7 @@ async function doShutdown() {
 
     <!-- Fleet -->
     <div class="sidebar-section fleet-section">
-      <div class="section-label">Fleet</div>
-      <div class="machine-list">
+      <div class="section-label">Fleet</div>      <div class="machine-list">
         <button
           v-for="m in machinesStore.machines"
           :key="m.id"
@@ -144,18 +143,7 @@ async function doShutdown() {
       </button>
       <div class="footer-right">
         <span class="footer-version">v0.1.0</span>
-        <div class="footer-actions">
-          <button
-            class="release-btn"
-            title="Release memory (stops server, clears MLX cache)"
-            @click="releaseMemory"
-          >
-            <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
-              <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
-            </svg>
-          </button>
-          <span class="footer-dot" :class="serverStore.isRunning ? 'running' : 'stopped'" />
-        </div>
+        <span class="footer-dot" :class="serverStore.isRunning ? 'running' : 'stopped'" />
       </div>
     </div>
 
