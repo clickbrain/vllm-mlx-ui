@@ -212,6 +212,21 @@ def main() -> None:
             UI_PID_FILE.unlink(missing_ok=True)
         except Exception:
             pass
+        # If a relaunch was requested (e.g., by POST /restart or update install), start a new process
+        try:
+            from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG
+            if RELAUNCH_FLAG.exists():
+                RELAUNCH_FLAG.unlink(missing_ok=True)
+                cmd = _find_binary()
+                subprocess.Popen(
+                    cmd,
+                    start_new_session=True,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+        except Exception:
+            pass
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -246,13 +261,13 @@ def main() -> None:
         except Exception:
             pass
     else:
-        print(f"[vllm-mlx] ⚠️  Management API did NOT start — check stderr for details",
+        print("[vllm-mlx] ⚠️  Management API did NOT start — check stderr for details",
               file=sys.stderr)
 
     # Auto-start inference server after a post-upgrade relaunch
     try:
         from vllm_mlx.dashboard.server_manager import (
-            AUTO_START_FLAG, load_config, start_server, get_server_status,
+            AUTO_START_FLAG, load_config, start_server,
         )
         # Two-path auto-start:
         # 1. AUTO_START_FLAG file: set by update_checker.relaunch() for post-upgrade

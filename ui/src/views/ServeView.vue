@@ -5,17 +5,32 @@ import { useModelsStore } from '@/stores/models'
 import StatusPill from '@/components/shared/StatusPill.vue'
 import AppButton from '@/components/shared/AppButton.vue'
 import CollapsibleSection from '@/components/shared/CollapsibleSection.vue'
+import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 import EndpointCard from '@/components/serve/EndpointCard.vue'
 import MetricCard from '@/components/serve/MetricCard.vue'
+import { api } from '@/api/client'
 
 const serverStore = useServerStore()
 const modelsStore = useModelsStore()
 let stopPolling: (() => void) | null = null
 
+interface NetworkInterface {
+  ip: string
+  label: string
+}
+const networkInterfaces = ref<NetworkInterface[]>([])
+const copiedUrl = ref<string | null>(null)
+
+// Clear cache confirms
+const confirmClearAll = ref(false)
+const confirmClearPrefix = ref(false)
+const cacheMsg = ref<string | null>(null)
+
 onMounted(() => {
   stopPolling = serverStore.startPolling()
   modelsStore.fetchModels()
   refreshLogs()
+  api.get<NetworkInterface[]>('/network/interfaces').then(r => { networkInterfaces.value = r }).catch(() => {})
 })
 onUnmounted(() => { stopPolling?.() })
 
@@ -101,6 +116,38 @@ async function saveConfig() {
     saveError.value = String(err)
   }
 }
+
+// Network interfaces
+const serverPort = computed(() => serverStore.config?.port ?? 8080)
+const serverHost = computed(() => serverStore.config?.host ?? '127.0.0.1')
+const localOnly = computed(() => serverHost.value.startsWith('127'))
+
+function connectionUrl(ip: string) {
+  return `http://${ip}:${serverPort.value}/v1`
+}
+
+async function copyUrl(url: string) {
+  try {
+    await navigator.clipboard.writeText(url)
+    copiedUrl.value = url
+    setTimeout(() => { if (copiedUrl.value === url) copiedUrl.value = null }, 1500)
+  } catch { /* silent */ }
+}
+
+// Clear cache
+async function doClearCache(type: string) {
+  confirmClearAll.value = false
+  confirmClearPrefix.value = false
+  cacheMsg.value = null
+  try {
+    await serverStore.clearCache(type)
+    cacheMsg.value = `${type === 'all' ? 'All cache' : 'Prefix cache'} cleared.`
+    setTimeout(() => { cacheMsg.value = null }, 3000)
+  } catch {
+    cacheMsg.value = 'Clear failed.'
+    setTimeout(() => { cacheMsg.value = null }, 3000)
+  }
+}
 </script>
 
 <template>
@@ -179,8 +226,39 @@ async function saveConfig() {
         <AppButton variant="secondary" size="sm" @click="serverStore.releaseMemory()">
           ↺ Release Memory
         </AppButton>
+        <AppButton variant="secondary" size="sm" @click="confirmClearAll = true">
+          🗑 Clear All Cache
+        </AppButton>
+        <AppButton variant="secondary" size="sm" @click="confirmClearPrefix = true">
+          🗑 Clear Prefix Cache
+        </AppButton>
+        <span v-if="cacheMsg" class="cache-msg">{{ cacheMsg }}</span>
       </div>
     </section>
+
+    <!-- Connection Info -->
+    <CollapsibleSection title="📡 Connection Info" :defaultOpen="true">
+      <div class="conn-body">
+        <div v-if="localOnly" class="conn-warning">
+          ⚠ Server is only reachable from this Mac. Change listen address in Settings → Network &amp; Access to allow remote connections.
+        </div>
+        <p class="conn-note">Use these URLs to connect Cursor, Continue, LM Studio, or any OpenAI-compatible client.</p>
+        <div v-if="networkInterfaces.length" class="conn-list">
+          <div v-for="iface in networkInterfaces" :key="iface.ip" class="conn-row">
+            <div class="conn-label">{{ iface.label }}</div>
+            <div class="conn-url-wrap">
+              <code class="conn-url">{{ connectionUrl(iface.ip) }}</code>
+              <button
+                class="copy-btn"
+                :class="{ copied: copiedUrl === connectionUrl(iface.ip) }"
+                @click="copyUrl(connectionUrl(iface.ip))"
+              >{{ copiedUrl === connectionUrl(iface.ip) ? '✓ Copied' : 'Copy' }}</button>
+            </div>
+          </div>
+        </div>
+        <p v-else class="conn-empty">No network interfaces found.</p>
+      </div>
+    </CollapsibleSection>
 
     <!-- Server Configuration -->
     <CollapsibleSection title="Server Configuration">
@@ -226,6 +304,25 @@ async function saveConfig() {
         <AppButton variant="ghost" size="sm" @click="refreshLogs" style="margin-top: var(--space-2)">↻ Refresh</AppButton>
       </div>
     </CollapsibleSection>
+
+    <ConfirmModal
+      v-if="confirmClearAll"
+      title="Clear All Cache"
+      message="This will clear the full KV cache. Running requests may be affected."
+      confirm-label="Clear"
+      :destructive="true"
+      @confirm="doClearCache('all')"
+      @cancel="confirmClearAll = false"
+    />
+    <ConfirmModal
+      v-if="confirmClearPrefix"
+      title="Clear Prefix Cache"
+      message="This will clear the prefix (prompt) cache only."
+      confirm-label="Clear"
+      :destructive="true"
+      @confirm="doClearCache('prefix')"
+      @cancel="confirmClearPrefix = false"
+    />
   </div>
 </template>
 
@@ -425,9 +522,91 @@ async function saveConfig() {
 
 .release-mem-row {
   display: flex;
-  justify-content: flex-start;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
   padding-top: var(--space-2);
 }
+
+.cache-msg {
+  font-size: 12px;
+  color: var(--si-300);
+}
+
+/* Connection info */
+.conn-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}
+
+.conn-warning {
+  padding: var(--space-2) var(--space-3);
+  background: rgba(245,158,11,.08);
+  border: 1px solid rgba(245,158,11,.25);
+  border-radius: var(--r-md);
+  font-size: 12px;
+  color: #f59e0b;
+}
+
+.conn-note {
+  font-size: 12px;
+  color: var(--tx-muted);
+}
+
+.conn-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.conn-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.conn-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--tx-muted);
+}
+
+.conn-url-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.conn-url {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--tx-primary);
+  background: var(--bg-canvas);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  padding: 4px 10px;
+}
+
+.copy-btn {
+  padding: 3px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--tx-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  white-space: nowrap;
+}
+.copy-btn:hover { background: var(--bg-canvas); color: var(--tx-primary); }
+.copy-btn.copied { color: var(--ph-400, #4ade80); border-color: rgba(74,222,128,.3); }
+
+.conn-empty { font-size: 12px; color: var(--tx-muted); font-style: italic; }
 
 /* Error banner */
 .error-banner {

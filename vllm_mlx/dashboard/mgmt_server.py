@@ -546,6 +546,147 @@ def set_auto_switch(data: dict[str, Any], _: None = Depends(_check_auth)) -> dic
     return {"ok": True, "enabled": cfg["auto_model_switch"]}
 
 
+import os as _os_mod
+import signal as _signal_mod
+
+
+@app.post("/shutdown")
+def shutdown(_: None = Depends(_check_auth)) -> dict:
+    """Terminate the vllm-mlx-ui process entirely."""
+    import threading as _thr
+
+    def _do_shutdown():
+        import time as _t
+        _t.sleep(0.3)
+        try:
+            from vllm_mlx.dashboard.server_manager import UI_PID_FILE
+            pid = int(UI_PID_FILE.read_text().strip())
+            _os_mod.kill(pid, _signal_mod.SIGTERM)
+        except Exception:
+            _os_mod.kill(_os_mod.getpid(), _signal_mod.SIGTERM)
+    _thr.Thread(target=_do_shutdown, daemon=True).start()
+    return {"ok": True}
+
+
+@app.post("/restart")
+def restart_app(_: None = Depends(_check_auth)) -> dict:
+    """Restart the vllm-mlx-ui process (re-reads config, picks up code changes)."""
+    import threading as _thr
+
+    def _do_restart():
+        import time as _t
+        _t.sleep(0.3)
+        try:
+            from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG, UI_PID_FILE
+            RELAUNCH_FLAG.touch()
+            pid = int(UI_PID_FILE.read_text().strip())
+            _os_mod.kill(pid, _signal_mod.SIGTERM)
+        except Exception:
+            pass
+    _thr.Thread(target=_do_restart, daemon=True).start()
+    return {"ok": True}
+
+
+@app.get("/updates")
+def check_for_updates(force: bool = False, _: None = Depends(_check_auth)) -> dict:
+    """Check for available updates to vllm-mlx-ui and key dependencies."""
+    from vllm_mlx.dashboard import update_checker as _uc
+    packages = _uc.check_updates(force=force)
+    return {
+        "packages": [
+            {
+                "name": p.name,
+                "installed": p.installed,
+                "latest": p.latest,
+                "update_available": p.update_available,
+                "url": p.url,
+            }
+            for p in packages
+        ],
+        "any_update": any(p.update_available for p in packages),
+        "install_method": _uc._detect_install_method(),
+    }
+
+
+@app.post("/updates/install")
+def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
+    """Start an upgrade and restart after it completes."""
+    import threading as _thr
+    import subprocess as _sp
+    from vllm_mlx.dashboard import update_checker as _uc
+    cmd = _uc.upgrade_command()
+
+    def _do_upgrade():
+        try:
+            _sp.run(cmd, timeout=300, check=False)
+        except Exception:
+            pass
+        try:
+            from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG, AUTO_START_FLAG, UI_PID_FILE
+            AUTO_START_FLAG.touch()
+            RELAUNCH_FLAG.touch()
+            pid = int(UI_PID_FILE.read_text().strip())
+            _os_mod.kill(pid, _signal_mod.SIGTERM)
+        except Exception:
+            pass
+    _thr.Thread(target=_do_upgrade, daemon=True).start()
+    return {"ok": True, "message": "Upgrade started. The app will restart automatically when complete."}
+
+
+@app.get("/network/interfaces")
+def network_interfaces(_: None = Depends(_check_auth)) -> list:
+    """Return all local network interfaces with friendly labels."""
+    import socket as _socket
+    import subprocess as _sp
+    addrs: list[dict] = []
+    seen: set[str] = set()
+
+    iface_labels: dict[str, str] = {}
+    try:
+        out = _sp.check_output(["ifconfig", "-l"], text=True, stderr=_sp.DEVNULL).strip()
+        for iface in out.split():
+            try:
+                r = _sp.check_output(["ipconfig", "getifaddr", iface], text=True, stderr=_sp.DEVNULL).strip()
+                if r:
+                    label = iface
+                    if iface.startswith("en0"):
+                        label = "Wi-Fi / Ethernet"
+                    elif iface.startswith("en"):
+                        label = f"Network ({iface})"
+                    elif "bridge" in iface.lower():
+                        label = "Thunderbolt Bridge"
+                    elif "utun" in iface or "lo" in iface:
+                        continue
+                    iface_labels[r] = label
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    try:
+        hostname = _socket.gethostname()
+        all_ips = _socket.getaddrinfo(hostname, None, _socket.AF_INET)
+        for item in all_ips:
+            ip = item[4][0]
+            if ip.startswith("127.") or ip in seen:
+                continue
+            seen.add(ip)
+            label = iface_labels.get(ip, "Network")
+            addrs.append({"ip": ip, "label": label})
+    except Exception:
+        pass
+
+    try:
+        local_name = _socket.gethostname()
+        if not local_name.endswith(".local"):
+            local_name = local_name.split(".")[0] + ".local"
+        addrs.append({"ip": local_name, "label": "mDNS (.local — works on same network)"})
+    except Exception:
+        pass
+
+    return addrs
+
+
 # ── Vue UI static serving ─────────────────────────────────────────────────────
 # Serve the built Vue UI from ui/dist/ at the root path.
 # API routes (/status, /memory, etc.) take priority because they are registered

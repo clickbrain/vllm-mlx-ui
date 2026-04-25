@@ -144,12 +144,25 @@ export const useServerStore = defineStore('server', () => {
     catch { /* silent */ }
   }
 
+  async function shutdown() {
+    await api.post('/shutdown', {})
+  }
+
+  async function restart() {
+    await api.post('/restart', {})
+  }
+
+  async function clearCache(cacheType: string) {
+    await api.delete(`/cache/${cacheType}`)
+  }
+
   return {
     status, metrics, memory, config, loading, error,
     isRunning, memoryPercent, underPressure,
     modelId, uptimeSeconds, tps, baseUrl,
     fetchStatus, fetchMetrics, fetchConfig, fetchMemory,
     startServer, stopServer, fetchLogs, startPolling, releaseMemory, saveConfig,
+    shutdown, restart, clearCache,
   }
 })
 

@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useServerStore } from '@/stores/server'
 import { useMachinesStore } from '@/stores/machines'
+import { useUpdatesStore } from '@/stores/updates'
+import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 import { api } from '@/api/client'
 
 const route = useRoute()
 const serverStore = useServerStore()
 const machinesStore = useMachinesStore()
+const updatesStore = useUpdatesStore()
+
+const showShutdownConfirm = ref(false)
+const shuttingDown = ref(false)
 
 const memPct = computed(() => serverStore.memory?.percent ?? 0)
 const arcFillColor = computed(() => memPct.value > 75 ? 'var(--cu-500)' : 'var(--si-500)')
@@ -18,6 +24,11 @@ const arcDashOffset = computed(() => {
 const memUsedGb = computed(() => serverStore.memory?.used_gb.toFixed(1) ?? '—')
 const memTotalGb = computed(() => serverStore.memory?.total_gb.toFixed(0) ?? '—')
 const loadedModel = computed(() => serverStore.modelId)
+
+onMounted(() => {
+  // best-effort — don't block render
+  updatesStore.checkUpdates().catch(() => {})
+})
 
 function selectMachine(id: string) {
   machinesStore.setActive(id)
@@ -31,6 +42,13 @@ const isActive = (path: string): boolean => {
 async function releaseMemory() {
   try { await api.post('/memory/release') }
   catch (err) { console.error('Release memory failed', err) }
+}
+
+async function doShutdown() {
+  shuttingDown.value = true
+  showShutdownConfirm.value = false
+  try { await serverStore.shutdown() }
+  catch { /* silent — server is going down */ }
 }
 </script>
 
@@ -62,6 +80,7 @@ async function releaseMemory() {
           <path fill-rule="evenodd" d="M7.84 1.804A1 1 0 018.82 1h2.36a1 1 0 01.98.804l.331 1.652a6.993 6.993 0 011.929 1.115l1.598-.54a1 1 0 011.186.447l1.18 2.044a1 1 0 01-.205 1.251l-1.267 1.113a7.047 7.047 0 010 2.228l1.267 1.113a1 1 0 01.206 1.25l-1.18 2.045a1 1 0 01-1.187.447l-1.598-.54a6.993 6.993 0 01-1.929 1.115l-.33 1.652a1 1 0 01-.98.804H8.82a1 1 0 01-.98-.804l-.331-1.652a6.993 6.993 0 01-1.929-1.115l-1.598.54a1 1 0 01-1.186-.447l-1.18-2.044a1 1 0 01.205-1.251l1.267-1.114a7.05 7.05 0 010-2.227L1.821 7.773a1 1 0 01-.206-1.25l1.18-2.045a1 1 0 011.187-.447l1.598.54A6.993 6.993 0 017.51 3.456l.33-1.652zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
         </svg>
         <span>Settings</span>
+        <span v-if="updatesStore.anyUpdate" class="update-badge" title="Updates available" />
       </RouterLink>
 
       <div class="nav-divider" />
@@ -112,20 +131,43 @@ async function releaseMemory() {
 
     <!-- Footer -->
     <div class="sidebar-footer">
-      <span class="footer-version">v0.1.0</span>
-      <div class="footer-actions">
-        <button
-          class="release-btn"
-          title="Release memory (stops server, clears MLX cache)"
-          @click="releaseMemory"
-        >
-          <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
-            <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
-          </svg>
-        </button>
-        <span class="footer-dot" :class="serverStore.isRunning ? 'running' : 'stopped'" />
+      <button
+        class="shutdown-btn"
+        title="Shut down vllm-mlx-ui"
+        :disabled="shuttingDown"
+        @click="showShutdownConfirm = true"
+      >
+        <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13" aria-hidden="true">
+          <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v5a1 1 0 11-2 0V3a1 1 0 011-1zm4.22 2.78a1 1 0 011.415 0 8 8 0 11-11.27 0 1 1 0 011.414 1.415 6 6 0 108.44 0 1 1 0 010-1.415z" clip-rule="evenodd" />
+        </svg>
+        <span>{{ shuttingDown ? 'Shutting down…' : 'Shut Down' }}</span>
+      </button>
+      <div class="footer-right">
+        <span class="footer-version">v0.1.0</span>
+        <div class="footer-actions">
+          <button
+            class="release-btn"
+            title="Release memory (stops server, clears MLX cache)"
+            @click="releaseMemory"
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
+              <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
+            </svg>
+          </button>
+          <span class="footer-dot" :class="serverStore.isRunning ? 'running' : 'stopped'" />
+        </div>
       </div>
     </div>
+
+    <ConfirmModal
+      v-if="showShutdownConfirm"
+      title="Shut Down Dashboard"
+      message="This will stop vllm-mlx-ui completely. You'll need to reopen it from the menu bar or terminal."
+      confirm-label="Shut Down"
+      :destructive="true"
+      @confirm="doShutdown"
+      @cancel="showShutdownConfirm = false"
+    />
   </aside>
 </template>
 
@@ -298,11 +340,17 @@ async function releaseMemory() {
 /* Footer */
 .sidebar-footer {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--bd-subtle);
   flex-shrink: 0;
+}
+
+.footer-right {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .footer-version {
@@ -361,5 +409,41 @@ async function releaseMemory() {
 /* Responsive: hide sidebar below 720px */
 @media (max-width: 720px) {
   .sidebar { display: none; }
+}
+
+.update-badge {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245,158,11,.2);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.shutdown-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 6px var(--space-2);
+  background: rgba(239, 68, 68, .08);
+  border: 1px solid rgba(239, 68, 68, .2);
+  border-radius: var(--r-md);
+  color: var(--cr-300, #f87171);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+  text-align: left;
+}
+.shutdown-btn:hover {
+  background: rgba(239, 68, 68, .15);
+  border-color: rgba(239, 68, 68, .40);
+}
+.shutdown-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>
