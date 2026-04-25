@@ -83,14 +83,13 @@ onMounted(() => {
     <!-- Download queue — shown when downloads are active -->
     <DownloadQueueCard />
 
-    <!-- Tab bar -->
+    <!-- Tab bar — sticky so it stays visible when scrolling -->
     <div class="view-header">
       <TabBar
         :tabs="['Library', 'Find', 'Benchmark']"
         :model-value="activeTab"
         @update:model-value="v => activeTab = v as TabName"
       />
-      <!-- Swarms tab reserved for Kilroy integration -->
     </div>
 
     <!-- Library tab -->
@@ -122,6 +121,7 @@ onMounted(() => {
             placeholder="Filter…"
           />
         </div>
+        <div class="toolbar-spacer" />
         <div class="sort-group">
           <button class="sort-btn" :class="{ active: sortMode === 'name' }" @click="sortMode = 'name'">Name</button>
           <button class="sort-btn" :class="{ active: sortMode === 'size' }" @click="sortMode = 'size'">Size</button>
@@ -244,8 +244,9 @@ onMounted(() => {
   top: 0;
   z-index: 10;
   background: var(--bg-canvas);
-  padding-bottom: var(--space-1);
-  margin-bottom: calc(-1 * var(--space-1));
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--bd-subtle);
+  margin-bottom: var(--space-1);
 }
 
 .tab-content {
@@ -264,6 +265,7 @@ onMounted(() => {
 .filter-chips {
   display: flex;
   gap: var(--space-1);
+  flex-shrink: 0;
 }
 
 .filter-chip {
@@ -458,7 +460,7 @@ onMounted(() => {
 
 /* Library search + sort */
 .lib-search-wrap {
-  width: 180px;
+  width: 140px;
   flex: none;
 }
 
@@ -480,6 +482,8 @@ onMounted(() => {
   border-color: var(--bd-focus);
   box-shadow: 0 0 0 3px rgba(91, 106, 208, .12);
 }
+
+.toolbar-spacer { flex: 1; }
 
 .sort-group {
   display: flex;

@@ -350,6 +350,12 @@ async function doClearCache(type: string) {
   gap: var(--space-3);
 }
 
+/* Align the AppButton vertically with the model select */
+.header-actions > :deep(.app-btn) {
+  align-self: flex-end;
+  margin-bottom: 1px;
+}
+
 .page-title {
   font-size: var(--text-lg);
   font-weight: 700;
