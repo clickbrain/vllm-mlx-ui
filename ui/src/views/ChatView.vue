@@ -92,7 +92,7 @@ function clear() { messages.value = []; error.value = '' }
 
       <div v-if="error" class="chat-error">{{ error }}</div>
 
-      <div class="chat-input-row">
+      <div class="chat-input-wrap">
         <textarea
           v-model="input"
           class="chat-input"
@@ -104,10 +104,11 @@ function clear() { messages.value = []; error.value = '' }
         <AppButton
           variant="primary"
           size="sm"
+          class="send-btn"
           :loading="sending"
           :disabled="!input.trim() || !serverStore.isRunning"
           @click="send"
-        >Send</AppButton>
+        >Send ↵</AppButton>
       </div>
       <p v-if="!serverStore.isRunning" class="server-warn">Server is not running. Start it from the Serve page first.</p>
     </div>
@@ -115,7 +116,7 @@ function clear() { messages.value = []; error.value = '' }
 </template>
 
 <style scoped>
-.chat-view { display: flex; flex-direction: column; height: 100%; gap: var(--space-4); max-width: 760px; }
+.chat-view { display: flex; flex-direction: column; height: 100%; gap: var(--space-4); max-width: 800px; }
 
 .chat-header { display: flex; align-items: center; justify-content: space-between; }
 .page-title { font-size: var(--text-lg); font-weight: 700; letter-spacing: -.3px; color: var(--tx-primary); }
@@ -161,13 +162,16 @@ function clear() { messages.value = []; error.value = '' }
 
 .chat-error { font-size: 12px; color: var(--cr-500); padding: var(--space-2) var(--space-3); background: rgba(239,68,68,.08); border: 1px solid rgba(239,68,68,.2); border-radius: var(--r-md); }
 
-.chat-input-row { display: flex; align-items: flex-end; gap: var(--space-3); }
+.chat-input-wrap {
+  position: relative;
+}
 .chat-input {
-  flex: 1;
+  width: 100%;
   background: var(--bg-surface);
   border: 1px solid var(--bd-default);
   border-radius: var(--r-md);
   padding: var(--space-3);
+  padding-bottom: 44px;
   font-family: var(--font-sans);
   font-size: var(--text-sm);
   color: var(--tx-primary);
@@ -175,10 +179,17 @@ function clear() { messages.value = []; error.value = '' }
   outline: none;
   transition: border-color var(--transition-fast);
   line-height: 1.5;
+  box-sizing: border-box;
 }
 .chat-input:focus { border-color: var(--bd-focus); }
 .chat-input::placeholder { color: var(--tx-muted); }
 .chat-input:disabled { opacity: .5; cursor: not-allowed; }
+
+.send-btn {
+  position: absolute;
+  bottom: var(--space-2);
+  right: var(--space-2);
+}
 
 .server-warn { font-size: 12px; color: var(--cu-400); }
 </style>

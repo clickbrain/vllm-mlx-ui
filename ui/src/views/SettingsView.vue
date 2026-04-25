@@ -151,7 +151,26 @@ function removeConfirm(m: Machine) {
 .page-title { font-size: var(--text-lg); font-weight: 700; letter-spacing: -.3px; color: var(--tx-primary); }
 .settings-section { background: var(--bg-surface); border: 1px solid var(--bd-default); border-radius: var(--r-lg); overflow: hidden; }
 .section-header { display: flex; align-items: flex-start; justify-content: space-between; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--bd-subtle); }
-.section-title { font-size: 13px; font-weight: 700; color: var(--tx-primary); margin-bottom: 2px; }
+.section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--si-400);
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.section-title::before {
+  content: '';
+  display: block;
+  width: 3px;
+  height: 11px;
+  background: var(--si-500);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
 .section-desc { font-size: 12px; color: var(--tx-muted); }
 .add-form { padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--bd-default); background: var(--bg-elevated); display: flex; flex-direction: column; gap: var(--space-3); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr auto; gap: var(--space-3); }

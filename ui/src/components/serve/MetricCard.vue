@@ -30,11 +30,17 @@ defineProps<{
 .metric-card {
   background: var(--bg-surface);
   border: 1px solid var(--bd-default);
+  border-top: 2px solid var(--si-700);
   border-radius: var(--r-lg);
   padding: var(--space-4) var(--space-5);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  transition: border-color var(--transition-fast);
+}
+.metric-card:hover {
+  border-color: var(--bd-emphasis);
+  border-top-color: var(--si-500);
 }
 
 .metric-label {
@@ -56,11 +62,11 @@ defineProps<{
   font-size: var(--text-xl);
   font-weight: 700;
   letter-spacing: -.5px;
-  color: var(--tx-primary);
+  color: var(--si-200);
   transition: color var(--transition-slow);
 }
 .metric-value.warn    { color: var(--cu-400); }
-.metric-value.nominal { color: var(--tx-primary); }
+.metric-value.nominal { color: var(--si-200); }
 
 .metric-unit {
   font-size: var(--text-sm);

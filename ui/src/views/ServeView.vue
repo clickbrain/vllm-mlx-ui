@@ -162,7 +162,19 @@ const memTotal = computed(() => serverStore.memory?.total_gb.toFixed(0) ?? '—'
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
-  color: var(--tx-muted);
+  color: var(--si-400);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.section-label::before {
+  content: '';
+  display: block;
+  width: 3px;
+  height: 11px;
+  background: var(--si-500);
+  border-radius: 2px;
+  flex-shrink: 0;
 }
 
 .endpoint-grid {
@@ -184,14 +196,16 @@ const memTotal = computed(() => serverStore.memory?.total_gb.toFixed(0) ?? '—'
 .config-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 0;
+  max-width: 520px;
 }
 
 .config-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: var(--space-4);
   align-items: center;
-  justify-content: space-between;
-  padding: var(--space-2) 0;
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--bd-subtle);
 }
 .config-row:last-of-type { border-bottom: none; }
