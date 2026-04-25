@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
+import { api } from '@/api/client'
 
 export interface Machine {
   id: string
@@ -71,5 +72,28 @@ export const useMachinesStore = defineStore('machines', () => {
     }
   }
 
-  return { machines, activeMachineId, activeMachine, addMachine, removeMachine, setActive, pingMachine, refreshOnlineStatus }
+  async function scanNetwork(): Promise<Machine[]> {
+    const results = await api.get<{ ip: string; port: number; name: string }[]>('/network/scan')
+    if (!results) return []
+    const discovered: Machine[] = []
+    for (const r of results) {
+      const alreadyKnown = machines.value.some(
+        m => m.host === r.ip && m.port === r.port
+      )
+      if (!alreadyKnown) {
+        discovered.push({
+          id: crypto.randomUUID(),
+          name: r.name || r.ip,
+          host: r.ip,
+          port: r.port,
+          type: 'remote',
+          online: true,
+          memoryGb: 0,
+        })
+      }
+    }
+    return discovered
+  }
+
+  return { machines, activeMachineId, activeMachine, addMachine, removeMachine, setActive, pingMachine, refreshOnlineStatus, scanNetwork }
 })

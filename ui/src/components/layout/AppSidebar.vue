@@ -15,6 +15,8 @@ const updatesStore = useUpdatesStore()
 const showShutdownConfirm = ref(false)
 const shuttingDown = ref(false)
 const memReleaseMsg = ref('')
+const scanning = ref(false)
+const discoveredMachines = ref<import('@/stores/machines').Machine[]>([])
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 const memPct = computed(() => {
@@ -62,6 +64,22 @@ async function releaseMemory() {
     console.error('Release memory failed', err)
   }
   setTimeout(() => { memReleaseMsg.value = '' }, 3500)
+}
+
+async function scanForMachines() {
+  scanning.value = true
+  discoveredMachines.value = []
+  try {
+    discoveredMachines.value = await machinesStore.scanNetwork()
+  } catch (err) {
+    console.error('Network scan failed', err)
+  }
+  scanning.value = false
+}
+
+function addDiscovered(m: import('@/stores/machines').Machine) {
+  machinesStore.addMachine({ name: m.name, host: m.host, port: m.port, type: 'remote', memoryGb: 0 })
+  discoveredMachines.value = discoveredMachines.value.filter(d => d.host !== m.host)
 }
 
 async function doShutdown() {
@@ -131,7 +149,21 @@ async function doShutdown() {
 
     <!-- Fleet -->
     <div class="sidebar-section fleet-section">
-      <div class="section-label">Fleet</div>      <div class="machine-list">
+      <div class="fleet-header">
+        <div class="section-label">Fleet</div>
+        <button
+          class="scan-btn"
+          :disabled="scanning"
+          :title="scanning ? 'Scanning…' : 'Scan local network for vllm-mlx servers'"
+          @click="scanForMachines"
+        >
+          <svg v-if="!scanning" viewBox="0 0 20 20" fill="currentColor" width="11" height="11">
+            <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
+          </svg>
+          <span v-if="scanning" class="scan-spinner" />
+        </button>
+      </div>
+      <div class="machine-list">
         <button
           v-for="m in machinesStore.machines"
           :key="m.id"
@@ -143,6 +175,23 @@ async function doShutdown() {
           <span class="machine-name">{{ m.name }}</span>
           <span v-if="m.type === 'remote'" class="machine-host">{{ m.host }}</span>
         </button>
+      </div>
+      <!-- Discovered machines waiting to be added -->
+      <div v-if="discoveredMachines.length > 0" class="discovered-list">
+        <div class="discovered-label">Found on network</div>
+        <div
+          v-for="d in discoveredMachines"
+          :key="d.host"
+          class="discovered-item"
+        >
+          <span class="machine-dot online" />
+          <span class="discovered-name">{{ d.name }}</span>
+          <button class="add-machine-btn" @click="addDiscovered(d)">+ Add</button>
+        </div>
+      </div>
+      <div v-if="scanning" class="fleet-hint">Scanning local network…</div>
+      <div v-else-if="!scanning && discoveredMachines.length === 0 && machinesStore.machines.length <= 1" class="fleet-hint">
+        Click ↺ to find servers on your network
       </div>
     </div>
 
@@ -260,8 +309,100 @@ async function doShutdown() {
 
 .fleet-section {
   flex-shrink: 0;
-  max-height: 180px;
+  max-height: 220px;
   overflow-y: auto;
+}
+
+.fleet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.fleet-header .section-label {
+  margin-bottom: 0;
+}
+
+.scan-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-sm);
+  color: var(--tx-muted);
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+  flex-shrink: 0;
+}
+.scan-btn:hover:not(:disabled) {
+  color: var(--tx-secondary);
+  border-color: var(--bd-emphasis);
+}
+.scan-btn:disabled { opacity: 0.5; cursor: default; }
+
+.scan-spinner {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--tx-muted);
+  border-top-color: var(--si-500);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+.discovered-list {
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--bd-subtle);
+  padding-top: var(--space-2);
+}
+
+.discovered-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--tx-muted);
+  margin-bottom: var(--space-2);
+  padding: 0 var(--space-2);
+}
+
+.discovered-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-2);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+}
+
+.discovered-name {
+  flex: 1;
+  font-family: var(--font-mono);
+  color: var(--tx-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.add-machine-btn {
+  background: transparent;
+  border: 1px solid var(--si-600);
+  border-radius: var(--r-sm);
+  color: var(--si-400);
+  font-size: 10px;
+  font-family: inherit;
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  flex-shrink: 0;
+}
+.add-machine-btn:hover {
+  background: var(--ac-bg);
+  color: var(--si-300);
 }
 
 .fleet-hint {

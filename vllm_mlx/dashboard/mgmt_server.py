@@ -814,6 +814,84 @@ def network_interfaces(_: None = Depends(_check_auth)) -> list:
     return addrs
 
 
+@app.get("/network/scan")
+def network_scan(_: None = Depends(_check_auth)) -> list:
+    """Scan the local subnet for other vllm-mlx-ui instances (port 8502).
+
+    Returns a list of hosts that respond to /health within 0.5 s.
+    The scan is limited to the first /24 of each active non-loopback IPv4
+    interface so it completes in a few seconds even on large subnets.
+    """
+    import ipaddress
+    import socket
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    MGMT_PORT = 8502
+    TIMEOUT   = 0.5
+
+    # Collect candidate /24 subnets from local interfaces
+    subnets: set[str] = set()
+    try:
+        import subprocess as _sp
+        out = _sp.check_output(["ifconfig"], text=True, stderr=_sp.DEVNULL)
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("inet ") and "127." not in line:
+                parts = line.split()
+                if len(parts) >= 2:
+                    ip = parts[1]
+                    try:
+                        base = ".".join(ip.split(".")[:3])
+                        subnets.add(base)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    if not subnets:
+        return []
+
+    # Build full candidate list (skip .0 and .255)
+    candidates: list[str] = []
+    own_ips: set[str] = set()
+    try:
+        own_ips = {r[4][0] for r in socket.getaddrinfo(socket.gethostname(), None)}
+    except Exception:
+        pass
+
+    for base in subnets:
+        for i in range(1, 255):
+            ip = f"{base}.{i}"
+            if ip not in own_ips:
+                candidates.append(ip)
+
+    def _probe(ip: str) -> dict | None:
+        try:
+            with socket.create_connection((ip, MGMT_PORT), timeout=TIMEOUT) as sock:
+                sock.sendall(b"GET /health HTTP/1.0\r\nHost: " + ip.encode() + b"\r\n\r\n")
+                data = sock.recv(256).decode(errors="ignore")
+                if "200" in data:
+                    name = ip
+                    try:
+                        name = socket.gethostbyaddr(ip)[0].split(".")[0]
+                    except Exception:
+                        pass
+                    return {"ip": ip, "port": MGMT_PORT, "name": name}
+        except Exception:
+            pass
+        return None
+
+    found: list[dict] = []
+    with ThreadPoolExecutor(max_workers=64) as pool:
+        futures = {pool.submit(_probe, ip): ip for ip in candidates}
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result:
+                found.append(result)
+
+    return found
+
+
 # ── Vue UI static serving ─────────────────────────────────────────────────────
 # Serve the built Vue UI from ui/dist/ at the root path.
 # API routes (/status, /memory, etc.) take priority because they are registered
@@ -821,7 +899,10 @@ def network_interfaces(_: None = Depends(_check_auth)) -> list:
 
 import os as _os
 
-_UI_DIST = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))), "ui", "dist")
+# Prefer the bundled ui_dist/ (pip-installed / Homebrew), fall back to dev repo ui/dist/
+_UI_DIST_BUNDLED = _os.path.join(_os.path.dirname(__file__), "ui_dist")
+_UI_DIST_DEV     = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))), "ui", "dist")
+_UI_DIST = _UI_DIST_BUNDLED if _os.path.isdir(_UI_DIST_BUNDLED) else _UI_DIST_DEV
 
 if _os.path.isdir(_UI_DIST):
     app.mount("/assets", StaticFiles(directory=_os.path.join(_UI_DIST, "assets")), name="assets")

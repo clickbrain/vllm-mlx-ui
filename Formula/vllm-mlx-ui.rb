@@ -25,6 +25,8 @@ class VllmMlxUi < Formula
   # Requires Apple Silicon — MLX only runs on Apple Silicon Macs
   depends_on arch: :arm64
   depends_on "python@3.11"
+  # Node.js is needed at build time to compile the Vue dashboard
+  depends_on "node" => :build
 
   # Don't let Homebrew rewrite dylib IDs inside the Python venv — the paths
   # are too long for the Mach-O header and the relinking isn't needed anyway.
@@ -35,6 +37,15 @@ class VllmMlxUi < Formula
     python = Formula["python@3.11"].opt_bin/"python3.11"
     venv   = libexec/"venv"
 
+    # Build the Vue dashboard and bundle it inside the Python package.
+    # The built assets land in ui/dist/, which pyproject.toml includes as
+    # package-data under vllm_mlx.dashboard.ui_dist so pip bundles them.
+    system "npm", "ci", "--prefix", "ui"
+    system "npm", "run", "build", "--prefix", "ui"
+    # Sync built dist into the Python package directory so pip picks it up
+    FileUtils.rm_rf "vllm_mlx/dashboard/ui_dist"
+    FileUtils.cp_r "ui/dist", "vllm_mlx/dashboard/ui_dist"
+
     # Create an isolated virtual environment
     system python, "-m", "venv", venv
 
@@ -43,8 +54,8 @@ class VllmMlxUi < Formula
     # pip's build isolation downloads this automatically when building.
     system venv/"bin/pip", "install", "--upgrade", "pip"
 
-    # Install the package with the [ui] extra (streamlit, plotly, pandas, httpx).
-    system venv/"bin/pip", "install", ".[ui]"
+    # Install the package (no [ui] extra needed — Streamlit dependency removed).
+    system venv/"bin/pip", "install", "."
 
     # Upgrade key dependencies within the ranges declared in pyproject.toml.
     # Using version bounds prevents silent breakage from incompatible upstream releases.
@@ -83,7 +94,7 @@ class VllmMlxUi < Formula
       To start the dashboard:
           vllm-mlx-ui
 
-      The browser will open automatically at http://127.0.0.1:8501
+      The browser will open automatically at http://127.0.0.1:8502
 
       Quick start:
         1. Go to the Server page
