@@ -177,13 +177,13 @@ onMounted(() => { modelsStore.fetchModels() })
         </div>
         <HFSearchResult
           v-for="r in modelsStore.searchResults"
-          :key="r.modelId"
-          :model-id="r.modelId"
+          :key="r.id"
+          :id="r.id"
           :downloads="r.downloads"
           :likes="r.likes"
-          :is-mlx="r.isMlx"
+          :is_mlx="r.is_mlx"
           :tags="r.tags"
-          @download="handleDownload(r.modelId)"
+          @download="handleDownload(r.id)"
         />
       </div>
       <div v-else-if="modelsStore.searchQuery !== ''" class="empty-state">

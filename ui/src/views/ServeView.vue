@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useServerStore } from '@/stores/server'
 import StatusPill from '@/components/shared/StatusPill.vue'
 import AppButton from '@/components/shared/AppButton.vue'
@@ -19,15 +19,11 @@ const status = computed(() => {
   return 'running' as const
 })
 
-const baseUrl = computed(() => {
-  const s = serverStore.status
-  return s?.running ? 'http://localhost:8080/v1' : '—'
-})
-
-const modelId = computed(() => serverStore.status?.model ?? '—')
+const baseUrl = computed(() => serverStore.baseUrl ?? '—')
+const modelId = computed(() => serverStore.modelId ?? '—')
 
 const uptime = computed(() => {
-  const secs = serverStore.status?.uptime
+  const secs = serverStore.uptimeSeconds
   if (!secs) return '—'
   const h = Math.floor(secs / 3600)
   const m = Math.floor((secs % 3600) / 60)
@@ -38,13 +34,19 @@ const uptime = computed(() => {
 })
 
 const tps = computed(() => {
-  const v = serverStore.status?.tokens_per_sec
-  return v !== undefined ? v.toFixed(1) : '—'
+  const v = serverStore.tps
+  return v !== null ? v.toFixed(1) : '—'
 })
 
 const memPct = computed(() => serverStore.memoryPercent.toFixed(0))
 const memUsed = computed(() => serverStore.memory?.used_gb.toFixed(1) ?? '—')
 const memTotal = computed(() => serverStore.memory?.total_gb.toFixed(0) ?? '—')
+
+const logs = ref<string[]>([])
+
+async function refreshLogs() {
+  logs.value = await serverStore.fetchLogs(200)
+}
 </script>
 
 <template>
@@ -98,24 +100,29 @@ const memTotal = computed(() => serverStore.memory?.total_gb.toFixed(0) ?? '—'
       <div class="config-body">
         <div class="config-row">
           <span class="config-label">Model</span>
-          <span class="config-value mono">{{ modelId }}</span>
+          <span class="config-value mono">{{ serverStore.config?.model ?? '—' }}</span>
         </div>
         <div class="config-row">
           <span class="config-label">Port</span>
-          <span class="config-value mono">8080</span>
+          <span class="config-value mono">{{ serverStore.config?.port ?? 8080 }}</span>
         </div>
         <div class="config-row">
-          <span class="config-label">GPU memory fraction</span>
-          <span class="config-value mono">0.90</span>
+          <span class="config-label">Context size</span>
+          <span class="config-value mono">{{ serverStore.config?.context_size ?? '—' }}</span>
         </div>
-        <p class="config-note">Full configuration editor coming next — edit via the Models → Library tab or CLI for now.</p>
+        <div class="config-row">
+          <span class="config-label">Max tokens</span>
+          <span class="config-value mono">{{ serverStore.config?.max_tokens ?? '—' }}</span>
+        </div>
       </div>
     </CollapsibleSection>
 
     <!-- Server Logs -->
-    <CollapsibleSection title="Server Logs">
+    <CollapsibleSection title="Server Logs" :defaultOpen="false">
       <div class="logs-body">
-        <p class="logs-empty">Server log stream will appear here once the server is running.</p>
+        <pre v-if="logs.length" class="logs-pre">{{ logs.join('\n') }}</pre>
+        <p v-else class="logs-empty">No log output yet.</p>
+        <AppButton variant="ghost" size="sm" @click="refreshLogs" style="margin-top: var(--space-2)">↻ Refresh</AppButton>
       </div>
     </CollapsibleSection>
   </div>
@@ -237,5 +244,18 @@ const memTotal = computed(() => serverStore.memory?.total_gb.toFixed(0) ?? '—'
   font-size: 12px;
   color: var(--tx-muted);
   font-style: italic;
+}
+.logs-pre {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--tx-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.55;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-canvas);
+  border-radius: var(--r-sm);
+  padding: var(--space-3);
 }
 </style>

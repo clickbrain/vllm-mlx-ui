@@ -4,10 +4,10 @@ import AppBadge from '@/components/shared/AppBadge.vue'
 import AppButton from '@/components/shared/AppButton.vue'
 
 const props = defineProps<{
-  modelId: string
+  id: string
   downloads: number
   likes: number
-  isMlx: boolean
+  is_mlx: boolean
   tags: string[]
 }>()
 
@@ -28,8 +28,8 @@ const likesFormatted = computed(() => abbreviate(props.likes))
 <template>
   <div class="hf-result">
     <div class="result-id">
-      <span class="model-id">{{ modelId }}</span>
-      <AppBadge v-if="isMlx" variant="info" size="sm">MLX</AppBadge>
+      <span class="model-id">{{ id }}</span>
+      <AppBadge v-if="is_mlx" variant="info" size="sm">MLX</AppBadge>
     </div>
     <div class="result-stats">
       <span class="stat">↓ {{ downloadsFormatted }}</span>

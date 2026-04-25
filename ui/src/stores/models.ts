@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api } from '@/api/client'
+import { useServerStore } from './server'
 
 export interface Model {
   id: string
@@ -12,10 +13,10 @@ export interface Model {
 }
 
 export interface HFModel {
-  modelId: string
+  id: string
   downloads: number
   likes: number
-  isMlx: boolean
+  is_mlx: boolean
   tags: string[]
 }
 
@@ -24,6 +25,7 @@ export interface DownloadQueueItem {
   name: string
   progress: number
   status: 'queued' | 'downloading' | 'done' | 'error'
+  error?: string
 }
 
 export interface BenchmarkResult {
@@ -41,37 +43,60 @@ export interface BenchmarkConfig {
   max_tokens: number
 }
 
+function deriveQuantization(modelId: string): string {
+  const id = modelId.toLowerCase()
+  if (id.includes('8bit') || id.includes('8-bit') || id.includes('q8')) return '8-bit'
+  if (id.includes('6bit') || id.includes('6-bit') || id.includes('q6')) return '6-bit'
+  if (id.includes('4bit') || id.includes('4-bit') || id.includes('q4')) return '4-bit'
+  if (id.includes('3bit') || id.includes('3-bit') || id.includes('q3')) return '3-bit'
+  if (id.includes('2bit') || id.includes('2-bit') || id.includes('q2')) return '2-bit'
+  if (id.includes('fp16') || id.includes('float16')) return 'fp16'
+  if (id.includes('bf16') || id.includes('bfloat16')) return 'bf16'
+  return 'unknown'
+}
+
 export const useModelsStore = defineStore('models', () => {
+  const serverStore = useServerStore()
   const models = ref<Model[]>([])
   const loading = ref(false)
 
-  // HF search
   const searchQuery = ref('')
   const searchResults = ref<HFModel[]>([])
   const searching = ref(false)
 
-  // Download queue
   const downloadQueue = ref<DownloadQueueItem[]>([])
   const pollIntervals: Record<string, number> = {}
 
-  // Benchmark
   const benchmarkResults = ref<BenchmarkResult[] | null>(null)
   const benchmarking = ref(false)
+  const benchmarkRunning = ref(false)
 
   async function fetchModels() {
     loading.value = true
     try {
-      models.value = await api.get<Model[]>('/models')
+      const activeModel = serverStore.modelId
+      const raw = await api.get<Array<{ id: string; size_gb: number; size_bytes?: number }>>('/models/cached')
+      models.value = raw.map(m => ({
+        id: m.id,
+        name: m.id.split('/').pop() ?? m.id,
+        size_gb: m.size_gb,
+        quantization: deriveQuantization(m.id),
+        cached: true,
+        active: m.id === activeModel,
+      }))
     } finally {
       loading.value = false
     }
   }
 
-  async function downloadModel(modelId: string) {
-    await api.post<void>('/models/download', { model_id: modelId })
+  async function downloadModel(modelId: string, token = '') {
+    // Guard: don't start a duplicate download
     const existing = downloadQueue.value.find(q => q.id === modelId)
+    if (existing && (existing.status === 'queued' || existing.status === 'downloading')) return
+
+    await api.post<void>('/models/download', { model_id: modelId, token })
+    const name = modelId.split('/').pop() ?? modelId
     if (!existing) {
-      const name = modelId.split('/').pop() ?? modelId
       downloadQueue.value.push({ id: modelId, name, progress: 0, status: 'queued' })
     }
     pollDownloadStatus(modelId)
@@ -82,18 +107,26 @@ export const useModelsStore = defineStore('models', () => {
 
     const interval = window.setInterval(async () => {
       try {
-        const status = await api.get<{ status: string; progress: number }>(
-          `/models/download_status/${encodeURIComponent(modelId)}`
-        )
+        const s = await api.get<{
+          status: string
+          error: string | null
+          bytes_downloaded: number
+          total_bytes: number
+        }>(`/models/download_status/${encodeURIComponent(modelId)}`)
+
         const item = downloadQueue.value.find(q => q.id === modelId)
         if (item) {
-          item.progress = status.progress ?? 0
-          item.status = status.status as DownloadQueueItem['status']
+          item.status = s.status as DownloadQueueItem['status']
+          item.error = s.error ?? undefined
+          item.progress = s.total_bytes > 0
+            ? Math.round((s.bytes_downloaded / s.total_bytes) * 100)
+            : (s.status === 'done' ? 100 : 0)
         }
-        if (status.status === 'done' || status.status === 'error') {
+
+        if (s.status === 'done' || s.status === 'error') {
           window.clearInterval(interval)
           delete pollIntervals[modelId]
-          if (status.status === 'done') {
+          if (s.status === 'done') {
             setTimeout(() => {
               downloadQueue.value = downloadQueue.value.filter(q => q.id !== modelId)
               fetchModels()
@@ -112,6 +145,8 @@ export const useModelsStore = defineStore('models', () => {
   async function loadModel(modelId: string) {
     await api.post<void>('/server/load', { model_id: modelId })
     await fetchModels()
+    await serverStore.fetchStatus()
+    await serverStore.fetchConfig()
   }
 
   async function deleteModel(modelId: string) {
@@ -123,43 +158,59 @@ export const useModelsStore = defineStore('models', () => {
     searchQuery.value = query
     searching.value = true
     try {
-      searchResults.value = await api.get<HFModel[]>(`/models/search?q=${encodeURIComponent(query)}`)
+      const results = await api.get<HFModel[]>(`/models/search?q=${encodeURIComponent(query)}`)
+      searchResults.value = results.filter(r => !('error' in r))
     } finally {
       searching.value = false
     }
   }
 
-  async function runBenchmark(modelIds: string[], config: BenchmarkConfig) {
+  async function runBenchmark(modelIds: string[], cfg: BenchmarkConfig) {
     benchmarking.value = true
-    benchmarkResults.value = null
+    benchmarkRunning.value = true
     try {
-      await api.post<void>('/benchmark', { model_ids: modelIds, config })
+      await api.post<void>('/benchmark/run', { model_ids: modelIds, config: cfg })
+      // Poll until done
+      await new Promise<void>(resolve => {
+        const poll = setInterval(async () => {
+          try {
+            const s = await api.get<{ running: boolean }>('/benchmark/status')
+            if (!s.running) {
+              clearInterval(poll)
+              resolve()
+            }
+          } catch { clearInterval(poll); resolve() }
+        }, 3000)
+      })
       await fetchBenchmarkResults()
     } finally {
       benchmarking.value = false
+      benchmarkRunning.value = false
     }
   }
 
   async function fetchBenchmarkResults() {
-    benchmarkResults.value = await api.get<BenchmarkResult[]>('/benchmark/results')
+    const raw = await api.get<Array<Record<string, unknown>>>('/benchmarks')
+    // Server returns stored benchmark records; map to our shape
+    benchmarkResults.value = raw.map(r => ({
+      model_id: String(r.model ?? r.model_id ?? ''),
+      avg_tps: Number(r.avg_tps ?? r.tokens_per_second ?? 0),
+      median_tps: Number(r.median_tps ?? r.avg_tps ?? 0),
+      min_tps: Number(r.min_tps ?? 0),
+      max_tps: Number(r.max_tps ?? r.avg_tps ?? 0),
+      runs: Number(r.runs ?? r.num_runs ?? 1),
+    }))
   }
 
   return {
-    models,
-    loading,
-    searchQuery,
-    searchResults,
-    searching,
+    models, loading,
+    searchQuery, searchResults, searching,
     downloadQueue,
-    benchmarkResults,
-    benchmarking,
-    fetchModels,
-    downloadModel,
-    pollDownloadStatus,
-    loadModel,
-    deleteModel,
+    benchmarkResults, benchmarking, benchmarkRunning,
+    fetchModels, downloadModel, pollDownloadStatus,
+    loadModel, deleteModel,
     searchHF,
-    runBenchmark,
-    fetchBenchmarkResults,
+    runBenchmark, fetchBenchmarkResults,
   }
 })
+

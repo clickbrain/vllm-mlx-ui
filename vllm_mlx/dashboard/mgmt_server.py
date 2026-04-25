@@ -281,6 +281,45 @@ def delete_model(model_id: str, _: None = Depends(_check_auth)) -> dict:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.get("/models/search")
+def search_models(q: str = "", limit: int = 30, _: None = Depends(_check_auth)) -> list:
+    """Search HuggingFace Hub for models."""
+    return mm.search_hf_models(query=q, limit=limit)
+
+
+class LoadModelRequest(BaseModel):
+    model_id: str
+
+
+@app.post("/server/load")
+def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
+    """Update the configured model; restart the server if it is currently running."""
+    model_id = req.model_id.strip()
+    if not model_id:
+        raise HTTPException(status_code=400, detail="model_id is required")
+
+    cfg = sm.load_config()
+    was_running = sm.get_server_status().get("running", False)
+
+    try:
+        presets = mm.get_model_presets(model_id)
+        if presets.get("max_tokens"):
+            cfg["max_tokens"] = presets["max_tokens"]
+            cfg["max_request_tokens"] = presets["max_tokens"]
+    except Exception:
+        pass
+
+    cfg["model"] = model_id
+    sm.save_config(cfg)
+
+    if was_running:
+        sm.stop_server()
+        time.sleep(1)
+        sm.start_server(cfg)
+
+    return {"ok": True, "model": model_id, "restarted": was_running}
+
+
 # ── Memory ────────────────────────────────────────────────────────────────────
 
 @app.get("/memory/stats")
@@ -309,6 +348,49 @@ def delete_benchmark(result_id: int, _: None = Depends(_check_auth)) -> dict:
         raise HTTPException(status_code=404, detail=f"Benchmark result {result_id} not found")
     br.delete_result(result_id)
     return {"ok": True}
+
+
+_benchmark_running = False
+_benchmark_lock = threading.Lock()
+
+
+@app.post("/benchmark/run")
+def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
+    """Start a benchmark run for one or more models in the background.
+    Poll GET /benchmark/status to check progress, GET /benchmarks for results.
+    """
+    global _benchmark_running
+    with _benchmark_lock:
+        if _benchmark_running:
+            return {"ok": False, "message": "A benchmark is already running"}
+        _benchmark_running = True
+
+    model_ids: list[str] = req.get("model_ids", [])
+    config: dict[str, Any] = req.get("config", {})
+    runs = int(config.get("runs", 3))
+    max_tokens = int(config.get("max_tokens", 256))
+
+    if not model_ids:
+        with _benchmark_lock:
+            _benchmark_running = False
+        raise HTTPException(status_code=400, detail="model_ids is required")
+
+    def _run() -> None:
+        global _benchmark_running
+        try:
+            for model_id in model_ids:
+                br.run_benchmark(model_id, prompts=runs, max_tokens=max_tokens)
+        finally:
+            with _benchmark_lock:
+                _benchmark_running = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True, "message": f"Benchmark started for {len(model_ids)} model(s)"}
+
+
+@app.get("/benchmark/status")
+def benchmark_run_status(_: None = Depends(_check_auth)) -> dict:
+    return {"running": _benchmark_running}
 
 
 # ── Auto model-switch proxy ───────────────────────────────────────────────────
