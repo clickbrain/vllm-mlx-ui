@@ -15,7 +15,11 @@ const updatesStore = useUpdatesStore()
 const showShutdownConfirm = ref(false)
 const shuttingDown = ref(false)
 
-const memPct = computed(() => serverStore.memory?.percent ?? 0)
+const memPct = computed(() => {
+  const mem = serverStore.memory
+  if (!mem || !mem.total_gb) return 0
+  return (mem.used_gb / mem.total_gb) * 100
+})
 const arcFillColor = computed(() => memPct.value > 75 ? 'var(--cu-500)' : 'var(--si-500)')
 const arcDashOffset = computed(() => {
   const arc = 157
