@@ -4,7 +4,20 @@ All notable changes to the dashboard UI are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Dashboard UI version is tracked separately from the core vllm-mlx version.
 
-## [0.3.45] — 2026-04-27
+## [0.3.46] — 2026-04-27
+
+### Added
+- **Quality benchmarks** — GSM8K (math), MMLU (knowledge), HumanEval (coding) run against
+  the live inference server; 25/25/15 questions bundled inline, no downloads required
+- **Unified Benchmark tab** — Speed + Quality suites selectable via checkboxes, single
+  Run button; both run concurrently against the running server
+- **History tab** (replaces Saved) — most-recent run highlighted, checkboxes for
+  side-by-side comparison, per-run delete, speed + quality badges per row
+- Quality results persisted to shared benchmark history (`~/.vllm_mlx_ui/benchmark_results.json`)
+- Extended `BenchmarkHistoryEntry` with optional `benchmark_type`, `overall_score`, `suites`
+- Removed separate Speed/Quality/Saved tabs — folded into Benchmark + History
+
+
 
 ### Added
 - **`--auto-model-switch` flag** — when enabled, requests that specify a different model name

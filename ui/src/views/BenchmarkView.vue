@@ -3,23 +3,21 @@
   BenchmarkView — Performance & Data hub.
 
   Sections (tabbed):
-    Live     — real-time server metrics: request charts, GPU memory chart,
-               active requests table, cache statistics panel
-    Speed    — tok/s benchmarks (existing BenchmarkPanel, promoted here)
-    Quality  — placeholder for MMLU / GSM8K / HumanEval runs
-    Saved    — all prior benchmark runs with save/favorite/compare
-    Advisor  — describe a task → AI recommends best model + config
+    Live      — real-time server metrics: request charts, GPU memory chart,
+                active requests table, cache statistics panel
+    Benchmark — unified Speed + Quality benchmark runner; shows current run results
+    History   — all prior runs (most recent first), select to compare, favorite, delete
+    Advisor   — describe a task → AI recommends best model + config
 -->
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Line, Bar } from 'vue-chartjs'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { Line } from 'vue-chartjs'
 import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
   PointElement,
   LineElement,
-  BarElement,
   Filler,
   Tooltip,
   Legend,
@@ -27,20 +25,20 @@ import {
 import type { ChartData, ChartOptions } from 'chart.js'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
-import BenchmarkPanel from '@/components/models/BenchmarkPanel.vue'
+import type { QualitySuiteResult } from '@/stores/models'
 import AppButton from '@/components/shared/AppButton.vue'
 import { api } from '@/api/client'
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement,
-  BarElement, Filler, Tooltip, Legend,
+  Filler, Tooltip, Legend,
 )
 
 const serverStore = useServerStore()
 const modelsStore = useModelsStore()
 
 // ── Tab state ─────────────────────────────────────────────────────────────
-const tabs = ['Live', 'Speed', 'Quality', 'Saved', 'Advisor'] as const
+const tabs = ['Live', 'Benchmark', 'History', 'Advisor'] as const
 type Tab = typeof tabs[number]
 const activeTab = ref<Tab>('Live')
 
@@ -61,11 +59,13 @@ onMounted(() => {
   stopPoll = serverStore.startPolling(3000)
   refreshCache()
   cacheInterval = setInterval(refreshCache, 15_000)
+  modelsStore.fetchBenchmarkResults()
 })
 
 onUnmounted(() => {
   stopPoll?.()
   if (cacheInterval) clearInterval(cacheInterval)
+  stopBenchmarkPolls()
 })
 
 watch(() => serverStore.isRunning, (running) => {
@@ -137,7 +137,7 @@ const memoryChartData = computed((): ChartData<'line'> => {
   }
 })
 
-// ── Uptime formatter (reused from ServeView) ────────────────────────────────
+// ── Uptime formatter ────────────────────────────────────────────────────────
 const uptime = computed(() => {
   const s = serverStore.uptimeSeconds
   if (!s) return '—'
@@ -151,14 +151,188 @@ const cacheEntries = computed(() => {
   return Object.entries(cacheStats.value).map(([k, v]) => ({ key: k, value: v }))
 })
 
-// ── Cost Analysis (Saved tab) ────────────────────────────────────────────────
+// ── BENCHMARK TAB — unified Speed + Quality ────────────────────────────────
+const QUALITY_SUITES = [
+  { id: 'gsm8k',     label: 'GSM8K',     description: 'Math word problems' },
+  { id: 'mmlu',      label: 'MMLU',      description: 'Multi-subject knowledge' },
+  { id: 'humaneval', label: 'HumanEval', description: 'Python coding tasks' },
+]
+
+// Config
+const benchIncludeSpeed  = ref(true)
+const benchSuites        = ref<string[]>(['gsm8k', 'mmlu', 'humaneval'])
+const benchMaxTokens     = ref(256)
+const benchRuns          = ref(3)
+const benchNumQuestions  = ref(20)
+
+// Run state
+const benchRunning     = ref(false)
+const speedPhase       = ref<'idle' | 'running' | 'done' | 'error'>('idle')
+const qualityPhase     = ref<'idle' | 'running' | 'done' | 'error'>('idle')
+const qualityLines     = ref<string[]>([])
+const qualityLogRef    = ref<HTMLPreElement | null>(null)
+let   qualityPollTimer: ReturnType<typeof setInterval> | null = null
+let   speedPollTimer:   ReturnType<typeof setInterval> | null = null
+
+// Last-run results
+const lastRunSpeed   = ref<typeof modelsStore.benchmarkResults extends (infer T)[] ? T : any | null>(null)
+const lastRunQuality = ref<Record<string, any> | null>(null)
+const lastRunModel   = ref('')
+const lastRunTime    = ref('')
+
+function stopBenchmarkPolls() {
+  if (qualityPollTimer) { clearInterval(qualityPollTimer); qualityPollTimer = null }
+  if (speedPollTimer)   { clearInterval(speedPollTimer);   speedPollTimer   = null }
+}
+
+async function runBenchmark() {
+  if (!serverStore.isRunning || benchRunning.value) return
+  if (!benchIncludeSpeed && !benchSuites.value.length) return
+
+  benchRunning.value = true
+  speedPhase.value   = 'idle'
+  qualityPhase.value = 'idle'
+  qualityLines.value = []
+  lastRunSpeed.value   = null
+  lastRunQuality.value = null
+  lastRunModel.value   = serverStore.modelId ?? ''
+  lastRunTime.value    = new Date().toLocaleTimeString()
+
+  // Track when each phase completes so we know when overall is done
+  let speedDone   = !benchIncludeSpeed.value
+  let qualityDone = benchSuites.value.length === 0
+
+  function checkDone() {
+    if (speedDone && qualityDone) {
+      benchRunning.value = false
+      modelsStore.fetchBenchmarkResults()
+    }
+  }
+
+  // Speed benchmark
+  if (benchIncludeSpeed.value) {
+    speedPhase.value = 'running'
+    const model = serverStore.modelId ?? ''
+    try {
+      await api.post('/benchmark/run', {
+        model_ids: [model],
+        config: { runs: benchRuns.value, max_tokens: benchMaxTokens.value, prompt: 'Explain the concept of machine learning in simple terms.' },
+      })
+    } catch {
+      speedPhase.value = 'error'
+      speedDone = true
+      checkDone()
+    }
+    if (speedPhase.value === 'running') {
+      speedPollTimer = setInterval(async () => {
+        try {
+          const { data } = await api.get<{ running: boolean }>('/benchmark/status')
+          if (!data.running) {
+            clearInterval(speedPollTimer!); speedPollTimer = null
+            speedPhase.value = 'done'
+            // pick up latest result
+            await modelsStore.fetchBenchmarkResults()
+            const hist = modelsStore.benchmarkHistory
+            lastRunSpeed.value = hist.length ? hist[hist.length - 1] : null
+            speedDone = true
+            checkDone()
+          }
+        } catch {
+          clearInterval(speedPollTimer!); speedPollTimer = null
+          speedPhase.value = 'error'
+          speedDone = true
+          checkDone()
+        }
+      }, 1500)
+    }
+  }
+
+  // Quality benchmark
+  if (benchSuites.value.length) {
+    qualityPhase.value = 'running'
+    try {
+      const { data } = await api.post<{ ok: boolean; run_id: string }>('/quality-benchmark/run', {
+        suites: benchSuites.value,
+        num_questions: benchNumQuestions.value,
+      })
+      const runId = data.run_id
+      let lineOffset = 0
+      qualityPollTimer = setInterval(async () => {
+        try {
+          const { data: out } = await api.get<{
+            running: boolean; lines: string[]; results: any; error: string | null; total_lines: number
+          }>(`/quality-benchmark/output/${runId}?since=${lineOffset}`)
+          qualityLines.value.push(...out.lines)
+          lineOffset = out.total_lines
+          if (!out.running) {
+            clearInterval(qualityPollTimer!); qualityPollTimer = null
+            qualityPhase.value = out.error ? 'error' : 'done'
+            if (out.results) lastRunQuality.value = out.results
+            qualityDone = true
+            checkDone()
+          }
+        } catch {
+          clearInterval(qualityPollTimer!); qualityPollTimer = null
+          qualityPhase.value = 'error'
+          qualityDone = true
+          checkDone()
+        }
+      }, 1000)
+    } catch {
+      qualityPhase.value = 'error'
+      qualityDone = true
+      checkDone()
+    }
+  }
+}
+
+watch(qualityLines, () => {
+  nextTick(() => {
+    if (qualityLogRef.value) qualityLogRef.value.scrollTop = qualityLogRef.value.scrollHeight
+  })
+})
+
+const anyResultsReady = computed(() =>
+  lastRunSpeed.value !== null || lastRunQuality.value !== null
+)
+
+// ── HISTORY TAB ────────────────────────────────────────────────────────────
+// Most-recent first; loaded by onMounted
+const sortedHistory = computed(() =>
+  [...(modelsStore.benchmarkHistory ?? [])].sort((a, b) =>
+    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  )
+)
+
+const historySelected = ref<Set<number>>(new Set())
+
+function toggleHistorySelect(id: number) {
+  const s = new Set(historySelected.value)
+  if (s.has(id)) s.delete(id); else s.add(id)
+  historySelected.value = s
+}
+
+const compareRuns = computed(() =>
+  sortedHistory.value.filter(r => historySelected.value.has(r.id))
+)
+
+function formatRelTime(ts: string): string {
+  if (!ts) return '—'
+  const diff = Date.now() - new Date(ts).getTime()
+  const s = Math.floor(diff / 1000)
+  if (s < 60)   return 'just now'
+  if (s < 3600) return `${Math.floor(s/60)}m ago`
+  if (s < 86400) return `${Math.floor(s/3600)}h ago`
+  return new Date(ts).toLocaleDateString()
+}
+
+// ── Cost Analysis ────────────────────────────────────────────────────────────
 interface CostByModel {
   model_id: string
   tier: 'small' | 'medium' | 'large'
   tokens_generated: number
   estimated_cost_usd: number
 }
-
 interface CostStats {
   benchmarks_analyzed: number
   total_input_tokens: number
@@ -168,14 +342,13 @@ interface CostStats {
   by_model: CostByModel[]
   rates_used: Record<string, { input_per_1m: number; output_per_1m: number }>
 }
-
-const costStats = ref<CostStats | null>(null)
+const costStats   = ref<CostStats | null>(null)
 const costLoading = ref(false)
-const costError = ref(false)
+const costError   = ref(false)
 
 async function fetchCostStats() {
   costLoading.value = true
-  costError.value = false
+  costError.value   = false
   try {
     const data = await api.get<CostStats>('/stats/cost')
     costStats.value = data
@@ -187,7 +360,10 @@ async function fetchCostStats() {
 }
 
 watch(activeTab, (tab) => {
-  if (tab === 'Saved') fetchCostStats()
+  if (tab === 'History') {
+    modelsStore.fetchBenchmarkResults()
+    fetchCostStats()
+  }
 })
 </script>
 
@@ -362,67 +538,190 @@ watch(activeTab, (tab) => {
       </div>
     </div>
 
-    <!-- ── SPEED TAB ─────────────────────────────────────────────────────── -->
-    <div v-else-if="activeTab === 'Speed'" class="tab-body">
-      <BenchmarkPanel />
-    </div>
+    <!-- ── BENCHMARK TAB ──────────────────────────────────────────────────── -->
+    <div v-else-if="activeTab === 'Benchmark'" class="tab-body">
 
-    <!-- ── QUALITY TAB ───────────────────────────────────────────────────── -->
-    <div v-else-if="activeTab === 'Quality'" class="tab-body">
-      <div class="coming-soon-card">
-        <div class="cs-icon">
-          <svg viewBox="0 0 20 20" fill="currentColor" width="28" height="28" aria-hidden="true">
-            <path fill-rule="evenodd" d="M7 2a1 1 0 00-.707 1.707L7 4.414v3.758a1 1 0 01-.293.707l-4 4C.817 14.769 2.156 18 4.828 18h10.343c2.673 0 4.012-3.231 2.122-5.121l-4-4A1 1 0 0113 8.172V4.414l.707-.707A1 1 0 0013 2H7zm2 6.172V4h2v4.172a3 3 0 00.879 2.12l1.027 1.028a4 4 0 00-2.171.102l-.47.156a4 4 0 01-2.53 0l-.563-.187a1.993 1.993 0 00-.114-.035l1.063-1.063A3 3 0 009 8.172z" clip-rule="evenodd" />
-          </svg>
-        </div>
-        <h3>Quality Benchmarks</h3>
-        <p>
-          Run standardised quality evaluations — MMLU, GSM8K, HumanEval — against your
-          locally-cached models. Results feed into the Kilroy collective intelligence
-          layer so the network can recommend the best model for every task type.
-        </p>
-        <div class="cs-tags">
-          <span class="cs-tag">MMLU</span>
-          <span class="cs-tag">GSM8K</span>
-          <span class="cs-tag">HumanEval</span>
-          <span class="cs-tag">TTFT</span>
-          <span class="cs-tag">Memory</span>
-          <span class="cs-tag">Coherence</span>
-        </div>
-        <p class="cs-note">Coming next release.</p>
+      <!-- Server warning -->
+      <div v-if="!serverStore.isRunning" class="status-banner banner-red">
+        <span class="banner-dot" />
+        <span><strong>Server not running</strong> — start it on the Serve page first.</span>
       </div>
+
+      <!-- Config panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Configure Benchmark</div>
+          <span v-if="serverStore.modelId" class="panel-model mono">
+            {{ serverStore.modelId.split('/').pop() }}
+          </span>
+        </div>
+        <div class="bench-config">
+
+          <!-- Tests to run -->
+          <div class="bench-section-label">Tests to run</div>
+          <div class="bench-checks">
+
+            <!-- Speed -->
+            <label class="bench-check" :class="{ checked: benchIncludeSpeed }">
+              <input type="checkbox" v-model="benchIncludeSpeed" :disabled="benchRunning" />
+              <div class="bench-check-info">
+                <span class="bench-check-label">Speed</span>
+                <span class="bench-check-desc">Tokens/sec &middot; TTFT &middot; throughput</span>
+              </div>
+            </label>
+
+            <!-- Quality suites -->
+            <label
+              v-for="suite in QUALITY_SUITES"
+              :key="suite.id"
+              class="bench-check"
+              :class="{ checked: benchSuites.includes(suite.id) }"
+            >
+              <input
+                type="checkbox"
+                :value="suite.id"
+                v-model="benchSuites"
+                :disabled="benchRunning"
+              />
+              <div class="bench-check-info">
+                <span class="bench-check-label">{{ suite.label }}</span>
+                <span class="bench-check-desc">{{ suite.description }}</span>
+              </div>
+            </label>
+          </div>
+
+          <!-- Options row -->
+          <div class="bench-opts-row">
+            <label v-if="benchIncludeSpeed" class="opt-label">
+              Runs
+              <select v-model="benchRuns" :disabled="benchRunning" class="opt-select">
+                <option :value="1">1</option>
+                <option :value="3">3</option>
+                <option :value="5">5</option>
+              </select>
+            </label>
+            <label v-if="benchIncludeSpeed" class="opt-label">
+              Max tokens
+              <select v-model="benchMaxTokens" :disabled="benchRunning" class="opt-select">
+                <option :value="128">128</option>
+                <option :value="256">256</option>
+                <option :value="512">512</option>
+              </select>
+            </label>
+            <label v-if="benchSuites.length" class="opt-label">
+              Questions / suite
+              <select v-model="benchNumQuestions" :disabled="benchRunning" class="opt-select">
+                <option :value="5">5 (quick)</option>
+                <option :value="10">10</option>
+                <option :value="20">20</option>
+                <option :value="25">25 (full)</option>
+              </select>
+            </label>
+          </div>
+
+          <!-- Run button -->
+          <div class="bench-run-row">
+            <AppButton
+              :disabled="benchRunning || !serverStore.isRunning || (!benchIncludeSpeed && !benchSuites.length)"
+              @click="runBenchmark"
+            >
+              {{ benchRunning ? 'Running…' : 'Run Benchmark' }}
+            </AppButton>
+          </div>
+        </div>
+      </div>
+
+      <!-- Progress panels -->
+      <div v-if="benchRunning || anyResultsReady" class="bench-progress-row">
+
+        <!-- Speed progress -->
+        <div v-if="benchIncludeSpeed" class="panel bench-phase-card">
+          <div class="panel-header">
+            <div class="panel-title">Speed</div>
+            <span class="phase-badge" :class="speedPhase">
+              {{ speedPhase === 'running' ? 'Running…' : speedPhase === 'done' ? 'Done' : speedPhase === 'error' ? 'Error' : '' }}
+            </span>
+          </div>
+          <div class="bench-phase-body">
+            <div v-if="speedPhase === 'idle'" class="panel-empty">Waiting to start…</div>
+            <div v-else-if="speedPhase === 'running'" class="bench-spin-row">
+              <span class="spin" />
+              <span class="dim">Benchmarking tok/s against live server…</span>
+            </div>
+            <div v-else-if="speedPhase === 'done' && lastRunSpeed" class="speed-result-inline">
+              <div class="sri-stat">
+                <div class="sri-val mono">{{ (lastRunSpeed as any).avg_tps?.toFixed(1) ?? '—' }}</div>
+                <div class="sri-label">avg t/s</div>
+              </div>
+              <div v-if="(lastRunSpeed as any).avg_ttft_ms" class="sri-stat">
+                <div class="sri-val mono">{{ Math.round((lastRunSpeed as any).avg_ttft_ms) }}ms</div>
+                <div class="sri-label">avg TTFT</div>
+              </div>
+            </div>
+            <div v-else-if="speedPhase === 'error'" class="panel-empty warn">Speed benchmark failed.</div>
+          </div>
+        </div>
+
+        <!-- Quality progress -->
+        <div v-if="benchSuites.length" class="panel bench-phase-card">
+          <div class="panel-header">
+            <div class="panel-title">Quality</div>
+            <span class="phase-badge" :class="qualityPhase">
+              {{ qualityPhase === 'running' ? 'Running…' : qualityPhase === 'done' ? 'Done' : qualityPhase === 'error' ? 'Error' : '' }}
+            </span>
+          </div>
+          <div class="bench-phase-body">
+            <div v-if="qualityPhase === 'idle'" class="panel-empty">Waiting to start…</div>
+            <pre
+              v-else-if="qualityPhase === 'running' || qualityLines.length"
+              ref="qualityLogRef"
+              class="quality-log"
+            >{{ qualityLines.join('') }}</pre>
+            <div v-if="qualityPhase === 'done' && lastRunQuality" class="quality-scores-inline">
+              <div
+                v-for="(sr, key) in lastRunQuality.suites"
+                :key="key"
+                class="qsi"
+              >
+                <div class="qsi-name">{{ String(key).toUpperCase() }}</div>
+                <div
+                  class="qsi-score"
+                  :class="(sr as QualitySuiteResult).accuracy >= 0.7 ? 'good' : (sr as QualitySuiteResult).accuracy >= 0.5 ? 'mid' : 'bad'"
+                >
+                  {{ Math.round((sr as QualitySuiteResult).accuracy * 100) }}%
+                </div>
+                <div class="qsi-detail dim">{{ (sr as QualitySuiteResult).correct }}/{{ (sr as QualitySuiteResult).total }}</div>
+              </div>
+              <div class="qsi qsi-overall">
+                <div class="qsi-name">Overall</div>
+                <div class="qsi-score" :class="lastRunQuality.overall_score >= 0.7 ? 'good' : lastRunQuality.overall_score >= 0.5 ? 'mid' : 'bad'">
+                  {{ Math.round(lastRunQuality.overall_score * 100) }}%
+                </div>
+              </div>
+            </div>
+            <div v-else-if="qualityPhase === 'error'" class="panel-empty warn">Quality benchmark failed.</div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
-    <!-- ── SAVED TAB ─────────────────────────────────────────────────────── -->
-    <div v-else-if="activeTab === 'Saved'" class="tab-body">
+    <!-- ── HISTORY TAB ────────────────────────────────────────────────────── -->
+    <div v-else-if="activeTab === 'History'" class="tab-body">
 
       <!-- Cost Analysis panel -->
       <div class="cost-panel">
         <div class="panel-header">
-          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" aria-hidden="true" class="panel-header-icon">
-            <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
-            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clip-rule="evenodd" />
-          </svg>
           <div class="panel-title">Cost Analysis</div>
         </div>
-
-        <!-- Loading skeleton -->
         <div v-if="costLoading" class="cost-body">
           <div class="cost-skeleton-row" />
           <div class="cost-skeleton-row short" />
         </div>
-
-        <!-- Error -->
-        <div v-else-if="costError" class="panel-empty warn">
-          Could not load cost data.
-        </div>
-
-        <!-- Empty state -->
+        <div v-else-if="costError" class="panel-empty warn">Could not load cost data.</div>
         <div v-else-if="!costStats || costStats.benchmarks_analyzed === 0" class="panel-empty">
-          No benchmark data yet — run a benchmark from the Speed tab to see cost estimates.
+          Run a benchmark to see cloud cost estimates.
         </div>
-
-        <!-- Data -->
         <div v-else class="cost-body">
           <div class="cost-summary-row">
             <div class="cost-summary-card">
@@ -431,92 +730,128 @@ watch(activeTab, (tab) => {
               <div class="cost-summary-sub">
                 {{ costStats.total_input_tokens.toLocaleString() }} input &plus;
                 {{ costStats.total_output_tokens.toLocaleString() }} output tokens
-                across {{ costStats.benchmarks_analyzed }} benchmark runs
+                across {{ costStats.benchmarks_analyzed }} runs
               </div>
             </div>
             <div class="cost-summary-card">
-              <div class="cost-summary-label">Estimated monthly savings at current usage</div>
+              <div class="cost-summary-label">Est. monthly savings at current usage</div>
               <div class="cost-summary-value si">${{ costStats.estimated_monthly_savings_usd.toFixed(2) }}</div>
               <div class="cost-summary-sub">vs equivalent cloud API calls</div>
             </div>
           </div>
-
-          <div class="table-wrap" v-if="costStats.by_model.length">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Model</th>
-                  <th>Tier</th>
-                  <th class="num">Tokens generated</th>
-                  <th class="num">Equiv. cloud cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="row in costStats.by_model" :key="row.model_id">
-                  <td class="mono">{{ row.model_id.split('/').pop() }}</td>
-                  <td>
-                    <span :class="['tier-badge', `tier-${row.tier}`]">{{ row.tier }}</span>
-                  </td>
-                  <td class="num mono">{{ row.tokens_generated.toLocaleString() }}</td>
-                  <td class="num mono">${{ row.estimated_cost_usd.toFixed(4) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="cost-rates-note">
-            Based on equivalent GPT-4o-mini / Claude Haiku / GPT-4o rates for comparable model sizes.
-            Small (&lt;7B): ${{ costStats.rates_used.small.input_per_1m }}/1M in &middot;
-            ${{ costStats.rates_used.small.output_per_1m }}/1M out&nbsp;&nbsp;
-            Medium (7–30B): ${{ costStats.rates_used.medium.input_per_1m }}/1M in &middot;
-            ${{ costStats.rates_used.medium.output_per_1m }}/1M out&nbsp;&nbsp;
-            Large (30B+): ${{ costStats.rates_used.large.input_per_1m }}/1M in &middot;
-            ${{ costStats.rates_used.large.output_per_1m }}/1M out
-          </div>
         </div>
       </div>
 
-      <!-- Saved runs list -->
-      <div v-if="modelsStore.benchmarkHistory?.length">
-        <div class="saved-header">
-          <span class="saved-count">{{ modelsStore.benchmarkHistory.length }} saved runs</span>
-          <AppButton variant="secondary" size="sm" @click="modelsStore.clearAllBenchmarks?.()">
+      <!-- History header -->
+      <div v-if="sortedHistory.length" class="history-toolbar">
+        <span class="saved-count">{{ sortedHistory.length }} runs</span>
+        <div class="history-actions">
+          <AppButton
+            v-if="historySelected.size >= 2"
+            variant="secondary"
+            size="sm"
+          >
+            Compare {{ historySelected.size }} runs
+          </AppButton>
+          <AppButton
+            variant="ghost"
+            size="sm"
+            @click="modelsStore.clearAllBenchmarks?.()"
+          >
             Clear all
           </AppButton>
         </div>
-        <div class="saved-list">
-          <div
-            v-for="run in modelsStore.benchmarkHistory"
-            :key="run.id"
-            class="saved-row"
-          >
-            <div class="saved-date mono dim">{{ new Date(run.timestamp).toLocaleString() }}</div>
-            <div class="saved-model mono">{{ (run.model_id || '').split('/').pop() || '—' }}</div>
-            <div class="saved-tps">
-              <span v-if="run.avg_tps > 0 && !isNaN(run.avg_tps)" class="tps-badge">
+      </div>
+
+      <!-- Comparison table -->
+      <div v-if="compareRuns.length >= 2" class="panel compare-panel">
+        <div class="panel-header">
+          <div class="panel-title">Comparison</div>
+          <button class="icon-btn" @click="historySelected = new Set()">✕ Clear</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Date</th>
+                <th class="num">Speed (t/s)</th>
+                <th class="num">TTFT</th>
+                <th class="num">GSM8K</th>
+                <th class="num">MMLU</th>
+                <th class="num">HumanEval</th>
+                <th class="num">Overall</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="run in compareRuns" :key="run.id">
+                <td class="mono">{{ (run.model_id || '').split('/').pop() || '—' }}</td>
+                <td class="dim">{{ formatRelTime(run.timestamp) }}</td>
+                <td class="num mono">{{ run.avg_tps > 0 ? run.avg_tps.toFixed(1) : '—' }}</td>
+                <td class="num mono">{{ run.avg_ttft_ms ? Math.round(run.avg_ttft_ms) + 'ms' : '—' }}</td>
+                <td class="num mono">{{ run.suites?.gsm8k ? Math.round(run.suites.gsm8k.accuracy * 100) + '%' : '—' }}</td>
+                <td class="num mono">{{ run.suites?.mmlu ? Math.round(run.suites.mmlu.accuracy * 100) + '%' : '—' }}</td>
+                <td class="num mono">{{ run.suites?.humaneval ? Math.round(run.suites.humaneval.accuracy * 100) + '%' : '—' }}</td>
+                <td class="num mono">{{ run.overall_score != null ? Math.round(run.overall_score * 100) + '%' : '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Runs list -->
+      <div v-if="sortedHistory.length" class="history-list">
+        <div
+          v-for="(run, idx) in sortedHistory"
+          :key="run.id"
+          class="history-row"
+          :class="{ selected: historySelected.has(run.id), latest: idx === 0 }"
+        >
+          <input
+            type="checkbox"
+            class="history-check"
+            :checked="historySelected.has(run.id)"
+            @change="toggleHistorySelect(run.id)"
+          />
+          <div class="history-main">
+            <div class="history-top">
+              <span class="latest-badge" v-if="idx === 0">Latest</span>
+              <span class="history-model mono">{{ (run.model_id || '').split('/').pop() || '—' }}</span>
+              <span class="history-time dim">{{ formatRelTime(run.timestamp) }}</span>
+            </div>
+            <div class="history-badges">
+              <span v-if="run.avg_tps > 0" class="h-badge speed-badge">
                 {{ run.avg_tps.toFixed(1) }} t/s
               </span>
-              <span v-else class="dim">—</span>
+              <span v-if="run.suites?.gsm8k" class="h-badge quality-badge"
+                :class="run.suites.gsm8k.accuracy >= 0.7 ? 'good' : run.suites.gsm8k.accuracy >= 0.5 ? 'mid' : 'bad'"
+              >
+                GSM8K {{ Math.round(run.suites.gsm8k.accuracy * 100) }}%
+              </span>
+              <span v-if="run.suites?.mmlu" class="h-badge quality-badge"
+                :class="run.suites.mmlu.accuracy >= 0.7 ? 'good' : run.suites.mmlu.accuracy >= 0.5 ? 'mid' : 'bad'"
+              >
+                MMLU {{ Math.round(run.suites.mmlu.accuracy * 100) }}%
+              </span>
+              <span v-if="run.suites?.humaneval" class="h-badge quality-badge"
+                :class="run.suites.humaneval.accuracy >= 0.7 ? 'good' : run.suites.humaneval.accuracy >= 0.5 ? 'mid' : 'bad'"
+              >
+                HumanEval {{ Math.round(run.suites.humaneval.accuracy * 100) }}%
+              </span>
+              <span v-if="run.overall_score != null" class="h-badge overall-badge">
+                {{ Math.round(run.overall_score * 100) }}% overall
+              </span>
             </div>
-            <div class="saved-actions">
-              <button class="icon-btn" title="Delete" @click="modelsStore.deleteBenchmarkResult(run.id)">✕</button>
-            </div>
+          </div>
+          <div class="history-row-actions">
+            <button class="icon-btn danger" title="Delete" @click="modelsStore.deleteBenchmarkResult(run.id)">✕</button>
           </div>
         </div>
       </div>
+
       <div v-else class="coming-soon-card">
-        <div class="cs-icon">
-          <svg viewBox="0 0 20 20" fill="currentColor" width="28" height="28" aria-hidden="true">
-            <path d="M4 3a2 2 0 100 4h12a2 2 0 100-4H4z" />
-            <path fill-rule="evenodd" d="M3 8h14v7a2 2 0 01-2 2H5a2 2 0 01-2-2V8zm5 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" clip-rule="evenodd" />
-          </svg>
-        </div>
-        <h3>Saved Results</h3>
-        <p>
-          Run a benchmark from the Speed tab — results appear here automatically.
-          Pin favourites and compare across runs.
-        </p>
-        <p class="cs-note">Favorites and comparison coming soon.</p>
+        <h3>No benchmark history yet</h3>
+        <p>Run your first benchmark from the Benchmark tab — results appear here automatically.</p>
       </div>
     </div>
 
@@ -544,6 +879,7 @@ watch(activeTab, (tab) => {
         <p class="cs-note">Coming next release.</p>
       </div>
     </div>
+
   </div>
 </template>
 
@@ -752,6 +1088,11 @@ watch(activeTab, (tab) => {
   flex: 1;
 }
 
+.panel-model {
+  font-size: 11px;
+  color: var(--tx-muted);
+}
+
 .panel-count {
   font-size: 11px;
   font-weight: 700;
@@ -831,18 +1172,173 @@ watch(activeTab, (tab) => {
   word-break: break-all;
 }
 
-/* ── Cost Analysis panel ─────────────────────────────────────────────────── */
+/* ── Benchmark tab ───────────────────────────────────────────────────────── */
+.bench-config { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.bench-section-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--tx-muted);
+}
+.bench-checks { display: flex; flex-direction: column; gap: 6px; }
+
+.bench-check {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--bd-default); cursor: pointer;
+  transition: background 0.15s;
+}
+.bench-check:hover { background: var(--bg-elevated); }
+.bench-check.checked { border-color: var(--si-400); background: color-mix(in srgb, var(--si-400) 6%, transparent); }
+.bench-check input { margin-top: 2px; accent-color: var(--si-400); flex-shrink: 0; }
+.bench-check-info { display: flex; flex-direction: column; gap: 2px; }
+.bench-check-label { font-weight: 600; font-size: 13px; color: var(--tx-primary); }
+.bench-check-desc { font-size: 11px; color: var(--tx-muted); }
+
+.bench-opts-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+.opt-label { font-size: 12px; color: var(--tx-secondary); display: flex; align-items: center; gap: 8px; }
+.opt-select {
+  background: var(--bg-elevated); border: 1px solid var(--bd-default);
+  border-radius: 6px; color: var(--tx-primary); padding: 4px 8px; font-size: 12px;
+}
+
+.bench-run-row { display: flex; align-items: center; gap: 12px; padding-top: 4px; }
+
+.bench-progress-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-4);
+}
+
+.bench-phase-card { display: flex; flex-direction: column; }
+.bench-phase-body { padding: 12px 16px; min-height: 60px; }
+
+.phase-badge {
+  font-size: 11px; border-radius: 99px; padding: 2px 8px; font-weight: 600;
+}
+.phase-badge.running {
+  background: color-mix(in srgb, var(--si-400) 15%, transparent);
+  color: var(--si-400);
+  animation: pulse 1.5s infinite;
+}
+.phase-badge.done {
+  background: rgba(52,211,153,.12); color: #34d399;
+}
+.phase-badge.error {
+  background: rgba(239,68,68,.1); color: #f87171;
+}
+
+.bench-spin-row {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; color: var(--tx-muted); padding: 4px 0;
+}
+
+.spin {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid var(--bd-default);
+  border-top-color: var(--si-400);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Inline speed result */
+.speed-result-inline { display: flex; gap: 24px; padding: 4px 0; }
+.sri-stat { display: flex; flex-direction: column; gap: 2px; }
+.sri-val { font-size: 22px; font-weight: 700; color: var(--tx-primary); line-height: 1.2; }
+.sri-label { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--tx-muted); }
+
+/* Quality log + inline scores */
+.quality-log {
+  background: rgba(0,0,0,.35); color: var(--tx-secondary);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
+  padding: 10px 12px; margin: 0; max-height: 240px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-word; border-radius: 0;
+}
+
+.quality-scores-inline {
+  display: flex; gap: 12px; flex-wrap: wrap; padding: 8px 0 4px;
+}
+.qsi { text-align: center; min-width: 64px; }
+.qsi-name { font-size: 9px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--tx-muted); margin-bottom: 2px; }
+.qsi-score { font-size: 20px; font-weight: 700; }
+.qsi-score.good { color: #4ade80; }
+.qsi-score.mid  { color: #f59e0b; }
+.qsi-score.bad  { color: #f87171; }
+.qsi-detail { font-size: 10px; color: var(--tx-muted); }
+.qsi-overall .qsi-score { font-size: 24px; }
+
+/* ── History tab ─────────────────────────────────────────────────────────── */
+.history-toolbar {
+  display: flex; align-items: center;
+  justify-content: space-between; gap: 12px;
+}
+.history-actions { display: flex; gap: 8px; }
+.saved-count {
+  font-size: 11px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--tx-muted);
+}
+
+.compare-panel { margin-bottom: 0; }
+
+.history-list {
+  background: var(--bg-surface);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-xl);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+
+.history-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--bd-subtle);
+  transition: background 0.12s;
+}
+.history-row:last-child { border-bottom: none; }
+.history-row:hover { background: var(--bg-elevated); }
+.history-row.selected { background: color-mix(in srgb, var(--si-400) 5%, transparent); }
+.history-row.latest { border-left: 2px solid var(--si-400); }
+
+.history-check {
+  margin-top: 4px; flex-shrink: 0; accent-color: var(--si-400);
+  width: 14px; height: 14px; cursor: pointer;
+}
+
+.history-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.history-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+
+.latest-badge {
+  font-size: 9px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  background: color-mix(in srgb, var(--si-400) 15%, transparent);
+  color: var(--si-400); border-radius: 99px; padding: 1px 7px;
+}
+
+.history-model { font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--tx-primary); }
+.history-time { font-size: 11px; color: var(--tx-muted); }
+
+.history-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.h-badge {
+  display: inline-flex; align-items: center;
+  font-size: 10px; font-weight: 600;
+  padding: 2px 7px; border-radius: var(--r-pill);
+  border: 1px solid var(--bd-default);
+}
+
+.speed-badge { color: var(--si-400); background: color-mix(in srgb, var(--si-400) 8%, transparent); border-color: color-mix(in srgb, var(--si-400) 25%, transparent); }
+.quality-badge.good { color: #4ade80; background: rgba(74,222,128,.08); border-color: rgba(74,222,128,.2); }
+.quality-badge.mid  { color: #f59e0b; background: rgba(245,158,11,.08); border-color: rgba(245,158,11,.2); }
+.quality-badge.bad  { color: #f87171; background: rgba(248,113,113,.08); border-color: rgba(248,113,113,.2); }
+.overall-badge { color: var(--tx-secondary); background: var(--bg-elevated); }
+
+.history-row-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+
+/* ── Cost Analysis ───────────────────────────────────────────────────────── */
 .cost-panel {
   background: var(--bg-surface);
   border: 1px solid var(--bd-default);
   border-radius: var(--r-xl);
   overflow: hidden;
-  margin-bottom: var(--space-4);
-}
-
-.panel-header-icon {
-  color: var(--tx-muted);
-  flex-shrink: 0;
 }
 
 .cost-body {
@@ -892,14 +1388,6 @@ watch(activeTab, (tab) => {
   line-height: 1.5;
 }
 
-.cost-rates-note {
-  font-size: 11px;
-  color: var(--tx-muted);
-  line-height: 1.6;
-  padding-top: var(--space-1);
-  border-top: 1px solid var(--bd-subtle);
-}
-
 .cost-skeleton-row {
   height: 20px;
   background: var(--bg-elevated);
@@ -909,120 +1397,45 @@ watch(activeTab, (tab) => {
 }
 .cost-skeleton-row.short { width: 55%; }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: .45; }
-}
-
-.tier-badge {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  padding: 2px 8px;
-  border-radius: var(--r-pill);
-  border: 1px solid var(--bd-default);
-}
-.tier-small  { color: var(--si-400); background: rgba(var(--si-400-rgb, 99,179,237),.08); }
-.tier-medium { color: var(--cu-400); background: rgba(var(--cu-400-rgb, 251,146,60),.08); }
-.tier-large  { color: var(--ph-400); background: rgba(var(--ph-400-rgb, 167,139,250),.08); }
-
-/* ── Saved tab ───────────────────────────────────────────────────────────── */
-.saved-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--space-3);
-}
-
-.saved-count {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .07em;
-  text-transform: uppercase;
-  color: var(--tx-muted);
-}
-
-.saved-list {
-  background: var(--bg-surface);
-  border: 1px solid var(--bd-default);
-  border-radius: var(--r-xl);
-  overflow: hidden;
-}
-
-.saved-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--bd-subtle);
-  font-size: 12.5px;
-  transition: background var(--transition-fast);
-}
-.saved-row:last-child { border-bottom: none; }
-.saved-row:hover { background: var(--bg-elevated); }
-
-.saved-date  { min-width: 150px; font-size: 11px; }
-.saved-model { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.saved-tps   { min-width: 80px; text-align: right; }
-.saved-actions { margin-left: var(--space-2); }
-
-.tps-badge {
-  font-size: 11.5px;
-  font-family: var(--font-mono);
-  color: var(--si-300);
-  font-weight: 600;
-}
-
-/* ── Coming soon card ────────────────────────────────────────────────────── */
+/* ── Coming soon ─────────────────────────────────────────────────────────── */
 .coming-soon-card {
   background: var(--bg-surface);
   border: 1px solid var(--bd-default);
   border-radius: var(--r-xl);
   padding: var(--space-8) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
   text-align: center;
-  max-width: 520px;
-  margin: var(--space-6) auto;
 }
 
 .cs-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  border-radius: var(--r-lg);
-  background: var(--ac-bg);
-  border: 1px solid var(--ac-border);
-  color: var(--si-400);
-  margin: 0 auto var(--space-3);
+  width: 52px; height: 52px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-xl);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--tx-muted);
 }
 
 .coming-soon-card h3 {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--tx-primary);
-  margin: 0 0 var(--space-3);
+  font-size: 16px; font-weight: 700;
+  color: var(--tx-primary); margin: 0;
 }
 
 .coming-soon-card p {
   font-size: var(--text-sm);
   color: var(--tx-secondary);
-  line-height: 1.6;
-  margin: 0 0 var(--space-4);
+  max-width: 420px;
+  line-height: 1.65;
+  margin: 0;
 }
 
-.cs-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  justify-content: center;
-  margin-bottom: var(--space-4);
-}
+.cs-tags { display: flex; gap: var(--space-2); flex-wrap: wrap; justify-content: center; }
 
 .cs-tag {
-  font-size: 11px;
+  font-size: 11px; font-weight: 600;
   padding: 3px 10px;
   border-radius: var(--r-pill);
   background: var(--bg-elevated);
@@ -1031,24 +1444,27 @@ watch(activeTab, (tab) => {
 }
 
 .cs-note {
-  font-size: 11px !important;
-  color: var(--tx-muted) !important;
-  margin-bottom: 0 !important;
+  font-size: 12px;
+  color: var(--tx-muted);
+  font-style: italic;
+  margin: 0;
 }
 
-/* ── Shared utilities ────────────────────────────────────────────────────── */
+/* ── Shared ──────────────────────────────────────────────────────────────── */
 .mono { font-family: var(--font-mono); }
 .dim  { color: var(--tx-muted); }
 
 .icon-btn {
-  background: none;
-  border: none;
-  color: var(--tx-muted);
-  cursor: pointer;
-  font-size: 11px;
-  padding: 2px 4px;
-  border-radius: var(--r-sm);
-  transition: color var(--transition-fast);
+  background: none; border: none; cursor: pointer;
+  color: var(--tx-muted); font-size: 13px; padding: 4px 6px;
+  border-radius: var(--r-sm); line-height: 1;
+  transition: color 0.15s, background 0.15s;
 }
-.icon-btn:hover { color: #fca5a5; }
+.icon-btn:hover { color: var(--tx-secondary); background: var(--bg-elevated); }
+.icon-btn.danger:hover { color: #f87171; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .45; }
+}
 </style>

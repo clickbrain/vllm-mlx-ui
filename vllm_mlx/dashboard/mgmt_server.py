@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from . import benchmark_runner as br
 from . import model_manager as mm
+from . import quality_runner as qr
 from . import server_manager as sm
 
 app = FastAPI(
@@ -1026,6 +1027,71 @@ async def proxy_v1_passthrough(path: str, request: Request) -> _FRsp:
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Inference server unreachable: {exc}")
+
+
+# ── Quality benchmarks ────────────────────────────────────────────────────────
+
+_quality_runs: dict[str, dict[str, Any]] = {}
+_quality_lock = threading.Lock()
+
+
+@app.post("/quality-benchmark/run")
+def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
+    """Start a quality benchmark run. Returns run_id to poll for output/results."""
+    import uuid
+    suites = req.get("suites", ["gsm8k"])
+    num_questions = int(req.get("num_questions", 20))
+    server_url = sm.get_server_url()
+
+    run_id = str(uuid.uuid4())[:8]
+    _quality_runs[run_id] = {"running": True, "lines": [], "results": None, "error": None}
+
+    def _run() -> None:
+        def _cb(line: str) -> None:
+            _quality_runs[run_id]["lines"].append(line)
+
+        try:
+            results = qr.run_quality_benchmark(
+                suites=suites,
+                server_url=server_url,
+                num_questions=num_questions,
+                output_callback=_cb,
+            )
+            _quality_runs[run_id]["results"] = results
+            # Persist to shared benchmark history so it appears in /benchmarks
+            br.save_result({
+                "model": results.get("model", ""),
+                "model_id": results.get("model", ""),
+                "timestamp": results.get("timestamp", ""),
+                "benchmark_type": "quality",
+                "suites": results.get("suites", {}),
+                "overall_score": results.get("overall_score", 0.0),
+                "success": True,
+            })
+        except Exception as exc:
+            _quality_runs[run_id]["error"] = str(exc)
+            _cb(f"Error: {exc}\n")
+        finally:
+            _quality_runs[run_id]["running"] = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True, "run_id": run_id}
+
+
+@app.get("/quality-benchmark/output/{run_id}")
+def quality_benchmark_output(run_id: str, since: int = 0, _: None = Depends(_check_auth)) -> dict:
+    """Return output lines since `since` index, plus running status and results when done."""
+    if run_id not in _quality_runs:
+        raise HTTPException(status_code=404, detail="Unknown run_id")
+    run = _quality_runs[run_id]
+    lines = run["lines"][since:]
+    return {
+        "running": run["running"],
+        "lines": lines,
+        "results": run.get("results"),
+        "error": run.get("error"),
+        "total_lines": len(run["lines"]),
+    }
 
 
 import os as _os_mod

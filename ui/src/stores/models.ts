@@ -51,11 +51,21 @@ export interface BenchmarkResult {
   avg_ttft_ms?: number
 }
 
+export interface QualitySuiteResult {
+  correct: number
+  total: number
+  accuracy: number
+}
+
 export interface BenchmarkHistoryEntry {
   id: number
   timestamp: string
   model_id: string
   avg_tps: number
+  avg_ttft_ms?: number
+  benchmark_type?: 'speed' | 'quality'
+  overall_score?: number
+  suites?: Record<string, QualitySuiteResult>
 }
 
 export interface BenchmarkConfig {
@@ -348,12 +358,19 @@ export const useModelsStore = defineStore('models', () => {
 
     benchmarkHistory.value = raw.map((r, idx) => {
       const tps = parseTps(r)
-      return {
+      const entry: BenchmarkHistoryEntry = {
         id: Number(r.id ?? idx),
         timestamp: String(r.timestamp ?? r.created_at ?? ''),
         model_id: String(r.model ?? r.model_id ?? ''),
         avg_tps: tps.avg_tps,
+        avg_ttft_ms: parseTtft(r),
+        benchmark_type: (r.benchmark_type as 'speed' | 'quality') ?? (r.suites ? 'quality' : 'speed'),
       }
+      if (r.suites) {
+        entry.overall_score = Number(r.overall_score ?? 0)
+        entry.suites = r.suites as Record<string, QualitySuiteResult>
+      }
+      return entry
     })
   }
 
