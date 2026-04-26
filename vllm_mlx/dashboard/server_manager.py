@@ -610,6 +610,8 @@ def _build_command(config: dict[str, Any]) -> list[str]:
         cmd += ["--warm-prompts", config["warm_prompts"]]
     if config.get("prefill_step_size", 0) > 0:
         cmd += ["--prefill-step-size", str(config["prefill_step_size"])]
+    if config.get("auto_model_switch"):
+        cmd += ["--auto-model-switch"]
 
     return cmd
 

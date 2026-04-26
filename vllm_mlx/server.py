@@ -188,6 +188,8 @@ _max_tts_input_chars: int = DEFAULT_MAX_TTS_INPUT_CHARS
 _force_mllm_model: bool = False
 _auto_unload_idle_seconds: float = 0.0
 _lazy_load_model: bool = False
+_auto_model_switch: bool = False
+_model_switch_lock: asyncio.Lock | None = None
 _residency_manager: ResidencyManager | None = None
 _lifecycle_task: asyncio.Task | None = None
 _lifespan_active: bool = False
@@ -1168,14 +1170,81 @@ def _coerce_tool_arguments(
     return arguments_json
 
 
-def _validate_model_name(request_model: str) -> None:
-    """Validate that the request model name matches the served model."""
-    if _model_name and request_model != _model_name:
+async def _ensure_model_ready(request_model: str) -> None:
+    """Validate model name, hot-swapping when --auto-model-switch is enabled.
+
+    Fast path: no-op when the request model already matches the loaded model.
+    Switch path: unloads the current model and loads the requested one in-place,
+    serialised by ``_model_switch_lock`` so concurrent switch requests coalesce.
+    """
+    global _model_name, _model_path, _model_switch_lock
+
+    if not _model_name or request_model == _model_name:
+        return
+
+    if not _auto_model_switch:
         raise HTTPException(
             status_code=404,
             detail=f"The model `{request_model}` does not exist. "
             f"Available model: `{_model_name}`",
         )
+
+    if _residency_manager is None or _default_model_key is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Auto model switching requires the lifecycle manager. "
+            "Start the server with --auto-model-switch.",
+        )
+
+    if _model_switch_lock is None:
+        _model_switch_lock = asyncio.Lock()
+
+    async with _model_switch_lock:
+        # Re-check: another coroutine may have already switched to this model.
+        if request_model == _model_name:
+            return
+
+        logger.info("[auto-model-switch] %r → %r", _model_name, request_model)
+
+        # Save spec before shutdown so we can preserve engine config.
+        old_resident = _residency_manager._residents.get(_default_model_key)
+        old_spec: ModelSpec | None = old_resident.spec if old_resident else None
+
+        # Unload current model (cancels any in-flight loading tasks).
+        await _residency_manager.shutdown()
+
+        # Update global model identity.
+        _model_name = request_model
+        _model_path = request_model
+
+        # Build new spec, preserving all engine settings from the previous one.
+        new_spec = ModelSpec(
+            model_key=_default_model_key,
+            model_name=request_model,
+            use_batching=old_spec.use_batching if old_spec else False,
+            scheduler_config=old_spec.scheduler_config if old_spec else None,
+            stream_interval=old_spec.stream_interval if old_spec else 1,
+            max_tokens=old_spec.max_tokens if old_spec else _default_max_tokens,
+            force_mllm=old_spec.force_mllm if old_spec else _force_mllm_model,
+            mtp=old_spec.mtp if old_spec else False,
+            prefill_step_size=old_spec.prefill_step_size if old_spec else 2048,
+            specprefill_enabled=(
+                old_spec.specprefill_enabled if old_spec else False
+            ),
+            specprefill_threshold=(
+                old_spec.specprefill_threshold if old_spec else 8192
+            ),
+            specprefill_keep_pct=(
+                old_spec.specprefill_keep_pct if old_spec else 0.3
+            ),
+            specprefill_draft_model=(
+                old_spec.specprefill_draft_model if old_spec else None
+            ),
+        )
+        _residency_manager.register_model(new_spec)
+        await _residency_manager.ensure_loaded(_default_model_key)
+        _sync_engine_from_residency()
+        logger.info("[auto-model-switch] Ready: %r", request_model)
 
 
 def _get_engine_tokenizer(engine: BaseEngine | None) -> object | None:
@@ -1665,11 +1734,11 @@ def _build_response_object(
     return response
 
 
-def _prepare_responses_request(
+async def _prepare_responses_request(
     request: ResponsesRequest,
 ) -> tuple[BaseEngine, ChatCompletionRequest, list[dict], dict]:
     """Prepare a Responses request for execution on the chat engine."""
-    _validate_model_name(request.model)
+    await _ensure_model_ready(request.model)
     engine = get_engine()
     chat_request = _responses_request_to_chat_request(request)
 
@@ -1711,7 +1780,7 @@ async def _run_responses_request(
     raw_request: Request,
 ) -> tuple[ResponseObject | None, list[dict]]:
     """Execute a Responses API request against the backend chat engine."""
-    engine, chat_request, messages, chat_kwargs = _prepare_responses_request(request)
+    engine, chat_request, messages, chat_kwargs = await _prepare_responses_request(request)
 
     timeout = _default_timeout
     output = await _wait_with_disconnect(
@@ -1764,7 +1833,7 @@ async def _run_responses_request(
 
 async def _stream_responses_request(request: ResponsesRequest) -> AsyncIterator[str]:
     """Execute a Responses API request and stream SSE events incrementally."""
-    engine, chat_request, messages, chat_kwargs = _prepare_responses_request(request)
+    engine, chat_request, messages, chat_kwargs = await _prepare_responses_request(request)
 
     response_id = _new_response_item_id("resp")
     sequence = 1
@@ -2402,6 +2471,7 @@ def load_model(
     warm_prompts_path: str | None = None,
     auto_unload_idle_seconds: float = 0.0,
     lazy_load_model: bool = False,
+    auto_model_switch: bool = False,
 ):
     """
     Load a model (auto-detects MLLM vs LLM).
@@ -2431,7 +2501,7 @@ def load_model(
     global _engine, _model_name, _model_path, _default_max_tokens
     global _max_request_tokens, _tool_parser_instance, _warm_prompts_path
     global _default_model_key, _auto_unload_idle_seconds, _residency_manager
-    global _force_mllm_model, _lazy_load_model, _lifespan_active
+    global _force_mllm_model, _lazy_load_model, _auto_model_switch, _lifespan_active
 
     _warm_prompts_path = warm_prompts_path
 
@@ -2482,13 +2552,14 @@ def load_model(
     _force_mllm_model = force_mllm
     _auto_unload_idle_seconds = auto_unload_idle_seconds
     _lazy_load_model = lazy_load_model
+    _auto_model_switch = auto_model_switch
     # Reset tool parser instance when model is reloaded (tokenizer may change)
     _invalidate_tool_parser_cache("model reloaded")
 
     if force_mllm:
         logger.info("Force MLLM mode enabled via --mllm flag")
 
-    if auto_unload_idle_seconds > 0 or lazy_load_model:
+    if auto_unload_idle_seconds > 0 or lazy_load_model or auto_model_switch:
         spec = ModelSpec(
             model_key=_default_model_key,
             model_name=model_name,
@@ -2521,6 +2592,7 @@ def load_model(
     _residency_manager = None
     _auto_unload_idle_seconds = 0.0
     _lazy_load_model = False
+    _auto_model_switch = False
 
     if use_batching:
         logger.info(f"Loading model with BatchedEngine: {model_name}")
@@ -3642,7 +3714,7 @@ async def _acquire_default_engine_for_request(
 )
 async def create_completion(request: CompletionRequest, raw_request: Request):
     """Create a text completion."""
-    _validate_model_name(request.model)
+    await _ensure_model_ready(request.model)
     effective_max_tokens = _resolve_request_max_tokens(request.max_tokens)
     tracker = _metrics.track_inference("completions", stream=request.stream)
 
@@ -3824,7 +3896,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
     }
     ```
     """
-    _validate_model_name(request.model)
+    await _ensure_model_ready(request.model)
     effective_max_tokens = _resolve_request_max_tokens(request.max_tokens)
     tracker = _metrics.track_inference("chat_completions", stream=request.stream)
     total_timeout, deadline = _start_request_budget(request.timeout)
@@ -4221,7 +4293,7 @@ async def create_anthropic_message(
             raise
     anthropic_request = AnthropicRequest(**body)
 
-    _validate_model_name(anthropic_request.model)
+    await _ensure_model_ready(anthropic_request.model)
     effective_max_tokens = _resolve_request_max_tokens(anthropic_request.max_tokens)
 
     # --- Detailed request logging ---
@@ -4420,7 +4492,7 @@ async def count_anthropic_tokens(request: Request):
     body = await request.json()
     request_model = body.get("model")
     if isinstance(request_model, str) and request_model:
-        _validate_model_name(request_model)
+        await _ensure_model_ready(request_model)
     total_timeout, deadline = _start_request_budget(None)
     engine = await _acquire_default_engine_for_request(
         request,

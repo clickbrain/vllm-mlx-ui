@@ -4,6 +4,18 @@ All notable changes to the dashboard UI are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Dashboard UI version is tracked separately from the core vllm-mlx version.
 
+## [0.3.45] — 2026-04-27
+
+### Added
+- **`--auto-model-switch` flag** — when enabled, requests that specify a different model name
+  automatically hot-swap the loaded model instead of returning a 404.
+  - `_validate_model_name` replaced by async `_ensure_model_ready` in `server.py`
+  - Uses `ResidencyManager.shutdown()` → `register_model()` → `ensure_loaded()` sequence
+  - Concurrent switch requests serialized via `_model_switch_lock`
+  - Dashboard `server_manager.py` passes `--auto-model-switch` to the server when
+    `auto_model_switch: true` is set in config (already defaulted to `true`)
+  - CLI flag `--auto-model-switch` added in `cli.py`
+
 ## [0.3.44] — 2026-04-27
 
 ### Fixed

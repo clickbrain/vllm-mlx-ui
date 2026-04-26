@@ -289,6 +289,7 @@ def serve_command(args):
         warm_prompts_path=getattr(args, "warm_prompts", None),
         auto_unload_idle_seconds=args.auto_unload_idle_seconds,
         lazy_load_model=args.lazy_load_model,
+        auto_model_switch=args.auto_model_switch,
     )
 
     # Start server
@@ -1050,6 +1051,14 @@ Examples:
         "--lazy-load-model",
         action="store_true",
         help="Register the main model at startup but defer loading until first request",
+    )
+    serve_parser.add_argument(
+        "--auto-model-switch",
+        action="store_true",
+        help=(
+            "Automatically load the requested model when a client sends a model name "
+            "different from the currently loaded one. Requires the lifecycle manager."
+        ),
     )
     serve_parser.add_argument(
         "--max-audio-upload-mb",
