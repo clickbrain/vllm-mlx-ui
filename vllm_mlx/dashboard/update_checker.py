@@ -48,10 +48,34 @@ class PackageInfo(NamedTuple):
 
 
 def _installed_version(package: str) -> str:
-    """Return the installed version of a Python package, or 'unknown'."""
+    """Return the installed version of a Python package, or 'unknown'.
+
+    Prefers a proper `.dist-info` in the running venv's site-packages over any
+    `.egg-info` found by importlib.metadata when scanning the working directory.
+    This prevents stale editable-install egg-info files from shadowing the real
+    installed version (a known footgun when both vllm-mlx and vllm-mlx-ui share
+    the same top-level `vllm_mlx` namespace).
+    """
+    import sys
+    import importlib.metadata as _meta
+    normalized = package.lower().replace("-", "_")
     try:
-        from importlib.metadata import version
-        return version(package)
+        # Prefer a distribution whose metadata lives inside the running venv,
+        # falling back to any distribution if nothing venv-local is found.
+        site_pkgs = {p for p in sys.path if "site-packages" in p}
+        best: str | None = None
+        for dist in _meta.distributions():
+            name = (dist.metadata.get("Name") or "").lower().replace("-", "_")
+            if name != normalized:
+                continue
+            ver = dist.metadata.get("Version") or ""
+            dist_path = str(getattr(dist, "_path", ""))
+            if any(sp in dist_path for sp in site_pkgs) and ".dist-info" in dist_path:
+                # This is the real venv installation — use it immediately.
+                return ver
+            if best is None:
+                best = ver
+        return best or "unknown"
     except Exception:
         return "unknown"
 

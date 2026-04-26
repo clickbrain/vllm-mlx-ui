@@ -45,6 +45,22 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
   names, average t/s, and the config used. Click any saved run to restore its results
   instantly. Each entry can be deleted individually.
 
+## [0.3.43] — 2026-04-26
+
+### Fixed
+- **Update checker always showed vllm-mlx as outdated (false positive)** — A stale
+  `vllm_mlx.egg-info` with `Name: vllm-mlx, Version: 0.2.8` was present in the project
+  root from a prior editable install of the upstream engine. Python's `importlib.metadata`
+  found this file (relative path) before the real `vllm_mlx-0.2.9.dist-info` in the
+  brew venv, causing the update checker to always report 0.2.8 installed and offer an
+  upgrade that could never change anything.
+  - Deleted the stale `vllm_mlx.egg-info` from the project root.
+  - Hardened `_installed_version()` to prefer `.dist-info` entries inside the running
+    venv's site-packages over `.egg-info` files found via relative path resolution, so
+    this class of false-positive cannot recur.
+
+---
+
 ---
 
 ---
