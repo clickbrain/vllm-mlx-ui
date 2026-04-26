@@ -6,6 +6,17 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
 
 ---
 
+## [0.3.38] — 2026-04-26
+
+### Fixed
+- **vllm-mlx and huggingface-hub never actually upgraded** — the Homebrew formula's install
+  block only ran `pip install --upgrade mlx-lm huggingface-hub`. `vllm-mlx` was installed
+  only via `pip install .` (the formula package), which pip won't upgrade if the currently
+  installed version already satisfies the declared version range. Added `vllm-mlx` to the
+  explicit `--upgrade` line so all three key packages are upgraded on every `brew upgrade`.
+
+---
+
 ## [0.3.37] — 2026-04-26
 
 ### Fixed

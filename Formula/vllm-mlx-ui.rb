@@ -58,9 +58,14 @@ class VllmMlxUi < Formula
     # Install the package (no [ui] extra needed — Streamlit dependency removed).
     system venv/"bin/pip", "install", "."
 
-    # Upgrade key dependencies within the ranges declared in pyproject.toml.
+    # Upgrade key dependencies to latest compatible releases.
     # Using version bounds prevents silent breakage from incompatible upstream releases.
-    system venv/"bin/pip", "install", "--upgrade", "mlx-lm>=0.31.0", "huggingface-hub>=0.23.0"
+    # vllm-mlx must be listed explicitly — pip install . only satisfies the minimum
+    # version requirement and won't upgrade an already-installed compatible release.
+    system venv/"bin/pip", "install", "--upgrade",
+           "vllm-mlx>=0.1.0",
+           "mlx-lm>=0.31.0",
+           "huggingface-hub>=0.23.0"
 
     # Install stable launcher scripts into Homebrew's bin.
     #
