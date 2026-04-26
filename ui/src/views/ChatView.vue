@@ -1,14 +1,38 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+// SPDX-License-Identifier: Apache-2.0
+/**
+ * ChatView — interactive test chat for the local inference server.
+ *
+ * Features:
+ *  - Streaming & non-streaming modes with AbortController stop button
+ *  - Auto-resizing textarea (grows up to 200 px, collapses on send)
+ *  - Message hover actions: copy, regenerate (last assistant), edit (user)
+ *  - Scroll-to-bottom button; auto-scroll only when already at bottom
+ *  - Collapsible system prompt persisted to localStorage
+ *  - Token usage display after each response
+ *  - Saved chats panel with New Chat (auto-saves current), Save, delete, load
+ *  - Per-model inference parameters persisted to localStorage
+ *  - Starter prompts in empty state
+ */
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useServerStore } from '@/stores/server'
+import { useModelsStore } from '@/stores/models'
+import { useChatStore } from '@/stores/chat'
 import AppButton from '@/components/shared/AppButton.vue'
+import MarkdownMessage from '@/components/chat/MarkdownMessage.vue'
 
 const serverStore = useServerStore()
+const modelsStore = useModelsStore()
+const chatStore = useChatStore()
+
+// ── Types ────────────────────────────────────────────────────────────────────
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
+  reasoning?: string
   streaming?: boolean
+  stopped?: boolean
 }
 
 interface SavedChat {
@@ -29,9 +53,18 @@ interface ChatParams {
   stream: boolean
 }
 
-const LS_CHATS_KEY = 'vmui_saved_chats'
-const LS_PARAMS_PREFIX = 'vmui_chat_params_'
+interface TokenUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
 
+// ── Storage keys ─────────────────────────────────────────────────────────────
+const LS_CHATS_KEY    = 'vmui_saved_chats'
+const LS_PARAMS_PFX   = 'vmui_chat_params_'
+const LS_SYSTEM_KEY   = 'vmui_system_prompt'
+
+// ── Saved chats ──────────────────────────────────────────────────────────────
 function loadSavedChats(): SavedChat[] {
   try { return JSON.parse(localStorage.getItem(LS_CHATS_KEY) ?? '[]') }
   catch { return [] }
@@ -40,10 +73,10 @@ function persistSavedChats(chats: SavedChat[]) {
   localStorage.setItem(LS_CHATS_KEY, JSON.stringify(chats))
 }
 
+// ── Per-model params ─────────────────────────────────────────────────────────
 function paramsKey(model: string | null) {
-  return LS_PARAMS_PREFIX + (model ?? '__default__').replace(/\//g, '_')
+  return LS_PARAMS_PFX + (model ?? '__default__').replace(/\//g, '_')
 }
-
 function loadParams(model: string | null): ChatParams {
   try {
     const raw = localStorage.getItem(paramsKey(model))
@@ -51,50 +84,107 @@ function loadParams(model: string | null): ChatParams {
   } catch {}
   return { temperature: 0.7, topP: 0.9, topK: 0, minP: 0.0, maxTokens: 2048, repetitionPenalty: 1.0, seed: 0, stream: true }
 }
-
-function saveParams(model: string | null, p: ChatParams) {
-  localStorage.setItem(paramsKey(model), JSON.stringify(p))
+function saveParams(model: string | null, params: ChatParams) {
+  localStorage.setItem(paramsKey(model), JSON.stringify(params))
 }
 
-const messages = ref<Message[]>([])
-const input = ref('')
-const sending = ref(false)
-const error = ref('')
-const messagesEl = ref<HTMLElement | null>(null)
-const savedChats = ref<SavedChat[]>(loadSavedChats())
-const showParams = ref(false)
+// ── State ─────────────────────────────────────────────────────────────────────
+const messages     = computed(() => chatStore.messages)
+const input        = ref('')
+const sending      = ref(false)
+const error        = ref('')
+const savedChats   = ref<SavedChat[]>(loadSavedChats())
+const showParams   = ref(false)
 const showAdvanced = ref(false)
 const loadingOptimal = ref(false)
+const optimalApplied = ref(false)
+const taskMode     = ref<'chat'|'code'|'creative'|'analysis'|'precise'>(
+  (localStorage.getItem('vmui_task_mode') as 'chat'|'code'|'creative'|'analysis'|'precise') ?? 'chat'
+)
+const tokenUsage   = ref<TokenUsage | null>(null)
+
+const systemPrompt     = ref(localStorage.getItem(LS_SYSTEM_KEY) ?? '')
+const showSystemPrompt = ref(false)
 
 const modelId = computed(() => serverStore.modelId)
+const p       = ref<ChatParams>(loadParams(modelId.value))
 
-// Per-model params — load from localStorage keyed by model
-const p = ref<ChatParams>(loadParams(modelId.value))
+// Active chat title for the header (set when loading a saved chat)
+const activeTitle = ref<string | null>(null)
 
-watch(modelId, (newModel) => {
-  p.value = loadParams(newModel)
-})
+// AbortController for in-flight streaming requests
+let abortCtrl: AbortController | null = null
 
-// Auto-save params when they change
+// DOM refs
+const messagesEl = ref<HTMLElement | null>(null)
+const inputEl    = ref<HTMLTextAreaElement | null>(null)
+
+// Scroll-to-bottom visibility
+const isAtBottom = ref(true)
+
+// Copied message index for transient feedback
+const copiedIdx = ref<number | null>(null)
+
+// ── Watchers ──────────────────────────────────────────────────────────────────
+watch(modelId, (newModel) => { p.value = loadParams(newModel) })
 watch(p, (val) => saveParams(modelId.value, val), { deep: true })
+watch(systemPrompt, (val) => localStorage.setItem(LS_SYSTEM_KEY, val))
 
-// ── Optimal settings ────────────────────────────────────────────────────────
+// ── Textarea auto-resize ──────────────────────────────────────────────────────
+function autoResize() {
+  const el = inputEl.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+}
+function resetInputHeight() {
+  if (inputEl.value) inputEl.value.style.height = 'auto'
+}
+
+// ── Scroll tracking ───────────────────────────────────────────────────────────
+function onMessagesScroll() {
+  const el = messagesEl.value
+  if (!el) return
+  isAtBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+}
+
+/**
+ * Scroll the message list to the bottom.
+ * @param force - if false, only scrolls when already at bottom (non-interrupting)
+ */
+async function scrollToBottom(force = false) {
+  await nextTick()
+  const el = messagesEl.value
+  if (!el) return
+  if (force || isAtBottom.value) {
+    el.scrollTop = el.scrollHeight
+    isAtBottom.value = true
+  }
+}
+
+// ── Optimal settings ──────────────────────────────────────────────────────────
 async function applyOptimalSettings() {
   if (!modelId.value) return
   loadingOptimal.value = true
   try {
     const BASE = import.meta.env.DEV ? '/api' : ''
-    const resp = await fetch(`${BASE}/models/presets?model_id=${encodeURIComponent(modelId.value)}`)
+    const url = `${BASE}/models/presets?model_id=${encodeURIComponent(modelId.value)}&task_mode=${taskMode.value}`
+    const resp = await fetch(url)
     if (!resp.ok) throw new Error(`${resp.status}`)
-    const data = await resp.json() as { recommended?: Partial<ChatParams> }
+    const data = await resp.json() as { recommended?: Record<string, number> }
     const rec = data.recommended
     if (rec) {
-      if (rec.temperature !== undefined) p.value.temperature = rec.temperature
-      if (rec.topP !== undefined) p.value.topP = rec.topP
-      if (rec.topK !== undefined) p.value.topK = rec.topK
-      if (rec.minP !== undefined) p.value.minP = rec.minP
-      if (rec.maxTokens !== undefined) p.value.maxTokens = rec.maxTokens
-      if (rec.repetitionPenalty !== undefined) p.value.repetitionPenalty = rec.repetitionPenalty
+      // API returns snake_case; map to camelCase ChatParams
+      if (rec.temperature        !== undefined) p.value.temperature       = rec.temperature
+      if (rec.top_p              !== undefined) p.value.topP              = rec.top_p
+      if (rec.top_k              !== undefined) p.value.topK              = rec.top_k
+      if (rec.min_p              !== undefined) p.value.minP              = rec.min_p
+      if (rec.max_tokens         !== undefined) p.value.maxTokens         = rec.max_tokens
+      if (rec.repetition_penalty !== undefined) p.value.repetitionPenalty = rec.repetition_penalty
+      // Open params panel so user can see what was applied
+      showParams.value = true
+      optimalApplied.value = true
+      setTimeout(() => { optimalApplied.value = false }, 1800)
     }
   } catch (e) {
     error.value = `Could not fetch optimal settings: ${e}`
@@ -103,83 +193,74 @@ async function applyOptimalSettings() {
   }
 }
 
-// ── Send message ─────────────────────────────────────────────────────────────
-async function send() {
-  const text = input.value.trim()
-  if (!text || sending.value) return
-
-  if (!serverStore.isRunning) {
-    error.value = 'The inference server is not running. Start it on the Serve page first.'
-    return
-  }
-
-  messages.value.push({ role: 'user', content: text })
-  input.value = ''
-  sending.value = true
-  error.value = ''
-  await scrollToBottom()
-
-  const body: Record<string, unknown> = {
-    model: modelId.value ?? 'default',
-    messages: messages.value.filter(m => !m.streaming).map(m => ({ role: m.role, content: m.content })),
-    stream: p.value.stream,
-    temperature: p.value.temperature,
-    max_tokens: p.value.maxTokens,
-    top_p: p.value.topP,
-  }
-  if (p.value.topK > 0) body.top_k = p.value.topK
-  if (p.value.minP > 0) body.min_p = p.value.minP
-  if (p.value.repetitionPenalty !== 1.0) body.repetition_penalty = p.value.repetitionPenalty
-  if (p.value.seed > 0) body.seed = p.value.seed
-
-  try {
-    if (p.value.stream) {
-      await sendStreaming(body)
-    } else {
-      await sendNonStreaming(body)
-    }
-  } catch (e) {
-    const msg = String(e)
-    if (msg.includes('502') || msg.includes('Load failed')) {
-      error.value = 'The inference server is not responding. Make sure it is started on the Serve page.'
-    } else {
-      error.value = `Request failed: ${msg}`
-    }
-    // remove partial streaming message if present
-    if (messages.value.at(-1)?.streaming) messages.value.pop()
-  } finally {
-    sending.value = false
-    await scrollToBottom()
-  }
+function setTaskMode(mode: typeof taskMode.value) {
+  taskMode.value = mode
+  localStorage.setItem('vmui_task_mode', mode)
 }
 
+// ── Build API body ────────────────────────────────────────────────────────────
+function buildBody(): Record<string, unknown> {
+  const systemMsgs = systemPrompt.value.trim()
+    ? [{ role: 'system', content: systemPrompt.value.trim() }]
+    : []
+  const body: Record<string, unknown> = {
+    model:       modelId.value ?? 'default',
+    messages: [
+      ...systemMsgs,
+      ...chatStore.messages.filter(m => !m.streaming).map(m => ({ role: m.role, content: m.content })),
+    ],
+    stream:              p.value.stream,
+    temperature:         p.value.temperature,
+    max_tokens:          p.value.maxTokens,
+    top_p:               p.value.topP,
+  }
+  if (p.value.topK > 0)             body.top_k             = p.value.topK
+  if (p.value.minP > 0)             body.min_p             = p.value.minP
+  if (p.value.repetitionPenalty !== 1.0) body.repetition_penalty = p.value.repetitionPenalty
+  if (p.value.seed > 0)             body.seed              = p.value.seed
+  return body
+}
+
+// ── Non-streaming send ────────────────────────────────────────────────────────
 async function sendNonStreaming(body: Record<string, unknown>) {
   const BASE = import.meta.env.DEV ? '/api' : ''
+  abortCtrl = new AbortController()
   const resp = await fetch(`${BASE}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: abortCtrl.signal,
   })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-  const data = await resp.json() as { choices: Array<{ message: { content: string } }> }
-  const reply = data?.choices?.[0]?.message?.content ?? '(no response)'
-  messages.value.push({ role: 'assistant', content: reply })
+  const data = await resp.json() as {
+    choices: Array<{ message: { content: string; reasoning_content?: string } }>
+    usage?: TokenUsage
+  }
+  const msg = data?.choices?.[0]?.message
+  chatStore.addMessage({
+    role:      'assistant',
+    content:   msg?.content ?? '(no response)',
+    reasoning: msg?.reasoning_content || undefined,
+  })
+  if (data.usage) tokenUsage.value = data.usage
 }
 
+// ── Streaming send ────────────────────────────────────────────────────────────
 async function sendStreaming(body: Record<string, unknown>) {
   const BASE = import.meta.env.DEV ? '/api' : ''
+  abortCtrl = new AbortController()
   const resp = await fetch(`${BASE}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: abortCtrl.signal,
   })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
 
-  // Add placeholder message that will fill in token-by-token
-  messages.value.push({ role: 'assistant', content: '', streaming: true })
-  const idx = messages.value.length - 1
+  chatStore.addMessage({ role: 'assistant', content: '', streaming: true })
+  let completionTokens = 0
 
-  const reader = resp.body!.getReader()
+  const reader  = resp.body!.getReader()
   const decoder = new TextDecoder()
   let buf = ''
 
@@ -197,94 +278,364 @@ async function sendStreaming(body: Record<string, unknown>) {
       if (payload === '[DONE]') break
       try {
         const chunk = JSON.parse(payload) as {
-          choices: Array<{ delta?: { content?: string }; finish_reason?: string }>
+          choices: Array<{ delta?: { content?: string; reasoning_content?: string }; finish_reason?: string }>
+          usage?: TokenUsage
         }
-        const delta = chunk.choices?.[0]?.delta?.content
-        if (delta) {
-          messages.value[idx].content += delta
+        const delta = chunk.choices?.[0]?.delta
+        if (delta?.reasoning_content) chatStore.updateLastReasoning(delta.reasoning_content)
+        if (delta?.content) {
+          chatStore.updateLastMessage(delta.content)
+          completionTokens++
           await scrollToBottom()
         }
+        if (chunk.usage) tokenUsage.value = chunk.usage
       } catch {}
     }
   }
-  // Mark streaming done
-  messages.value[idx].streaming = false
+
+  chatStore.finalizeLastMessage()
+  // If server didn't provide usage, show approximate completion token count
+  if (!tokenUsage.value && completionTokens > 0) {
+    tokenUsage.value = { prompt_tokens: 0, completion_tokens: completionTokens, total_tokens: completionTokens }
+  }
 }
 
-async function scrollToBottom() {
-  await nextTick()
-  if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+// ── Core send logic ───────────────────────────────────────────────────────────
+async function sendRequest() {
+  if (sending.value) return
+  sending.value = true
+  error.value   = ''
+  tokenUsage.value = null
+  await scrollToBottom(true)
+
+  const body = buildBody()
+  try {
+    if (p.value.stream) {
+      await sendStreaming(body)
+    } else {
+      await sendNonStreaming(body)
+    }
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      // User stopped — partial message already in store; finalize it as stopped
+      chatStore.finalizeLastMessage(true)
+      await scrollToBottom()
+      sending.value = false
+      abortCtrl = null
+      return
+    }
+    const msg = String(e)
+    if (msg.includes('502') || msg.includes('Load failed') || msg.includes('Failed to fetch')) {
+      error.value = 'The inference server is not responding. Make sure it is started on the Serve page.'
+    } else {
+      error.value = `Request failed: ${msg}`
+    }
+    // Remove any partial streaming placeholder
+    if (chatStore.messages.at(-1)?.streaming) chatStore.popLastMessage()
+  } finally {
+    sending.value = false
+    abortCtrl = null
+    await scrollToBottom()
+  }
 }
 
+// ── Public send (from input) ──────────────────────────────────────────────────
+async function send() {
+  const text = input.value.trim()
+  if (!text || sending.value) return
+  if (!serverStore.isRunning) {
+    error.value = 'The inference server is not running. Start it on the Serve page first.'
+    return
+  }
+  chatStore.addMessage({ role: 'user', content: text })
+  input.value = ''
+  resetInputHeight()
+  activeTitle.value = null
+  await sendRequest()
+}
+
+// ── Stop streaming ────────────────────────────────────────────────────────────
+function stopStreaming() {
+  abortCtrl?.abort()
+}
+
+// ── Regenerate last assistant response ───────────────────────────────────────
+async function regenerate() {
+  if (sending.value) return
+  // Remove last assistant message (keep the user message it responded to)
+  if (chatStore.messages.at(-1)?.role === 'assistant') {
+    chatStore.popLastMessage()
+  }
+  await sendRequest()
+}
+
+// ── Edit a user message (remove it + everything after, put text in input) ────
+function editMessage(index: number) {
+  const msg = chatStore.messages[index]
+  if (!msg || msg.role !== 'user') return
+  input.value = msg.content
+  chatStore.removeMessagesFrom(index)
+  activeTitle.value = null
+  tokenUsage.value  = null
+  nextTick(() => {
+    inputEl.value?.focus()
+    autoResize()
+  })
+}
+
+// ── Copy a message to clipboard ───────────────────────────────────────────────
+async function copyMessage(idx: number, content: string) {
+  try {
+    await navigator.clipboard.writeText(content)
+    copiedIdx.value = idx
+    setTimeout(() => { if (copiedIdx.value === idx) copiedIdx.value = null }, 1500)
+  } catch { /* clipboard unavailable */ }
+}
+
+// ── Keyboard ──────────────────────────────────────────────────────────────────
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
 }
 
-function clear() { messages.value = []; error.value = '' }
+// ── Chat management ───────────────────────────────────────────────────────────
+function clear() {
+  chatStore.clearMessages()
+  tokenUsage.value  = null
+  activeTitle.value = null
+  error.value = ''
+}
 
-function saveChat() {
-  if (!messages.value.length) return
-  const firstUser = messages.value.find(m => m.role === 'user')?.content ?? 'Chat'
-  const title = firstUser.length > 50 ? firstUser.slice(0, 50) + '…' : firstUser
+/** Save current chat to the saved panel. Returns the generated title. */
+function saveChat(): string {
+  if (!chatStore.messages.length) return ''
+  const firstUser = chatStore.messages.find(m => m.role === 'user')?.content ?? 'Chat'
+  const title = firstUser.length > 60 ? firstUser.slice(0, 60) + '…' : firstUser
+  // Don't save a duplicate of the currently active chat
   const chat: SavedChat = {
-    id: crypto.randomUUID(),
+    id:       crypto.randomUUID(),
     title,
-    savedAt: Date.now(),
-    messages: messages.value.filter(m => !m.streaming).map(m => ({ ...m })),
+    savedAt:  Date.now(),
+    messages: chatStore.messages.filter(m => !m.streaming).map(m => ({ ...m })),
   }
   savedChats.value.unshift(chat)
   persistSavedChats(savedChats.value)
+  return title
+}
+
+/** Start a new chat, auto-saving current if it has messages. */
+function newChat() {
+  if (chatStore.messages.length) saveChat()
+  clear()
 }
 
 function loadChat(chat: SavedChat) {
-  messages.value = [...chat.messages]
+  chatStore.setMessages(chat.messages)
+  activeTitle.value = chat.title
+  tokenUsage.value  = null
   error.value = ''
-  nextTick(() => scrollToBottom())
+  nextTick(() => scrollToBottom(true))
 }
 
 function deleteChat(id: string) {
   savedChats.value = savedChats.value.filter(c => c.id !== id)
   persistSavedChats(savedChats.value)
 }
+
+// ── Starter prompts ───────────────────────────────────────────────────────────
+const STARTER_PROMPTS = [
+  'Explain how transformers work in plain English',
+  'Write a Python function to find all prime numbers up to N',
+  'What are the main differences between REST and GraphQL?',
+  'Summarize the key ideas in the paper "Attention Is All You Need"',
+]
+
+function useStarterPrompt(prompt: string) {
+  input.value = prompt
+  nextTick(() => {
+    inputEl.value?.focus()
+    autoResize()
+  })
+}
+
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
+onMounted(() => {
+  nextTick(() => scrollToBottom(true))
+})
+
+onUnmounted(() => {
+  abortCtrl?.abort()
+})
 </script>
 
 <template>
   <div class="chat-view">
-    <!-- Main chat area -->
+    <!-- ── Main chat area ──────────────────────────────────────────────── -->
     <div class="chat-main">
+      <!-- Header -->
       <div class="chat-header">
-        <h1 class="page-title">Test Chat</h1>
-        <div class="chat-meta">
-          <span class="model-tag" :class="{ offline: !modelId }">
-            {{ modelId ?? 'No model loaded' }}
+        <div class="header-left">
+          <h1 class="page-title">{{ activeTitle ?? 'Chat' }}</h1>
+          <span v-if="!modelsStore.serverRestartingFor" class="model-tag" :class="{ offline: !modelId }">
+            {{ modelId?.split('/').pop() ?? 'No model loaded' }}
           </span>
-          <AppButton v-if="messages.length" variant="ghost" size="sm" @click="saveChat" title="Save this conversation">
+          <span v-else class="model-tag switching">Switching…</span>
+        </div>
+        <div class="header-actions">
+          <select
+            v-if="modelsStore.models.length"
+            class="model-select-inline"
+            :value="modelId ?? ''"
+            :disabled="!!modelsStore.serverRestartingFor || serverStore.loading"
+            @change="(e) => modelsStore.loadModel((e.target as HTMLSelectElement).value)"
+          >
+            <option value="" disabled>Switch model…</option>
+            <option v-for="m in modelsStore.models" :key="m.id" :value="m.id">
+              {{ m.id.split('/').pop() }}
+            </option>
+          </select>
+
+          <!-- System prompt toggle -->
+          <button
+            class="icon-btn"
+            :class="{ active: showSystemPrompt || systemPrompt.trim() }"
+            title="System prompt"
+            @click="showSystemPrompt = !showSystemPrompt"
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path d="M10 2a8 8 0 100 16A8 8 0 0010 2zm1 11H9v-2h2v2zm0-4H9V7h2v2z"/></svg>
+          </button>
+
+          <AppButton v-if="messages.length" variant="ghost" size="sm" @click="saveChat" title="Save conversation">
             Save
           </AppButton>
-          <AppButton v-if="messages.length" variant="ghost" size="sm" @click="clear">Clear</AppButton>
+          <AppButton v-if="messages.length" variant="ghost" size="sm" @click="clear" title="Clear without saving">
+            Clear
+          </AppButton>
         </div>
       </div>
 
+      <!-- Chat body -->
       <div class="chat-body">
-        <div class="messages" ref="messagesEl">
+        <!-- System prompt (collapsible) -->
+        <div v-if="showSystemPrompt" class="system-prompt-bar">
+          <div class="system-prompt-label">
+            <svg viewBox="0 0 20 20" fill="currentColor" width="11" height="11"><path d="M10 2a8 8 0 100 16A8 8 0 0010 2zm1 11H9v-2h2v2zm0-4H9V7h2v2z"/></svg>
+            System Prompt
+          </div>
+          <textarea
+            v-model="systemPrompt"
+            class="system-prompt-input"
+            placeholder="You are a helpful assistant…"
+            rows="3"
+          />
+        </div>
+
+        <!-- Messages -->
+        <div class="messages" ref="messagesEl" @scroll="onMessagesScroll">
+          <!-- Empty state -->
           <div v-if="!messages.length" class="empty-state">
             <div v-if="!modelId" class="server-warning">
               ⚠ No model loaded — start the server on the Serve page first.
             </div>
-            <p class="empty-title">Ready to test</p>
-            <p class="empty-sub">Send a message to verify your inference endpoint is responding correctly.</p>
+            <div v-else>
+              <p class="empty-title">Ready to chat</p>
+              <p class="empty-sub">Send a message or try one of these:</p>
+              <div class="starter-prompts">
+                <button
+                  v-for="prompt in STARTER_PROMPTS"
+                  :key="prompt"
+                  class="starter-btn"
+                  @click="useStarterPrompt(prompt)"
+                >
+                  {{ prompt }}
+                </button>
+              </div>
+            </div>
           </div>
+
+          <!-- Message list -->
           <div
             v-for="(msg, i) in messages"
             :key="i"
             class="message"
             :class="msg.role"
           >
-            <div class="message-bubble" :class="{ streaming: msg.streaming }">{{ msg.content }}</div>
+            <div class="msg-content" :class="msg.role">
+              <div class="message-bubble" :class="{ streaming: msg.streaming, stopped: msg.stopped }">
+                <MarkdownMessage
+                  v-if="msg.role === 'assistant'"
+                  :content="msg.content"
+                  :reasoning="msg.reasoning"
+                  :streaming="!!msg.streaming"
+                />
+                <span v-else>{{ msg.content }}</span>
+                <span v-if="msg.stopped" class="stopped-badge">stopped</span>
+              </div>
+
+              <!-- Hover actions -->
+              <div class="msg-actions" :class="msg.role">
+                <!-- Copy -->
+                <button
+                  class="action-btn"
+                  :title="copiedIdx === i ? 'Copied!' : 'Copy'"
+                  @click="copyMessage(i, msg.content)"
+                >
+                  <svg v-if="copiedIdx !== i" viewBox="0 0 20 20" fill="currentColor" width="12" height="12">
+                    <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z"/>
+                    <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z"/>
+                  </svg>
+                  <svg v-else viewBox="0 0 20 20" fill="currentColor" width="12" height="12">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                  </svg>
+                  {{ copiedIdx === i ? 'Copied' : 'Copy' }}
+                </button>
+
+                <!-- Regenerate (last assistant only, not streaming) -->
+                <button
+                  v-if="msg.role === 'assistant' && i === messages.length - 1 && !sending"
+                  class="action-btn"
+                  title="Regenerate response"
+                  @click="regenerate"
+                >
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12">
+                    <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/>
+                  </svg>
+                  Retry
+                </button>
+
+                <!-- Edit (user messages only, not streaming) -->
+                <button
+                  v-if="msg.role === 'user' && !sending"
+                  class="action-btn"
+                  title="Edit and resend"
+                  @click="editMessage(i)"
+                >
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12">
+                    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/>
+                  </svg>
+                  Edit
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div v-if="error" class="chat-error">{{ error }}</div>
+        <!-- Scroll to bottom button -->
+        <button
+          v-if="!isAtBottom && messages.length"
+          class="scroll-to-bottom"
+          title="Scroll to bottom"
+          @click="scrollToBottom(true)"
+        >
+          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+            <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+          </svg>
+        </button>
+
+        <!-- Error banner -->
+        <div v-if="error" class="chat-error">
+          {{ error }}
+          <button class="error-dismiss" @click="error = ''">✕</button>
+        </div>
 
         <!-- Parameters panel -->
         <div class="chat-params">
@@ -295,26 +646,40 @@ function deleteChat(id: string) {
               <svg class="params-chevron" :class="{ open: showParams }" viewBox="0 0 20 20" fill="currentColor" width="12" height="12"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
             </button>
 
-            <!-- Stream toggle -->
-            <label class="stream-toggle" title="Stream tokens as they're generated">
+            <label class="stream-toggle" title="Stream tokens as they are generated">
               <input type="checkbox" v-model="p.stream" class="stream-check" />
               <span class="stream-label">Stream</span>
             </label>
 
-            <!-- Optimal settings button -->
+            <!-- Task mode selector -->
+            <div class="task-mode-group" title="Select your task type — Optimal will tune parameters accordingly">
+              <button
+                v-for="m in (['chat','code','creative','analysis','precise'] as const)"
+                :key="m"
+                class="task-mode-btn"
+                :class="{ active: taskMode === m }"
+                @click="setTaskMode(m)"
+              >{{ m }}</button>
+            </div>
+
             <button
               class="optimal-btn"
+              :class="{ applied: optimalApplied }"
               :disabled="!modelId || loadingOptimal"
               @click="applyOptimalSettings"
-              title="Apply recommended settings for this model"
+              :title="`Apply optimal parameters for ${taskMode} tasks using this model`"
             >
               <svg viewBox="0 0 20 20" fill="currentColor" width="11" height="11"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
-              {{ loadingOptimal ? 'Loading…' : 'Optimal' }}
+              {{ loadingOptimal ? 'Loading…' : optimalApplied ? '✓ Applied' : 'Optimal' }}
             </button>
+
+            <!-- Token usage -->
+            <span v-if="tokenUsage" class="token-count">
+              {{ tokenUsage.prompt_tokens > 0 ? `${tokenUsage.prompt_tokens}↑ ` : '' }}{{ tokenUsage.completion_tokens }}↓ tok
+            </span>
           </div>
 
           <div v-if="showParams" class="params-body">
-            <!-- Row 1: Temperature + Top-P -->
             <div class="params-row">
               <label class="param-item">
                 <span class="param-label">Temp</span>
@@ -328,7 +693,6 @@ function deleteChat(id: string) {
               </label>
             </div>
 
-            <!-- Row 2: Max Tokens + Repetition Penalty -->
             <div class="params-row">
               <label class="param-item">
                 <span class="param-label">Max tokens</span>
@@ -341,7 +705,6 @@ function deleteChat(id: string) {
               </label>
             </div>
 
-            <!-- Advanced toggle -->
             <button class="advanced-toggle" @click="showAdvanced = !showAdvanced">
               <span>Advanced</span>
               <svg class="params-chevron" :class="{ open: showAdvanced }" viewBox="0 0 20 20" fill="currentColor" width="11" height="11"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
@@ -367,20 +730,31 @@ function deleteChat(id: string) {
           </div>
         </div>
 
+        <!-- Input row -->
         <div class="input-row">
           <div class="textarea-wrap">
             <textarea
+              ref="inputEl"
               v-model="input"
               class="chat-input"
-              placeholder="Send a message… (Enter to send, Shift+Enter for newline)"
-              rows="3"
+              placeholder="Message… (Enter to send, Shift+Enter for newline)"
+              rows="1"
+              :disabled="sending"
               @keydown="onKeydown"
+              @input="autoResize"
             />
+            <!-- Stop button while streaming; Send button otherwise -->
+            <button v-if="sending" class="stop-btn" title="Stop generating" @click="stopStreaming">
+              <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+                <rect x="5" y="5" width="10" height="10" rx="1"/>
+              </svg>
+            </button>
             <AppButton
+              v-else
               class="send-btn"
               variant="primary"
               size="sm"
-              :loading="sending"
+              :loading="false"
               :disabled="!input.trim()"
               @click="send"
             >
@@ -389,19 +763,24 @@ function deleteChat(id: string) {
               </svg>
             </AppButton>
           </div>
+          <p class="input-hint">Enter to send · Shift+Enter for newline</p>
         </div>
       </div>
     </div>
 
-    <!-- Saved chats sidebar -->
+    <!-- ── Saved chats panel ──────────────────────────────────────────────── -->
     <aside class="saved-panel">
       <div class="saved-header">
-        <span class="saved-title">Saved</span>
+        <span class="saved-title">History</span>
         <span class="saved-count">{{ savedChats.length }}</span>
+        <button class="new-chat-btn" title="New chat (auto-saves current)" @click="newChat">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
+          New
+        </button>
       </div>
       <div class="saved-list">
         <div v-if="savedChats.length === 0" class="saved-empty">
-          No saved chats yet. Save a conversation to access it here.
+          No saved chats yet. Start a conversation and click <strong>Save</strong> or <strong>New</strong> to keep it.
         </div>
         <div
           v-for="chat in savedChats"
@@ -410,7 +789,9 @@ function deleteChat(id: string) {
         >
           <button class="saved-load-btn" @click="loadChat(chat)">
             <span class="saved-item-title">{{ chat.title }}</span>
-            <span class="saved-item-meta">{{ new Date(chat.savedAt).toLocaleDateString() }}</span>
+            <span class="saved-item-meta">
+              {{ chat.messages.length }} msg · {{ new Date(chat.savedAt).toLocaleDateString() }}
+            </span>
           </button>
           <button class="saved-delete-btn" @click="deleteChat(chat.id)" title="Delete">✕</button>
         </div>
@@ -420,6 +801,7 @@ function deleteChat(id: string) {
 </template>
 
 <style scoped>
+/* ── Layout ─────────────────────────────────────────────────────────────── */
 .chat-view {
   display: flex;
   gap: var(--space-4);
@@ -432,15 +814,25 @@ function deleteChat(id: string) {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  max-width: 800px;
+  max-width: 820px;
 }
 
+/* ── Header ─────────────────────────────────────────────────────────────── */
 .chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--space-4);
   flex-shrink: 0;
+  gap: var(--space-3);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .page-title {
@@ -448,25 +840,66 @@ function deleteChat(id: string) {
   font-weight: 700;
   letter-spacing: -.3px;
   color: var(--tx-primary);
+  white-space: nowrap;
 }
 
-.chat-meta {
+.header-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 .model-tag {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--si-300);
   background: var(--ac-bg);
   border: 1px solid var(--ac-border);
   border-radius: var(--r-pill);
-  padding: 2px 10px;
+  padding: 2px 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
 }
-.model-tag.offline { color: var(--tx-muted); background: var(--bg-elevated); border-color: var(--bd-default); }
+.model-tag.offline   { color: var(--tx-muted); background: var(--bg-elevated); border-color: var(--bd-default); }
+.model-tag.switching { color: var(--cu-400); background: rgba(245,158,11,.08); border-color: rgba(245,158,11,.25); }
 
+.model-select-inline {
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  color: var(--tx-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  max-width: 160px;
+  transition: border-color var(--transition-fast);
+}
+.model-select-inline:focus    { outline: none; border-color: var(--bd-focus); }
+.model-select-inline:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Small icon button (system prompt toggle) */
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  color: var(--tx-muted);
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+  flex-shrink: 0;
+}
+.icon-btn:hover { color: var(--tx-secondary); border-color: var(--bd-emphasis); }
+.icon-btn.active { color: var(--si-300); border-color: var(--ac-border); background: var(--ac-bg); }
+
+/* ── Chat body (flex column holds messages + toolbar + input) ────────────── */
 .chat-body {
   flex: 1;
   min-height: 0;
@@ -476,23 +909,60 @@ function deleteChat(id: string) {
   border: 1px solid var(--bd-default);
   border-radius: var(--r-lg);
   overflow: hidden;
+  position: relative;
 }
 
+/* ── System prompt bar ──────────────────────────────────────────────────── */
+.system-prompt-bar {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--bd-subtle);
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+}
+.system-prompt-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--si-400);
+  margin-bottom: var(--space-2);
+}
+.system-prompt-input {
+  width: 100%;
+  background: var(--bg-base);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  color: var(--tx-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  padding: var(--space-2) var(--space-3);
+  resize: none;
+  box-sizing: border-box;
+  transition: border-color var(--transition-fast);
+}
+.system-prompt-input:focus { outline: none; border-color: var(--bd-focus); }
+
+/* ── Messages area ──────────────────────────────────────────────────────── */
 .messages {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
+/* ── Empty state ────────────────────────────────────────────────────────── */
 .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   height: 100%;
   padding: var(--space-8);
   text-align: center;
@@ -505,8 +975,6 @@ function deleteChat(id: string) {
   border-radius: var(--r-md);
   font-size: 12px;
   color: var(--cr-300, #f87171);
-  text-align: center;
-  width: 100%;
   max-width: 380px;
 }
 
@@ -514,43 +982,153 @@ function deleteChat(id: string) {
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--tx-secondary);
+  margin: 0;
 }
 
 .empty-sub {
   font-size: var(--text-sm);
   color: var(--tx-muted);
-  line-height: 1.5;
-  max-width: 320px;
+  margin: 0;
 }
 
+.starter-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 400px;
+  width: 100%;
+}
+
+.starter-btn {
+  text-align: left;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  color: var(--tx-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+  line-height: 1.4;
+}
+.starter-btn:hover { border-color: var(--si-500); color: var(--tx-primary); }
+
+/* ── Message bubbles ────────────────────────────────────────────────────── */
 .message { display: flex; }
-.message.user { justify-content: flex-end; }
+.message.user      { justify-content: flex-end; }
 .message.assistant { justify-content: flex-start; }
 
+/* msg-content wraps bubble + hover actions as a column */
+.msg-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 76%;
+}
+.msg-content.user      { align-items: flex-end; }
+.msg-content.assistant { align-items: flex-start; }
+
 .message-bubble {
-  max-width: 72%;
-  padding: var(--space-3) var(--space-4);
+  padding: 10px var(--space-4);
   border-radius: var(--r-lg);
   font-size: var(--text-sm);
-  line-height: 1.55;
-  white-space: pre-wrap;
+  line-height: 1.5;
   word-break: break-word;
+  position: relative;
 }
 
+/* User: right-aligned indigo bubble */
 .user .message-bubble {
   background: var(--si-600, #4c56b8);
   color: #fff;
   border-bottom-right-radius: var(--r-sm);
+  white-space: pre-wrap;  /* preserve user's line breaks */
 }
 
+/* Assistant: left-aligned neutral bubble; markdown handles whitespace */
 .assistant .message-bubble {
   background: var(--bg-elevated);
   border: 1px solid var(--bd-default);
   color: var(--tx-primary);
   border-bottom-left-radius: var(--r-sm);
+  white-space: normal;
 }
 
+/* Subtle outline on stopped messages */
+.message-bubble.stopped {
+  border-color: rgba(249, 115, 22, 0.30);
+}
+
+/* "(stopped)" label appended to aborted messages */
+.stopped-badge {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: #f97316;
+  opacity: 0.75;
+  vertical-align: middle;
+}
+
+/* ── Hover actions ──────────────────────────────────────────────────────── */
+.msg-actions {
+  display: flex;
+  gap: var(--space-1);
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+/* Show on parent .message hover */
+.message:hover .msg-actions { opacity: 1; }
+
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-sm);
+  color: var(--tx-muted);
+  font-size: 10px;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+  white-space: nowrap;
+}
+.action-btn:hover { color: var(--tx-secondary); border-color: var(--bd-emphasis); }
+
+/* ── Scroll to bottom button ────────────────────────────────────────────── */
+.scroll-to-bottom {
+  position: absolute;
+  bottom: 140px;  /* above the input area */
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-emphasis);
+  border-radius: 50%;
+  color: var(--tx-secondary);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  transition: background var(--transition-fast), color var(--transition-fast);
+  z-index: 10;
+}
+.scroll-to-bottom:hover { background: var(--bg-surface); color: var(--tx-primary); }
+
+/* ── Error ──────────────────────────────────────────────────────────────── */
 .chat-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
   margin: 0 var(--space-4) var(--space-2);
   padding: var(--space-2) var(--space-3);
   background: rgba(239, 68, 68, .08);
@@ -560,13 +1138,19 @@ function deleteChat(id: string) {
   color: var(--cr-300, #f87171);
   flex-shrink: 0;
 }
-
-.input-row {
-  padding: var(--space-3);
-  border-top: 1px solid var(--bd-subtle);
+.error-dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.7;
   flex-shrink: 0;
+  padding: 0 2px;
 }
+.error-dismiss:hover { opacity: 1; }
 
+/* ── Parameters panel ───────────────────────────────────────────────────── */
 .chat-params {
   border-top: 1px solid var(--bd-subtle);
   padding: var(--space-2) var(--space-4);
@@ -577,6 +1161,7 @@ function deleteChat(id: string) {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .params-toggle {
@@ -616,6 +1201,35 @@ function deleteChat(id: string) {
   user-select: none;
 }
 
+/* Task mode selector */
+.task-mode-group {
+  display: flex;
+  gap: 1px;
+  background: var(--bd-subtle);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.task-mode-btn {
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  font-family: inherit;
+  background: var(--bg-elevated);
+  border: none;
+  color: var(--tx-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.task-mode-btn:hover { background: var(--bg-inset); color: var(--tx-secondary); }
+.task-mode-btn.active {
+  background: var(--bg-inset);
+  color: var(--si-300);
+}
+
 .optimal-btn {
   display: flex;
   align-items: center;
@@ -634,6 +1248,16 @@ function deleteChat(id: string) {
 }
 .optimal-btn:hover:not(:disabled) { border-color: var(--si-500); color: var(--si-300); }
 .optimal-btn:disabled { opacity: .4; cursor: default; }
+.optimal-btn.applied { border-color: var(--cu-500); color: var(--cu-300); }
+
+/* Token count indicator */
+.token-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--tx-muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
 
 .params-body {
   display: flex;
@@ -655,6 +1279,7 @@ function deleteChat(id: string) {
   flex: 1;
   min-width: 180px;
 }
+
 .param-label {
   font-size: 11px;
   font-weight: 700;
@@ -664,11 +1289,13 @@ function deleteChat(id: string) {
   width: 76px;
   flex-shrink: 0;
 }
+
 .param-range {
   flex: 1;
   accent-color: var(--si-500);
   height: 3px;
 }
+
 .param-val {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -676,6 +1303,7 @@ function deleteChat(id: string) {
   width: 36px;
   text-align: right;
 }
+
 .param-number {
   width: 90px;
   background: var(--bg-elevated);
@@ -686,6 +1314,7 @@ function deleteChat(id: string) {
   font-size: 12px;
   padding: 3px 8px;
 }
+
 .param-hint {
   font-size: 10.5px;
   color: var(--tx-muted);
@@ -707,15 +1336,12 @@ function deleteChat(id: string) {
 }
 .advanced-toggle:hover { color: var(--tx-secondary); }
 
-.message-bubble.streaming::after {
-  content: '▋';
-  display: inline-block;
-  color: var(--si-400);
-  animation: blink .8s step-end infinite;
-  margin-left: 1px;
+/* ── Input area ─────────────────────────────────────────────────────────── */
+.input-row {
+  padding: var(--space-3);
+  border-top: 1px solid var(--bd-subtle);
+  flex-shrink: 0;
 }
-@keyframes blink { 50% { opacity: 0; } }
-
 
 .textarea-wrap {
   position: relative;
@@ -723,6 +1349,8 @@ function deleteChat(id: string) {
 
 .chat-input {
   width: 100%;
+  min-height: 40px;
+  max-height: 200px;
   background: var(--bg-elevated);
   border: 1px solid var(--bd-default);
   border-radius: var(--r-md);
@@ -730,9 +1358,10 @@ function deleteChat(id: string) {
   font-family: var(--font-sans);
   font-size: var(--text-sm);
   line-height: 1.5;
-  padding: var(--space-3) 52px var(--space-3) var(--space-3);
+  padding: 10px 52px 10px var(--space-3);
   resize: none;
   box-sizing: border-box;
+  overflow-y: auto;
   transition: border-color var(--transition-fast);
 }
 .chat-input::placeholder { color: var(--tx-muted); }
@@ -741,14 +1370,42 @@ function deleteChat(id: string) {
   border-color: var(--bd-focus);
   box-shadow: 0 0 0 3px rgba(91, 106, 208, .12);
 }
+.chat-input:disabled { opacity: 0.65; cursor: not-allowed; }
 
-.send-btn {
+.send-btn, .stop-btn {
   position: absolute;
   right: var(--space-3);
-  bottom: var(--space-3);
+  bottom: 8px;
 }
 
-/* Saved chats sidebar */
+/* Stop button — square red-tinted style */
+.stop-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: rgba(239, 68, 68, .10);
+  border: 1px solid rgba(239, 68, 68, .35);
+  border-radius: var(--r-md);
+  color: var(--cr-300, #f87171);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.stop-btn:hover {
+  background: rgba(239, 68, 68, .18);
+  border-color: rgba(239, 68, 68, .55);
+}
+
+.input-hint {
+  font-size: 10px;
+  color: var(--tx-muted);
+  margin: 4px 0 0;
+  text-align: right;
+  opacity: 0.6;
+}
+
+/* ── Saved panel ────────────────────────────────────────────────────────── */
 .saved-panel {
   width: 220px;
   flex-shrink: 0;
@@ -763,8 +1420,8 @@ function deleteChat(id: string) {
 .saved-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3) var(--space-4);
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--bd-subtle);
   flex-shrink: 0;
 }
@@ -786,6 +1443,7 @@ function deleteChat(id: string) {
   height: 11px;
   background: var(--si-500);
   border-radius: 2px;
+  flex-shrink: 0;
 }
 
 .saved-count {
@@ -793,6 +1451,26 @@ function deleteChat(id: string) {
   font-size: 11px;
   color: var(--tx-muted);
 }
+
+/* "New chat" button in the saved panel header */
+.new-chat-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 3px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-sm);
+  font-size: 10px;
+  font-family: inherit;
+  font-weight: 600;
+  color: var(--tx-secondary);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+  white-space: nowrap;
+}
+.new-chat-btn:hover { border-color: var(--si-500); color: var(--si-300); }
 
 .saved-list {
   flex: 1;
@@ -807,6 +1485,7 @@ function deleteChat(id: string) {
   line-height: 1.5;
   text-align: center;
 }
+.saved-empty strong { color: var(--tx-secondary); font-weight: 600; }
 
 .saved-item {
   display: flex;
@@ -827,6 +1506,7 @@ function deleteChat(id: string) {
   gap: 2px;
   border-radius: 0;
   transition: background var(--transition-fast);
+  min-width: 0;
 }
 .saved-load-btn:hover { background: var(--bg-elevated); }
 
@@ -836,7 +1516,6 @@ function deleteChat(id: string) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 150px;
   display: block;
 }
 

@@ -12,6 +12,8 @@
 | `--max-request-tokens` | Maximum `max_tokens` accepted from API clients | `32768` |
 | `--default-temperature` | Default temperature when not specified in request | None |
 | `--default-top-p` | Default top_p when not specified in request | None |
+| `--trust-remote-code` | Allow execution of custom code from HuggingFace model repos. **Only enable for models you trust.** Required by certain Qwen, Phi, and custom architectures. Disabled by default as of v0.2.9. | `false` |
+| `--served-model-name` | Override the model name returned in API responses. Useful for drop-in replacement of named endpoints. | None |
 
 ### Security Options
 
@@ -20,17 +22,27 @@
 | `--api-key` | API key for authentication | None |
 | `--rate-limit` | Requests per minute per client (0 = disabled) | `0` |
 | `--timeout` | Request timeout in seconds | `300` |
-| `--enable-metrics` | Expose Prometheus metrics on `/metrics` | `false` |
+| `--enable-metrics` | Expose Prometheus metrics on `/metrics` endpoint (Prometheus/Grafana compatible) | `false` |
 | `--max-audio-upload-mb` | Maximum uploaded audio size for `/v1/audio/transcriptions` | `25` |
 | `--max-tts-input-chars` | Maximum text length accepted by `/v1/audio/speech` | `4096` |
+
+### Rerank Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--rerank-model` | HuggingFace model ID for the `/v1/rerank` endpoint (cross-encoder / BERT classifier). Leave unset to disable. *(v0.2.9+)* | None |
 
 ### Batching Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--continuous-batching` | Enable batching | `false` |
+| `--continuous-batching` | Enable the batched engine. Higher throughput for multi-user serving; slightly higher latency per request than the simple engine. | `false` |
 | `--stream-interval` | Tokens per stream chunk | `1` |
 | `--max-num-seqs` | Max concurrent sequences | `256` |
+| `--prefill-step-size` | Tokens per chunked prefill step. Tune to balance latency vs throughput on long prompts. `0` = engine default. *(v0.2.9+)* | `0` |
+| `--warm-prompts` | Path to a newline-separated file of prompts to pre-warm the KV cache on startup. Reduces cold-start time-to-first-token (TTFT) for agent workloads. *(v0.2.9+)* | None |
+| `--enable-mtp` | Enable Multi-Token Prediction (MTP) speculative decoding. Increases throughput on capable models. | `false` |
+| `--mtp-num-draft-tokens` | Number of tokens to draft per MTP step. | `1` |
 
 ### Cache Options
 
@@ -42,6 +54,11 @@
 | `--use-paged-cache` | Enable paged KV cache | `false` |
 | `--paged-cache-block-size` | Tokens per block | `64` |
 | `--max-cache-blocks` | Maximum blocks | `1000` |
+| `--kv-cache-quantization` | Quantize KV cache (8-bit or 4-bit). Reduces memory at slight quality cost. | `false` |
+| `--kv-cache-quantization-bits` | KV cache quantization bits when `--kv-cache-quantization` is enabled | `8` |
+| `--gpu-memory-utilization` | Fraction of GPU memory reserved for KV cache (0.1–1.0). Lower if you see OOM errors. | `0.90` |
+| `--ssd-cache-dir` | Directory to spill KV cache blocks to disk when GPU memory is full. Enables long-context workloads beyond RAM limits. Leave unset to disable. *(v0.2.9+)* | None |
+| `--ssd-cache-max-gb` | Maximum disk space for SSD KV cache in GB. `0` = unlimited. *(v0.2.9+)* | `0` |
 
 ### Tool Calling Options
 

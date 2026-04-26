@@ -2,6 +2,7 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useServerStore } from '@/stores/server'
+import { useModelsStore } from '@/stores/models'
 import { useMachinesStore } from '@/stores/machines'
 import { useUpdatesStore } from '@/stores/updates'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
@@ -9,6 +10,7 @@ import { api } from '@/api/client'
 
 const route = useRoute()
 const serverStore = useServerStore()
+const modelsStore = useModelsStore()
 const machinesStore = useMachinesStore()
 const updatesStore = useUpdatesStore()
 
@@ -38,6 +40,7 @@ onMounted(() => {
   updatesStore.checkUpdates().catch(() => {})
   machinesStore.refreshOnlineStatus()
   refreshInterval = setInterval(() => machinesStore.refreshOnlineStatus(), 30000)
+  if (!modelsStore.models.length) modelsStore.fetchModels().catch(() => {})
 })
 
 onUnmounted(() => {
@@ -121,6 +124,13 @@ async function doShutdown() {
         <span>Models</span>
       </RouterLink>
 
+      <RouterLink to="/benchmarks" class="nav-item" :class="{ active: isActive('/benchmarks') }">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
+          <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
+        </svg>
+        <span>Benchmarks</span>
+      </RouterLink>
+
       <RouterLink to="/settings" class="nav-item" :class="{ active: isActive('/settings') }">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path fill-rule="evenodd" d="M7.84 1.804A1 1 0 018.82 1h2.36a1 1 0 01.98.804l.331 1.652a6.993 6.993 0 011.929 1.115l1.598-.54a1 1 0 011.186.447l1.18 2.044a1 1 0 01-.205 1.251l-1.267 1.113a7.047 7.047 0 010 2.228l1.267 1.113a1 1 0 01.206 1.25l-1.18 2.045a1 1 0 01-1.187.447l-1.598-.54a6.993 6.993 0 01-1.929 1.115l-.33 1.652a1 1 0 01-.98.804H8.82a1 1 0 01-.98-.804l-.331-1.652a6.993 6.993 0 01-1.929-1.115l-1.598.54a1 1 0 01-1.186-.447l-1.18-2.044a1 1 0 01.205-1.251l1.267-1.114a7.05 7.05 0 010-2.227L1.821 7.773a1 1 0 01-.206-1.25l1.18-2.045a1 1 0 011.187-.447l1.598.54A6.993 6.993 0 017.51 3.456l.33-1.652zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
@@ -136,9 +146,38 @@ async function doShutdown() {
           <path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd" />
           <path d="M15 7h1a2 2 0 012 2v5.5a.5.5 0 01-.5.5H15V7z" />
         </svg>
-        <span>Test Chat</span>
+        <span>Chat</span>
+      </RouterLink>
+
+      <RouterLink to="/docs" class="nav-item nav-item-util" :class="{ active: isActive('/docs') }">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
+          <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z" />
+        </svg>
+        <span>Docs</span>
       </RouterLink>
     </nav>
+
+    <!-- Model Selector -->
+    <div class="sidebar-section model-section">
+      <div class="section-label">Model</div>
+      <div v-if="modelsStore.serverRestartingFor" class="model-switching">
+        <span class="switch-spinner" />
+        <span class="switch-text">Switching…</span>
+      </div>
+      <select
+        v-else
+        class="model-select"
+        :value="serverStore.modelId ?? ''"
+        :disabled="serverStore.loading || !modelsStore.models.length"
+        @change="(e) => modelsStore.loadModel((e.target as HTMLSelectElement).value)"
+      >
+        <option value="" disabled>{{ modelsStore.models.length ? 'Select model…' : 'No models cached' }}</option>
+        <option v-for="m in modelsStore.models" :key="m.id" :value="m.id">
+          {{ m.id.split('/').pop() }}
+        </option>
+      </select>
+      <RouterLink to="/models" class="manage-models-link">Manage models</RouterLink>
+    </div>
 
     <!-- Memory Arc Gauge -->
     <div class="sidebar-section gauge-section">
@@ -611,4 +650,60 @@ async function doShutdown() {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* Model Selector */
+.model-section {
+  padding: var(--space-2) var(--space-3);
+}
+
+.model-select {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  color: var(--tx-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+  appearance: auto;
+}
+.model-select:focus { outline: none; border-color: var(--bd-focus); }
+.model-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.model-switching {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 2px;
+}
+
+.switch-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--tx-muted);
+  border-top-color: var(--si-500);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+
+.switch-text {
+  font-size: 11px;
+  color: var(--cu-400);
+  font-family: var(--font-mono);
+}
+
+.manage-models-link {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: 10.5px;
+  color: var(--tx-muted);
+  text-decoration: none;
+  padding: 2px 2px;
+  transition: color var(--transition-fast);
+}
+.manage-models-link:hover { color: var(--si-300); }
 </style>
