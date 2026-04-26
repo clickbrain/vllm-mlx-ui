@@ -244,19 +244,36 @@ def bust_cache() -> None:
 
 def upgrade_command() -> list[str]:
     """Return the shell command to upgrade the installation."""
+    import sys
+    from pathlib import Path as _Path
+
     method = _detect_install_method()
+
+    # Resolve pip from the *running* Python — guarantees we upgrade packages
+    # inside the correct venv (brew cellar or dev) rather than a system pip.
+    venv_bin = _Path(sys.executable).parent
+    pip = str(venv_bin / "pip")
+    if not _Path(pip).exists():
+        pip = str(venv_bin / "pip3")
+    if not _Path(pip).exists():
+        pip = shutil.which("pip3") or "pip3"
+
     if method == "homebrew":
-        # brew update pulls the latest tap (third-party taps are git repos —
-        # they are NOT updated by the JSON API download that brew upgrade does).
-        # brew upgrade then installs the newest stable release.
-        return ["sh", "-c", "brew update && brew upgrade vllm-mlx-ui"]
-    # pip / install.sh path — upgrade the dashboard and all key dependencies
-    pip = shutil.which("pip3") or "pip3"
+        # brew update + brew upgrade refreshes the formula (vllm-mlx-ui UI/code).
+        # The explicit pip upgrade that follows ensures vllm-mlx and huggingface-hub
+        # are also brought to latest — brew upgrade alone only re-runs the formula
+        # install block which may leave satisfying-but-stale pip packages in place.
+        return [
+            "sh", "-c",
+            "brew update && brew upgrade vllm-mlx-ui"
+            f" && {pip} install --upgrade vllm-mlx mlx-lm huggingface-hub",
+        ]
+    # pip / dev install path
     return [
         "sh", "-c",
-        f"{pip} install --upgrade "
-        f"git+https://github.com/clickbrain/vllm-mlx-ui.git#egg=vllm-mlx[ui] "
-        f"&& {pip} install --upgrade huggingface-hub",
+        f"{pip} install --upgrade"
+        f" git+https://github.com/clickbrain/vllm-mlx-ui.git#egg=vllm-mlx[ui]"
+        f" && {pip} install --upgrade vllm-mlx mlx-lm huggingface-hub",
     ]
 
 

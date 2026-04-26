@@ -4,6 +4,17 @@ All notable changes to the dashboard UI are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Dashboard UI version is tracked separately from the core vllm-mlx version.
 
+## [0.3.39] — 2026-04-26
+
+### Fixed
+- **vllm-mlx / huggingface-hub still not upgraded** — `upgrade_command()` only ran
+  `brew upgrade vllm-mlx-ui`; the formula's pip install step won't upgrade already-satisfying
+  packages. Now explicitly pip-upgrades `vllm-mlx`, `mlx-lm`, and `huggingface-hub` using
+  the *running venv's own pip* (`sys.executable/../pip`) after the brew upgrade, so all
+  packages update correctly regardless of formula version.
+
+---
+
 ---
 
 ## [0.3.38] — 2026-04-26
