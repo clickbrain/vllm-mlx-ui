@@ -455,6 +455,7 @@ def check_health(config: dict[str, Any] | None = None) -> tuple[bool, dict]:
 
 def get_server_status() -> dict[str, Any]:
     """Returns a status dict safe to call on every Streamlit rerun."""
+    global _last_crash_log
     cfg = load_config()
     mgmt = _mgmt_base(cfg)
     if mgmt:
@@ -482,7 +483,6 @@ def get_server_status() -> dict[str, Any]:
             intentional = _intentional_stop_in_progress
         if intentional:
             with _server_state_lock:
-                global _last_crash_log
                 _last_crash_log = None
             return {"running": False, "healthy": False, "pid": None, "health": {}}
         crash_log = ""
