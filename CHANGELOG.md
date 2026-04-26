@@ -6,7 +6,19 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
 
 ---
 
-## [0.3.34] — 2026-04-26
+## [0.3.35] — 2026-04-26
+
+### Fixed
+- **Blank main panel on all pages** — `CollapsibleSection.vue` and `ConfirmModal.vue` were
+  missing all import statements and `defineProps` declarations (lost during the doc pass).
+  `CollapsibleSection` used `ref`, `onMounted`, and `props` without importing them.
+  `ConfirmModal` referenced `title`, `message`, `confirmLabel`, `destructive` props without
+  declaring them. These components are used on every view, causing runtime crashes.
+- Added Python-based import scanner to catch this class of issue going forward.
+
+---
+
+
 
 ### Fixed
 - **Blank page on all routes** — `AppTopbar.vue` was missing all import statements

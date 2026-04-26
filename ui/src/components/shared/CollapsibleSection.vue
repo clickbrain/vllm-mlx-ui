@@ -9,6 +9,12 @@
   (v-if, not v-show) — complex children are unmounted when collapsed.
 -->
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
+
+const props = defineProps<{
+  title: string
+  defaultOpen?: boolean
+}>()
 
 const open = ref(false)
 onMounted(() => { open.value = props.defaultOpen ?? false })

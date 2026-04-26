@@ -14,6 +14,12 @@
   Usage: pair with a v-if flag; listen for @confirm/@cancel to act and dismiss.
 -->
 <script setup lang="ts">
+defineProps<{
+  title: string
+  message: string
+  confirmLabel?: string
+  destructive?: boolean
+}>()
 
 defineEmits<{
   confirm: []
