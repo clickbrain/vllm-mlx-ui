@@ -36,6 +36,17 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
   `~/.cache/huggingface/hub/models--mlx-community--Llama-3.2-3B-Instruct-4bit` first and
   skips the download entirely if the model is present.
 
+## [0.3.42] — 2026-04-26
+
+### Added
+- **Benchmark favorites** — save any benchmark run with a name using the new ☆ Save
+  button in the results header. Saved runs persist in `localStorage` across sessions.
+  The configure view shows a "Saved Benchmarks" panel listing all favorites with model
+  names, average t/s, and the config used. Click any saved run to restore its results
+  instantly. Each entry can be deleted individually.
+
+---
+
 ---
 
 ---

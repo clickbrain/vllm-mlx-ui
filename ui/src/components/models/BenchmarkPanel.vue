@@ -23,13 +23,50 @@ import type { ChartData, ChartOptions } from 'chart.js'
 import AppButton from '@/components/shared/AppButton.vue'
 import { useModelsStore } from '@/stores/models'
 import type { BenchmarkConfig } from '@/stores/models'
+import { useBenchmarkFavoritesStore } from '@/stores/benchmarkFavorites'
+import type { SavedBenchmark } from '@/stores/benchmarkFavorites'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 
 const modelsStore = useModelsStore()
+const favoritesStore = useBenchmarkFavoritesStore()
 
 const cachedModels = computed(() => modelsStore.models.filter(m => m.cached))
 const selectedModels = ref<string[]>([])
+
+// Favorites UI state
+const saveNameInput = ref('')
+const showSaveInput = ref(false)
+const justSaved = ref(false)
+
+function openSaveInput() {
+  saveNameInput.value = ''
+  showSaveInput.value = true
+}
+
+function confirmSave() {
+  if (!modelsStore.benchmarkResults) return
+  favoritesStore.save(modelsStore.benchmarkResults, config.value, saveNameInput.value)
+  showSaveInput.value = false
+  saveNameInput.value = ''
+  justSaved.value = true
+  setTimeout(() => { justSaved.value = false }, 2000)
+}
+
+function cancelSave() {
+  showSaveInput.value = false
+  saveNameInput.value = ''
+}
+
+function restoreFavorite(fav: SavedBenchmark) {
+  config.value = { ...fav.config }
+  modelsStore.benchmarkResults = fav.results
+}
+
+function formatDate(ts: string): string {
+  if (!ts) return '—'
+  try { return new Date(ts).toLocaleString() } catch { return ts }
+}
 
 const config = ref<BenchmarkConfig>({
   prompt: 'Tell me about the history of computing in 3 paragraphs.',
@@ -128,11 +165,6 @@ function bestModelForUseCase(_useCase: string): string | null {
   const best = results.reduce((a, b) => (a.avg_tps > b.avg_tps ? a : b))
   return best.model_id.split('/').pop() ?? best.model_id
 }
-
-function formatDate(ts: string): string {
-  if (!ts) return '—'
-  try { return new Date(ts).toLocaleString() } catch { return ts }
-}
 </script>
 
 <template>
@@ -218,13 +250,75 @@ function formatDate(ts: string): string {
           </div>
         </div>
       </div>
+
+      <!-- Saved benchmarks -->
+      <div v-if="favoritesStore.favorites.length > 0" class="saved-section">
+        <div class="section-label">Saved Benchmarks</div>
+        <div class="saved-list">
+          <div
+            v-for="fav in favoritesStore.favorites"
+            :key="fav.id"
+            class="saved-row"
+            @click="restoreFavorite(fav)"
+          >
+            <div class="saved-main">
+              <span class="saved-name">{{ fav.name }}</span>
+              <span class="saved-meta">{{ formatDate(fav.savedAt) }}</span>
+            </div>
+            <div class="saved-stats">
+              <span
+                v-for="r in fav.results.slice(0, 3)"
+                :key="r.model_id"
+                class="saved-stat"
+              >
+                {{ (r.model_id.split('/').pop() ?? r.model_id) }}
+                <em>{{ r.avg_tps.toFixed(1) }} t/s</em>
+              </span>
+              <span v-if="fav.results.length > 3" class="saved-more">
+                +{{ fav.results.length - 3 }} more
+              </span>
+            </div>
+            <button
+              class="saved-del"
+              title="Remove"
+              @click.stop="favoritesStore.remove(fav.id)"
+            >✕</button>
+          </div>
+        </div>
+      </div>
     </template>
 
     <!-- Results state -->
     <template v-else>
       <div class="results-header">
         <span class="results-title">Results</span>
-        <AppButton variant="secondary" size="sm" @click="runAgain">Run Again</AppButton>
+        <div class="results-actions">
+          <!-- Save flow -->
+          <template v-if="showSaveInput">
+            <input
+              v-model="saveNameInput"
+              class="save-name-input"
+              placeholder="Name this run…"
+              autofocus
+              @keydown.enter="confirmSave"
+              @keydown.esc="cancelSave"
+            />
+            <AppButton variant="primary" size="sm" @click="confirmSave">Save</AppButton>
+            <AppButton variant="secondary" size="sm" @click="cancelSave">Cancel</AppButton>
+          </template>
+          <template v-else>
+            <AppButton
+              variant="secondary"
+              size="sm"
+              :disabled="justSaved"
+              @click="openSaveInput"
+            >
+              <span v-if="justSaved">✓ Saved</span>
+              <span v-else>☆ Save</span>
+            </AppButton>
+          </template>
+          <AppButton variant="secondary" size="sm" @click="runAgain">Run Again</AppButton>
+        </div>
       </div>
 
       <div class="results-table-wrap">
@@ -659,4 +753,121 @@ function formatDate(ts: string): string {
   flex-shrink: 0;
 }
 .history-del:hover { color: var(--cr-300, #fca5a5); }
+
+/* Results header actions */
+.results-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.save-name-input {
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-focus);
+  border-radius: var(--r-md);
+  color: var(--tx-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  padding: 4px 10px;
+  width: 200px;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(91, 106, 208, .12);
+}
+
+/* Saved benchmarks */
+.saved-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  padding: var(--space-4) var(--space-5);
+}
+
+.saved-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.saved-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  border: 1px solid transparent;
+}
+
+.saved-row:hover {
+  background: var(--bg-elevated);
+  border-color: var(--bd-subtle);
+}
+
+.saved-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 160px;
+}
+
+.saved-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tx-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.saved-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--tx-muted);
+}
+
+.saved-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  flex: 1;
+}
+
+.saved-stat {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--tx-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-subtle);
+  border-radius: var(--r-sm);
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.saved-stat em {
+  font-style: normal;
+  color: var(--si-300);
+  margin-left: 4px;
+}
+
+.saved-more {
+  font-size: 11px;
+  color: var(--tx-muted);
+}
+
+.saved-del {
+  background: none;
+  border: none;
+  color: var(--tx-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: var(--r-sm);
+  transition: color var(--transition-fast);
+  flex-shrink: 0;
+}
+.saved-del:hover { color: var(--cr-300, #fca5a5); }
 </style>
