@@ -10,6 +10,9 @@
   No props — reads page title from the route and update state from the store.
 -->
 <script setup lang="ts">
+import { ref, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useUpdatesStore } from '@/stores/updates'
 
 const route = useRoute()
 const router = useRouter()

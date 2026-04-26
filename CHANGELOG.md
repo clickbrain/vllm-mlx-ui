@@ -6,7 +6,17 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
 
 ---
 
-## [0.3.33] — 2026-04-26
+## [0.3.34] — 2026-04-26
+
+### Fixed
+- **Blank page on all routes** — `AppTopbar.vue` was missing all import statements
+  (`ref`, `computed`, `useRoute`, `useRouter`, `useUpdatesStore`). These were lost
+  during the documentation pass. Caused a `ReferenceError: Can't find variable: useRoute`
+  crash in the setup function, blanking every page.
+
+---
+
+
 
 ### Added
 - **Multimodal image attachment in Chat** — when an MLLM (vision) model is loaded, an
