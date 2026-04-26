@@ -6,6 +6,33 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
 
 ---
 
+## [0.3.33] — 2026-04-26
+
+### Added
+- **Multimodal image attachment in Chat** — when an MLLM (vision) model is loaded, an
+  image attachment button appears in the chat input. Supports file picker and drag-and-drop.
+  Images are sent in OpenAI vision content-array format. Attached images display as
+  thumbnails in user message bubbles.
+- **`isMultimodal` store computed** — `server.ts` now exposes `isMultimodal` derived from
+  the `/health` endpoint's `model_type` field (`"mllm"` vs `"llm"`).
+
+### Fixed
+- **Build failure: missing `Props` interfaces** — `AppButton`, `AppBadge`, and `StatusPill`
+  had their TypeScript `Props` interface declarations accidentally removed during the
+  documentation pass, causing a complete Vue build failure. Restored all three.
+- **Syntax error in `server_manager.py`** — `global _last_crash_log` declaration was
+  inside a `with` block after first use of the variable, causing a Python `SyntaxError`.
+  Moved declaration to the top of `get_server_status()`.
+- **README: stale `pip install` upgrade instructions** — replaced with `brew upgrade` and
+  re-running the appropriate install script. Homebrew is the canonical install method.
+
+### Docs
+- Comprehensive JSDoc / Vue comment / test-docstring pass across all UI source files.
+- All test functions in `test_anthropic_adapter.py`, `test_api_utils.py`,
+  `test_paged_cache.py` now have docstrings (120 added).
+
+---
+
 ## [UI 1.6.0] — 2026-04-24
 
 ### Fixed
