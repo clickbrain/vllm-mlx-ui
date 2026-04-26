@@ -53,10 +53,10 @@ Homebrew puts `vllm-mlx-ui` permanently on your PATH so the command always works
 
 ```bash
 # 1. Add the tap (one time only)
-brew tap clickbrain/vllm-mlx-ui https://github.com/clickbrain/vllm-mlx-ui
+brew tap clickbrain/vllm-mlx-ui
 
 # 2. Install (takes 3–10 minutes on first run)
-brew install --HEAD clickbrain/vllm-mlx-ui/vllm-mlx-ui
+brew install vllm-mlx-ui
 ```
 
 After install, start the dashboard with:
@@ -73,8 +73,7 @@ brew update && brew upgrade vllm-mlx-ui
 **Uninstalling (Homebrew):**
 ```bash
 brew uninstall vllm-mlx-ui
-brew untap clickbrain/vllm-mlx-ui
-```
+brew untap clickbrain/vllm-mlx-ui```
 
 > **Don't have Homebrew?** Get it at [brew.sh](https://brew.sh) or run:
 > ```bash

@@ -1,0 +1,36 @@
+name: Update Homebrew tap on release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  update-tap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download tarball and compute sha256
+        id: sha256
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          URL="https://github.com/clickbrain/vllm-mlx-ui/archive/refs/tags/v${VERSION}.tar.gz"
+          SHA=$(curl -sL "$URL" | sha256sum | cut -d' ' -f1)
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch to tap repo
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.TAP_DEPLOY_TOKEN }}
+          repository: clickbrain/homebrew-vllm-mlx-ui
+          event-type: new-release
+          client-payload: |
+            {
+              "version": "${{ steps.version.outputs.version }}",
+              "sha256": "${{ steps.sha256.outputs.sha256 }}"
+            }

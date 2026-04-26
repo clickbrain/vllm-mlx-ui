@@ -13,6 +13,21 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
   the *running venv's own pip* (`sys.executable/../pip`) after the brew upgrade, so all
   packages update correctly regardless of formula version.
 
+## [0.3.40] — 2026-04-26
+
+### Fixed
+- **Homebrew tap naming violation causing unreliable upgrades** — tap repo was `clickbrain/vllm-mlx-ui`
+  (full app repo), which violated Homebrew convention. Taps must be named `homebrew-<name>`.
+  Created dedicated lightweight tap repo `clickbrain/homebrew-vllm-mlx-ui` containing only
+  the formula. `brew tap clickbrain/vllm-mlx-ui` now works without an explicit URL, and
+  `brew update` reliably pulls the latest formula on every `brew upgrade`.
+- **Added GitHub Actions auto-update workflow** — pushing a version tag to the app repo now
+  automatically computes the sha256 and updates the formula in the tap repo, eliminating
+  the manual formula-bump step that was causing stale tap versions.
+- Updated README install instructions to use the new tap (no explicit URL needed).
+
+---
+
 ---
 
 ---
