@@ -1113,16 +1113,18 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
 
     def _do_upgrade():
         import time as _t
+        _uc.upgrade_status = "upgrading"
         try:
             _sp.run(cmd, timeout=300, check=False)
         except Exception:
-            pass
-        # Spawn a fresh process before exiting — os.execv crashes when stdin/
-        # stdout FDs are in bad state (e.g. closed by nohup).
+            _uc.upgrade_status = "error:upgrade command failed"
+            return
+        # Bust cache so the next /updates check reflects newly installed versions
+        _uc.bust_cache()
+        _uc.upgrade_status = "restarting"
         _t.sleep(2)
         try:
             log_path = _os_mod.environ.get("VMUI_LOG", str(sm.STATE_DIR / "mgmt.log"))
-            # Must use -m flag to avoid relative import errors when re-spawning
             restart_cmd = [_sys.executable, "-m", "vllm_mlx.dashboard.mgmt_server"] + _sys.argv[1:]
             with open(_os_mod.devnull, "r") as devnull_in, open(log_path, "a") as log_out:
                 _sp.Popen(
@@ -1139,6 +1141,13 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
 
     _thr.Thread(target=_do_upgrade, daemon=True).start()
     return {"ok": True, "message": "Upgrade started. The server will restart in ~30s."}
+
+
+@app.get("/updates/install-status")
+def install_status(_: None = Depends(_check_auth)) -> dict:
+    """Return the current upgrade phase for frontend progress polling."""
+    from vllm_mlx.dashboard import update_checker as _uc
+    return {"status": _uc.upgrade_status}
 
 
 @app.get("/network/interfaces")

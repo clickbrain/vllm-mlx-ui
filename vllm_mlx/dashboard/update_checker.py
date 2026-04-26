@@ -22,9 +22,11 @@ import requests
 _CACHE_TTL = 3600  # seconds
 
 # Module-level cache — written by background threads, read by UI thread.
-# Avoids touching st.session_state from non-Streamlit threads (which produces
-# "missing ScriptRunContext" warnings on every call).
 _cache: dict = {}
+
+# Upgrade progress: set by mgmt_server._do_upgrade so the frontend can poll.
+# Values: 'idle' | 'upgrading' | 'restarting' | 'done' | 'error:<msg>'
+upgrade_status: str = "idle"
 
 
 class PackageInfo(NamedTuple):
@@ -133,8 +135,17 @@ def _version_gt(latest: str, installed: str) -> bool:
 
 def _detect_install_method() -> str:
     """Return 'homebrew', 'pip', or 'unknown'."""
+    import sys
+    # Check sys.prefix first — most reliable when running inside a Homebrew cellar
+    prefix = sys.prefix.lower()
+    if "homebrew" in prefix or "cellar" in prefix or "linuxbrew" in prefix:
+        return "homebrew"
     binary = shutil.which("vllm-mlx-ui") or ""
     if "homebrew" in binary.lower() or "cellar" in binary.lower():
+        return "homebrew"
+    # Check HOMEBREW_PREFIX env (set by Homebrew shell integration)
+    import os
+    if os.environ.get("HOMEBREW_PREFIX"):
         return "homebrew"
     if binary:
         return "pip"
@@ -156,20 +167,33 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     def _check_ui():
-        ui_installed_commit = _homebrew_installed_commit()
-        ui_latest_commit = _github_latest_commit_sha("clickbrain", "vllm-mlx-ui")
-        ui_update = (
-            bool(ui_installed_commit)
-            and ui_latest_commit not in ("unknown", "")
-            and ui_installed_commit != ui_latest_commit
-        )
         from vllm_mlx.dashboard import __version__ as _ui_ver
+        ui_latest = _github_latest_tag("clickbrain", "vllm-mlx-ui")
+        # For stable (tarball) Homebrew installs the version is a semver like
+        # "0.3.35" — compare that directly against the latest tag.
+        # For HEAD-based installs the version contains a commit SHA: fall back
+        # to commit-SHA comparison so nightly users still get update dots.
+        ui_installed_commit = _homebrew_installed_commit()
+        if ui_installed_commit:
+            # HEAD install: compare commit SHAs
+            ui_latest_commit = _github_latest_commit_sha("clickbrain", "vllm-mlx-ui")
+            ui_update = (
+                ui_latest_commit not in ("unknown", "")
+                and ui_installed_commit != ui_latest_commit
+            )
+            installed_display = f"v{_ui_ver} ({ui_installed_commit})"
+            latest_display = f"commit {ui_latest_commit}"
+        else:
+            # Stable semver install: compare version numbers
+            ui_update = _version_gt(ui_latest, _ui_ver)
+            installed_display = f"v{_ui_ver}"
+            latest_display = f"v{ui_latest}" if ui_latest != "unknown" else _ui_ver
         return PackageInfo(
             name="vllm-mlx-ui (dashboard)",
-            installed=f"v{_ui_ver} ({ui_installed_commit or 'pip'})",
-            latest=f"commit {ui_latest_commit}",
+            installed=installed_display,
+            latest=latest_display,
             update_available=ui_update,
-            url="https://github.com/clickbrain/vllm-mlx-ui/commits/main",
+            url="https://github.com/clickbrain/vllm-mlx-ui/releases",
         )
 
     def _check_vllm():
@@ -210,6 +234,12 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
 
     _cache = {"ts": time.time(), "results": results}
     return results
+
+
+def bust_cache() -> None:
+    """Invalidate the update cache so the next check_updates() hits the network."""
+    global _cache
+    _cache = {}
 
 
 def upgrade_command() -> list[str]:

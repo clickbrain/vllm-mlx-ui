@@ -6,6 +6,25 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
 
 ---
 
+## [0.3.36] — 2026-04-26
+
+### Fixed
+- **Update flow broken — button stuck, no feedback, versions not updating** — multiple bugs:
+  - `installing` ref never reset to `false` on success (button stuck in loading state forever)
+  - No progress feedback during the ~35s brew upgrade + restart wait
+  - `vllm-mlx-ui` update detection never fired for stable semver installs (only worked for
+    `HEAD-<sha>` nightly builds; tarball installs like `v0.3.35` always showed "up to date")
+  - Install method detection fell through to `pip` in dev/terminal mode because
+    `shutil.which("vllm-mlx-ui")` returned nothing; now also checks `sys.prefix` and
+    `HOMEBREW_PREFIX` env var
+  - Update cache not invalidated after upgrade (versions showed stale data for up to 1 hour)
+- **Update progress now visible**: frontend polls `/updates/install-status` every 2s and shows
+  "Running brew upgrade…", "Server restarting…", "Done! Reloading…" phase messages
+- **3-minute timeout**: if the server never comes back, a clear error message is shown instead
+  of leaving the button stuck indefinitely
+
+---
+
 ## [0.3.35] — 2026-04-26
 
 ### Fixed

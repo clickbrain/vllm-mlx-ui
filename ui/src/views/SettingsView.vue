@@ -275,9 +275,12 @@ async function doRestart() {
         </div>
       </div>
       <div v-if="updatesStore.anyUpdate || updatesStore.installing" class="update-install-row">
-        <div v-if="updatesStore.installMessage" class="install-message">{{ updatesStore.installMessage }}</div>
+        <div v-if="updatesStore.installPhase" class="install-phase">
+          <span class="phase-spinner" v-if="updatesStore.installing">⏳</span>
+          {{ updatesStore.installPhase }}
+        </div>
         <AppButton
-          v-else
+          v-if="!updatesStore.installPhase"
           variant="primary"
           size="sm"
           :loading="updatesStore.installing"
@@ -891,6 +894,9 @@ async function doRestart() {
 .update-chip.up-to-date { color: var(--ph-400, #4ade80); background: rgba(74,222,128,.08); border: 1px solid rgba(74,222,128,.2); }
 .update-install-row { padding: var(--space-3) var(--space-5); border-top: 1px solid var(--bd-subtle); display: flex; align-items: center; gap: var(--space-3); }
 .install-message { font-size: var(--text-sm); color: var(--si-300); }
+.install-phase { font-size: var(--text-sm); color: var(--tx-secondary); display: flex; align-items: center; gap: var(--space-2); }
+.phase-spinner { animation: spin 1.2s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .update-error { padding: var(--space-3) var(--space-5); font-size: 12px; color: var(--cr-400); }
 
 /* Firewall guide */

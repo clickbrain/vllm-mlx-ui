@@ -5,9 +5,9 @@
  * checkUpdates() hits GET /updates (or /updates?force=true) which returns a
  * list of pip-inspected packages with installed vs latest versions.
  *
- * installUpdates() triggers POST /updates/install. The backend runs pip upgrade
- * and restarts itself; this store waits ~35s then polls /health every 2s,
- * reloading the page once the server is back up.
+ * installUpdates() triggers POST /updates/install. The backend runs brew upgrade
+ * and restarts itself; this store polls /updates/install-status for progress,
+ * then polls /health every 2s, reloading the page once the server is back up.
  *
  * anyUpdate is the reactive flag used by AppTopbar to show the update dot.
  */
@@ -23,6 +23,13 @@ interface PackageInfo {
   url: string
 }
 
+const PHASE_LABELS: Record<string, string> = {
+  idle: '',
+  upgrading: 'Running brew upgrade… this may take a minute.',
+  restarting: 'Upgrade complete — server restarting…',
+  done: 'Done! Reloading…',
+}
+
 export const useUpdatesStore = defineStore('updates', () => {
   const packages = ref<PackageInfo[]>([])
   const anyUpdate = ref(false)
@@ -30,6 +37,7 @@ export const useUpdatesStore = defineStore('updates', () => {
   const checking = ref(false)
   const installing = ref(false)
   const installMessage = ref('')
+  const installPhase = ref('')   // human-readable current phase
   const error = ref('')
 
   async function checkUpdates(force = false) {
@@ -50,26 +58,79 @@ export const useUpdatesStore = defineStore('updates', () => {
   async function installUpdates() {
     installing.value = true
     installMessage.value = ''
+    installPhase.value = 'Starting upgrade…'
     error.value = ''
+
     try {
-      const data = await api.post<{ message?: string }>('/updates/install', {})
-      installMessage.value = data.message ?? 'Upgrade started. The server will restart in ~30s.'
+      await api.post<{ message?: string }>('/updates/install', {})
     } catch (e: any) {
       error.value = e.message ?? 'Failed to start upgrade'
       installing.value = false
+      installPhase.value = ''
       return
     }
-    // After 35s, start polling /health every 2s; reload when it responds
-    setTimeout(async () => {
-      const poll = setInterval(async () => {
+
+    // Poll /updates/install-status every 2s for phase updates.
+    // After the server kills itself (restarting phase), poll /health every 2s.
+    // Timeout after 3 minutes total.
+    const startedAt = Date.now()
+    const TIMEOUT_MS = 3 * 60 * 1000
+    let sawRestarting = false
+
+    const statusPoll = setInterval(async () => {
+      if (Date.now() - startedAt > TIMEOUT_MS) {
+        clearInterval(statusPoll)
+        installing.value = false
+        installPhase.value = ''
+        error.value = 'Upgrade timed out. Please check the server logs.'
+        return
+      }
+      try {
+        const s = await api.get<{ status: string }>('/updates/install-status')
+        const phase = s.status ?? 'upgrading'
+        installPhase.value = PHASE_LABELS[phase] ?? phase
+        if (phase === 'restarting' || phase.startsWith('error:')) {
+          clearInterval(statusPoll)
+          if (phase.startsWith('error:')) {
+            error.value = phase.replace('error:', '') || 'Upgrade failed'
+            installing.value = false
+            installPhase.value = ''
+            return
+          }
+          sawRestarting = true
+          // Server is about to kill itself — switch to health polling
+          _pollUntilBack()
+        }
+      } catch {
+        // Server went down — it's restarting
+        if (!sawRestarting) {
+          sawRestarting = true
+          clearInterval(statusPoll)
+          installPhase.value = 'Server restarting…'
+          _pollUntilBack()
+        }
+      }
+    }, 2000)
+
+    function _pollUntilBack() {
+      const healthPoll = setInterval(async () => {
+        if (Date.now() - startedAt > TIMEOUT_MS) {
+          clearInterval(healthPoll)
+          installing.value = false
+          installPhase.value = ''
+          error.value = 'Server did not come back after upgrade. Please restart manually.'
+          return
+        }
         try {
           await api.get('/health')
-          clearInterval(poll)
-          window.location.reload()
+          clearInterval(healthPoll)
+          installPhase.value = 'Done! Reloading…'
+          // Brief pause so the user sees the "Done" message, then reload
+          setTimeout(() => window.location.reload(), 1200)
         } catch { /* still restarting */ }
       }, 2000)
-    }, 35000)
+    }
   }
 
-  return { packages, anyUpdate, installMethod, checking, installing, installMessage, error, checkUpdates, installUpdates }
+  return { packages, anyUpdate, installMethod, checking, installing, installMessage, installPhase, error, checkUpdates, installUpdates }
 })
