@@ -1,0 +1,199 @@
+name: Upstream Release Watch
+
+on:
+  schedule:
+    # Check daily at 8am UTC
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+    inputs:
+      force_check:
+        description: "Force check even if version matches"
+        type: boolean
+        default: false
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get pinned upstream version
+        id: pinned
+        run: |
+          PINNED=$(cat .github/upstream-version.txt | tr -d '[:space:]')
+          echo "version=$PINNED" >> $GITHUB_OUTPUT
+          echo "Pinned upstream version: $PINNED"
+
+      - name: Get latest upstream release
+        id: latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LATEST=$(gh release view --repo waybarrios/vllm-mlx --json tagName -q .tagName 2>/dev/null || echo "unknown")
+          echo "version=$LATEST" >> $GITHUB_OUTPUT
+          echo "Latest upstream version: $LATEST"
+
+      - name: Get release notes
+        id: notes
+        if: steps.pinned.outputs.version != steps.latest.outputs.version || inputs.force_check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY=$(gh release view ${{ steps.latest.outputs.version }} --repo waybarrios/vllm-mlx --json body -q .body 2>/dev/null || echo "Could not fetch release notes.")
+          # GitHub Actions multiline output
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Get CLI diff summary
+        id: diff
+        if: steps.pinned.outputs.version != steps.latest.outputs.version || inputs.force_check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fetch upstream at new version and extract new CLI flags
+          git clone --depth 1 --branch ${{ steps.latest.outputs.version }} \
+            https://github.com/waybarrios/vllm-mlx.git /tmp/upstream-new 2>/dev/null || \
+          git clone --depth 1 https://github.com/waybarrios/vllm-mlx.git /tmp/upstream-new
+
+          # Extract CLI flags from the new version
+          NEW_FLAGS=$(grep -o '"--[a-z-]*"' /tmp/upstream-new/vllm_mlx/cli.py 2>/dev/null | sort -u || echo "")
+          # Extract CLI flags from our current pinned version  
+          CUR_FLAGS=$(grep -o '"--[a-z-]*"' vllm_mlx/cli.py 2>/dev/null | sort -u || echo "")
+          
+          ADDED=$(comm -23 <(echo "$NEW_FLAGS") <(echo "$CUR_FLAGS"))
+          REMOVED=$(comm -13 <(echo "$NEW_FLAGS") <(echo "$CUR_FLAGS"))
+
+          echo "added_flags<<EOF" >> $GITHUB_OUTPUT
+          echo "$ADDED" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "removed_flags<<EOF" >> $GITHUB_OUTPUT
+          echo "$REMOVED" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Count file changes
+          cd /tmp/upstream-new
+          git diff HEAD --stat 2>/dev/null | tail -1 || echo ""
+
+      - name: Check for existing open issue
+        id: existing
+        if: steps.pinned.outputs.version != steps.latest.outputs.version || inputs.force_check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXISTING=$(gh issue list --repo ${{ github.repository }} \
+            --label "upstream-update" \
+            --state open \
+            --search "${{ steps.latest.outputs.version }}" \
+            --json number -q '.[0].number' 2>/dev/null || echo "")
+          echo "number=$EXISTING" >> $GITHUB_OUTPUT
+
+      - name: Create review issue
+        if: |
+          (steps.pinned.outputs.version != steps.latest.outputs.version || inputs.force_check) &&
+          steps.existing.outputs.number == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PINNED: ${{ steps.pinned.outputs.version }}
+          LATEST: ${{ steps.latest.outputs.version }}
+          ADDED_FLAGS: ${{ steps.diff.outputs.added_flags }}
+          REMOVED_FLAGS: ${{ steps.diff.outputs.removed_flags }}
+        run: |
+          cat > /tmp/issue-body.md << 'ISSUE_EOF'
+          ## 🔔 Upstream vllm-mlx ${{ steps.latest.outputs.version }} Released
+
+          **Current pinned version:** `${{ steps.pinned.outputs.version }}`
+          **New version:** `${{ steps.latest.outputs.version }}`
+          **Upstream repo:** https://github.com/waybarrios/vllm-mlx/releases/tag/${{ steps.latest.outputs.version }}
+
+          ---
+
+          ## Release Notes
+
+          ${{ steps.notes.outputs.body }}
+
+          ---
+
+          ## 🔍 Review Checklist
+
+          Complete this review before updating `.github/upstream-version.txt` to `${{ steps.latest.outputs.version }}`.
+
+          ### 1. Security Review
+          - [ ] Review all security-related changes
+          - [ ] Check if any new endpoints need auth protection in our proxy
+          - [ ] Check if any default values changed that affect our users (e.g. `trust_remote_code`, bind address)
+          - [ ] Verify our `vllm_mlx/dashboard/` code still works with the new upstream
+
+          ### 2. New CLI Flags → Expose in UI
+          For each new flag below, decide: expose in Settings UI, expose as advanced setting, or document-only.
+
+          **Newly added flags detected:**
+          ```
+          ${{ steps.diff.outputs.added_flags }}
+          ```
+
+          - [ ] For each new flag: add to `DEFAULT_CONFIG` in `server_manager.py`
+          - [ ] For each new flag: add to `_build_server_cmd()` in `server_manager.py`
+          - [ ] For each user-facing flag: add a control to Settings/Serve UI in Vue
+
+          ### 3. Removed / Renamed Flags
+          **Flags removed or renamed:**
+          ```
+          ${{ steps.diff.outputs.removed_flags }}
+          ```
+          - [ ] Remove or update any removed flags from `DEFAULT_CONFIG` and `_build_server_cmd()`
+          - [ ] Update Vue UI controls for any renamed flags
+
+          ### 4. New API Endpoints
+          - [ ] Check for new endpoints in `server.py` that we should proxy or expose
+          - [ ] Check for new endpoints useful to surface in the dashboard
+
+          ### 5. Bug Fixes → Update Our PR List
+          - [ ] Review bug fixes against our pending upstream PRs in `upstream-prs.md`
+          - [ ] Mark any PRs as closed/superseded if upstream fixed them
+          - [ ] Remove xfail markers in `tests/conftest.py` for any fixed bugs
+
+          ### 6. Breaking Changes
+          - [ ] Check for Python version requirement changes (currently >=3.10)
+          - [ ] Check for new required dependencies in `pyproject.toml`
+          - [ ] Run full test suite after updating: `pytest tests/ -q`
+
+          ### 7. Docs Update
+          - [ ] Update `docs/` for any new features we expose
+          - [ ] Update `docs/dashboard/user-guide.md` for new settings
+
+          ### 8. Approve & Pin
+          - [ ] Update `.github/upstream-version.txt` to `${{ steps.latest.outputs.version }}`
+          - [ ] Run `git fetch upstream && git checkout upstream/main -- vllm_mlx/` (excluding `vllm_mlx/dashboard/`)
+          - [ ] Run full test suite — confirm passing
+          - [ ] Commit: `chore: update upstream vllm-mlx to ${{ steps.latest.outputs.version }}`
+
+          ---
+
+          /cc @ClickbrainAI
+
+          ISSUE_EOF
+
+          gh issue create \
+            --repo ${{ github.repository }} \
+            --title "🔔 Upstream vllm-mlx ${{ steps.latest.outputs.version }} available (pinned: ${{ steps.pinned.outputs.version }})" \
+            --body-file /tmp/issue-body.md \
+            --label "upstream-update"
+
+      - name: Summary
+        run: |
+          echo "## Upstream Release Check" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Pinned | \`${{ steps.pinned.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Latest | \`${{ steps.latest.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.pinned.outputs.version }}" = "${{ steps.latest.outputs.version }}" ]; then
+            echo "| Status | ✅ Up to date |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Status | 🔔 Update available — issue created |" >> $GITHUB_STEP_SUMMARY
+          fi

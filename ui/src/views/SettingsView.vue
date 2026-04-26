@@ -31,6 +31,28 @@ const listenAllInterfaces = ref(false)
 const inferenceApiKey = ref('')
 const hfToken = ref(localStorage.getItem('vmui_hf_token') ?? '')
 const offlineMode = ref(false)
+const autoModelSwitch = ref(false)
+
+// Advanced Inference Settings
+const trustRemoteCode = ref(false)
+const gpuMemoryUtil = ref(0.90)
+const kvCacheQuantization = ref(false)
+const kvCacheQuantizationBits = ref(8)
+const usePaged = ref(false)
+const ssdCacheDir = ref('')
+const ssdCacheMaxGb = ref(0)
+const continuousBatching = ref(false)
+const enableMtp = ref(false)
+const mtpDraftTokens = ref(1)
+const prefillStepSize = ref(0)
+const enableMetrics = ref(false)
+const rateLimit = ref(0)
+const rerankModel = ref('')
+const warmPrompts = ref('')
+const advancedSaved = ref(false)
+
+// Preferences
+const openBrowserOnStart = ref(localStorage.getItem('vmui_open_browser') !== 'false')
 
 // Maintenance
 const showRestartConfirm = ref(false)
@@ -46,6 +68,22 @@ onMounted(async () => {
       host?: string
       api_key?: string
       offline?: boolean
+      auto_model_switch?: boolean
+      trust_remote_code?: boolean
+      gpu_memory_utilization?: number
+      kv_cache_quantization?: boolean
+      kv_cache_quantization_bits?: number
+      use_paged_cache?: boolean
+      ssd_cache_dir?: string
+      ssd_cache_max_gb?: number
+      continuous_batching?: boolean
+      enable_mtp?: boolean
+      mtp_num_draft_tokens?: number
+      prefill_step_size?: number
+      enable_metrics?: boolean
+      rate_limit?: number
+      rerank_model?: string
+      warm_prompts?: string
     }>('/config')
     const p = cfg.model_cache_dir ?? '~/.cache/huggingface/hub'
     cachePathInput.value = p
@@ -54,6 +92,23 @@ onMounted(async () => {
     listenAllInterfaces.value = (cfg.host ?? '127.0.0.1') === '0.0.0.0'
     inferenceApiKey.value = cfg.api_key ?? ''
     offlineMode.value = cfg.offline ?? false
+    autoModelSwitch.value = cfg.auto_model_switch ?? false
+    // Advanced inference settings
+    trustRemoteCode.value = cfg.trust_remote_code ?? false
+    gpuMemoryUtil.value = cfg.gpu_memory_utilization ?? 0.90
+    kvCacheQuantization.value = cfg.kv_cache_quantization ?? false
+    kvCacheQuantizationBits.value = cfg.kv_cache_quantization_bits ?? 8
+    usePaged.value = cfg.use_paged_cache ?? false
+    ssdCacheDir.value = cfg.ssd_cache_dir ?? ''
+    ssdCacheMaxGb.value = cfg.ssd_cache_max_gb ?? 0
+    continuousBatching.value = cfg.continuous_batching ?? false
+    enableMtp.value = cfg.enable_mtp ?? false
+    mtpDraftTokens.value = cfg.mtp_num_draft_tokens ?? 1
+    prefillStepSize.value = cfg.prefill_step_size ?? 0
+    enableMetrics.value = cfg.enable_metrics ?? false
+    rateLimit.value = cfg.rate_limit ?? 0
+    rerankModel.value = cfg.rerank_model ?? ''
+    warmPrompts.value = cfg.warm_prompts ?? ''
   } catch { /* silent */ }
   try {
     const r = await api.get<{ size_gb: number }>('/models/cache_size')
@@ -113,9 +168,43 @@ function saveHfToken() {
   localStorage.setItem('vmui_hf_token', hfToken.value.trim())
 }
 
+function saveOpenBrowserOnStart(val: boolean) {
+  openBrowserOnStart.value = val
+  localStorage.setItem('vmui_open_browser', String(val))
+}
+
 async function saveOfflineMode(val: boolean) {
   offlineMode.value = val
   try { await api.post('/config', { offline: val }) } catch { /* silent */ }
+}
+
+async function saveAutoModelSwitch(val: boolean) {
+  autoModelSwitch.value = val
+  try { await api.post('/auto_switch_enabled', { enabled: val }) } catch { /* silent */ }
+}
+
+async function saveAdvancedSettings() {
+  try {
+    await api.post('/config', {
+      trust_remote_code: trustRemoteCode.value,
+      gpu_memory_utilization: gpuMemoryUtil.value,
+      kv_cache_quantization: kvCacheQuantization.value,
+      kv_cache_quantization_bits: kvCacheQuantizationBits.value,
+      use_paged_cache: usePaged.value,
+      ssd_cache_dir: ssdCacheDir.value,
+      ssd_cache_max_gb: ssdCacheMaxGb.value,
+      continuous_batching: continuousBatching.value,
+      enable_mtp: enableMtp.value,
+      mtp_num_draft_tokens: mtpDraftTokens.value,
+      prefill_step_size: prefillStepSize.value,
+      enable_metrics: enableMetrics.value,
+      rate_limit: rateLimit.value,
+      rerank_model: rerankModel.value,
+      warm_prompts: warmPrompts.value,
+    })
+    advancedSaved.value = true
+    setTimeout(() => { advancedSaved.value = false }, 2000)
+  } catch { /* silent */ }
 }
 
 async function doRestart() {
@@ -248,21 +337,28 @@ async function doRestart() {
             <span class="pref-label">Auto-start server on launch</span>
             <span class="pref-desc">Automatically start the inference server when vmUI opens.</span>
           </div>
-          <label class="toggle"><input type="checkbox" /><span class="toggle-track"><span class="toggle-thumb" /></span></label>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              :checked="startupBehavior === 'auto'"
+              @change="saveStartupBehavior(($event.target as HTMLInputElement).checked ? 'auto' : 'none')"
+            />
+            <span class="toggle-track"><span class="toggle-thumb" /></span>
+          </label>
         </div>
         <div class="pref-row">
           <div class="pref-info">
             <span class="pref-label">Open browser on start</span>
             <span class="pref-desc">Launch the dashboard in the default browser when the server starts.</span>
           </div>
-          <label class="toggle"><input type="checkbox" checked /><span class="toggle-track"><span class="toggle-thumb" /></span></label>
-        </div>
-        <div class="pref-row">
-          <div class="pref-info">
-            <span class="pref-label">API key</span>
-            <span class="pref-desc">Optional bearer token required by clients to connect.</span>
-          </div>
-          <input class="field-input field-inline" type="password" placeholder="sk-…  (leave blank to disable)" />
+          <label class="toggle">
+            <input
+              type="checkbox"
+              :checked="openBrowserOnStart"
+              @change="saveOpenBrowserOnStart(($event.target as HTMLInputElement).checked)"
+            />
+            <span class="toggle-track"><span class="toggle-thumb" /></span>
+          </label>
         </div>
       </div>
     </section>
@@ -342,6 +438,204 @@ async function doRestart() {
       </div>
     </section>
 
+    <!-- Advanced Inference Settings -->
+    <section class="settings-section">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Advanced Inference</div>
+          <div class="section-desc">Engine, memory, and API tuning. Changes take effect on the next server restart.</div>
+        </div>
+      </div>
+      <div class="pref-list">
+
+        <!-- Safety -->
+        <div class="pref-group-label">Safety</div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">Trust Remote Code</span>
+            <span class="pref-desc">
+              Required for some HuggingFace models (certain Qwen, Phi, and custom architectures).
+              <strong class="warn-inline">⚠ Only enable for models you trust.</strong>
+              Disabled by default as of vllm-mlx v0.2.9.
+            </span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" v-model="trustRemoteCode" />
+            <span class="toggle-track"><span class="toggle-thumb" /></span>
+          </label>
+        </div>
+
+        <!-- Memory & Cache -->
+        <div class="pref-group-label">Memory &amp; Cache</div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">GPU Memory Utilization</span>
+            <span class="pref-desc">Fraction of GPU memory reserved for KV cache. Lower if you see OOM errors. Default: 0.90</span>
+          </div>
+          <input
+            v-model.number="gpuMemoryUtil"
+            class="field-input field-inline field-narrow"
+            type="number" min="0.1" max="1.0" step="0.05"
+          />
+        </div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">KV Cache Quantization</span>
+            <span class="pref-desc">Compress key/value cache to 4 or 8 bits. Reduces memory at a slight quality cost.</span>
+          </div>
+          <div class="toggle-with-select">
+            <label class="toggle">
+              <input type="checkbox" v-model="kvCacheQuantization" />
+              <span class="toggle-track"><span class="toggle-thumb" /></span>
+            </label>
+            <select v-if="kvCacheQuantization" class="field-input field-select field-narrow" v-model.number="kvCacheQuantizationBits">
+              <option :value="8">8-bit</option>
+              <option :value="4">4-bit</option>
+            </select>
+          </div>
+        </div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">Paged KV Cache</span>
+            <span class="pref-desc">Use vLLM-style paged memory blocks. Reduces fragmentation for concurrent requests.</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" v-model="usePaged" />
+            <span class="toggle-track"><span class="toggle-thumb" /></span>
+          </label>
+        </div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">SSD KV Cache Directory</span>
+            <span class="pref-desc">
+              Spill KV cache blocks to disk when GPU memory is full. Enables long-context workloads beyond RAM limits.
+              Leave blank to disable. <em>(Added in v0.2.9)</em>
+            </span>
+          </div>
+          <input
+            v-model="ssdCacheDir"
+            class="field-input field-inline"
+            type="text"
+            placeholder="/tmp/vllm-ssd-cache"
+          />
+        </div>
+        <div v-if="ssdCacheDir" class="pref-row pref-row-sub">
+          <div class="pref-info">
+            <span class="pref-label">SSD Cache Max Size (GB)</span>
+            <span class="pref-desc">Maximum disk space to use for KV cache. 0 = unlimited.</span>
+          </div>
+          <input
+            v-model.number="ssdCacheMaxGb"
+            class="field-input field-inline field-narrow"
+            type="number" min="0" step="10"
+          />
+        </div>
+
+        <!-- Inference Engine -->
+        <div class="pref-group-label">Inference Engine</div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">Continuous Batching</span>
+            <span class="pref-desc">Enable the batched engine for multi-user serving. Higher throughput, slightly higher latency per request.</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" v-model="continuousBatching" />
+            <span class="toggle-track"><span class="toggle-thumb" /></span>
+          </label>
+        </div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">Multi-Token Prediction (MTP)</span>
+            <span class="pref-desc">Speculatively draft multiple tokens per step. Increases throughput on capable models.</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" v-model="enableMtp" />
+            <span class="toggle-track"><span class="toggle-thumb" /></span>
+          </label>
+        </div>
+        <div v-if="enableMtp" class="pref-row pref-row-sub">
+          <div class="pref-info">
+            <span class="pref-label">MTP Draft Tokens</span>
+            <span class="pref-desc">Number of tokens to speculatively draft per step. Default: 1</span>
+          </div>
+          <input
+            v-model.number="mtpDraftTokens"
+            class="field-input field-inline field-narrow"
+            type="number" min="1" max="8"
+          />
+        </div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">Prefill Step Size</span>
+            <span class="pref-desc">Tokens per chunked prefill step. 0 = use engine default. Tune to trade latency vs throughput on long prompts.</span>
+          </div>
+          <input
+            v-model.number="prefillStepSize"
+            class="field-input field-inline field-narrow"
+            type="number" min="0" step="64"
+            placeholder="0"
+          />
+        </div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">Warm Prompts File</span>
+            <span class="pref-desc">
+              Path to a file of prompts to pre-warm the KV cache on startup. Reduces cold-start TTFT for agents.
+              <em>(Added in v0.2.9)</em>
+            </span>
+          </div>
+          <input
+            v-model="warmPrompts"
+            class="field-input field-inline"
+            type="text"
+            placeholder="/path/to/warm-prompts.txt"
+          />
+        </div>
+
+        <!-- API & Observability -->
+        <div class="pref-group-label">API &amp; Observability</div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">Rate Limit</span>
+            <span class="pref-desc">Max requests per minute per API key. 0 = unlimited.</span>
+          </div>
+          <input
+            v-model.number="rateLimit"
+            class="field-input field-inline field-narrow"
+            type="number" min="0" step="10"
+            placeholder="0"
+          />
+        </div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">Prometheus Metrics</span>
+            <span class="pref-desc">Expose <code class="step-code">/metrics</code> endpoint in Prometheus format. Requires server restart.</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" v-model="enableMetrics" />
+            <span class="toggle-track"><span class="toggle-thumb" /></span>
+          </label>
+        </div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">Rerank Model</span>
+            <span class="pref-desc">HuggingFace model ID to serve on the <code class="step-code">/v1/rerank</code> endpoint (MLX BERT classifier). Leave blank to disable.</span>
+          </div>
+          <input
+            v-model="rerankModel"
+            class="field-input field-inline"
+            type="text"
+            placeholder="mlx-community/…"
+          />
+        </div>
+
+        <div class="pref-row pref-row-actions">
+          <span v-if="advancedSaved" class="saved-badge">✓ Saved — restart server to apply</span>
+          <AppButton variant="primary" size="sm" @click="saveAdvancedSettings">Save Advanced Settings</AppButton>
+        </div>
+      </div>
+    </section>
+
     <!-- Network & Access -->
     <section class="settings-section">
       <div class="section-header">
@@ -400,6 +694,18 @@ async function doRestart() {
           </div>
           <label class="toggle">
             <input type="checkbox" :checked="offlineMode" @change="saveOfflineMode(($event.target as HTMLInputElement).checked)" />
+            <span class="toggle-track"><span class="toggle-thumb" /></span>
+          </label>
+        </div>
+        <div class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">Auto Model Switch</span>
+            <span class="pref-desc">
+              When enabled, chat clients that request a different model are automatically switched — the server restarts and they receive an in-stream notification to wait. Uses the <code class="step-code">/v1/chat/completions</code> proxy endpoint (port 8502).
+            </span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" :checked="autoModelSwitch" @change="saveAutoModelSwitch(($event.target as HTMLInputElement).checked)" />
             <span class="toggle-track"><span class="toggle-thumb" /></span>
           </label>
         </div>
@@ -647,5 +953,40 @@ async function doRestart() {
   font-size: 12px;
   line-height: 1.55;
   flex-shrink: 0;
+}
+
+/* Advanced inference settings */
+.pref-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--tx-muted);
+  padding: var(--space-2) var(--space-5) var(--space-1);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--bd-subtle);
+  border-top: 1px solid var(--bd-subtle);
+}
+.pref-group-label:first-child {
+  border-top: none;
+}
+.pref-row-sub {
+  background: var(--bg-elevated);
+  padding-left: calc(var(--space-5) + 16px);
+}
+.field-narrow { width: 100px; }
+.toggle-with-select { display: flex; align-items: center; gap: var(--space-3); }
+.warn-inline { color: var(--cr-400, #f87171); font-weight: 600; font-size: 11.5px; }
+.pref-row-actions {
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: none;
+}
+.saved-badge {
+  font-size: 12px;
+  color: var(--ph-400, #4ade80);
+  font-weight: 500;
 }
 </style>

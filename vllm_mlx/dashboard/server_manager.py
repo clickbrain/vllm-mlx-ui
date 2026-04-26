@@ -8,11 +8,11 @@ State (PID, config, logs) is persisted to ~/.vllm_mlx_ui/.
 
 import json
 import os
-import shutil
 import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,19 @@ RELAUNCH_FLAG   = STATE_DIR / "relaunch_pending.flag"
 _http = requests.Session()
 _http.mount("http://", HTTPAdapter(max_retries=0, pool_connections=4, pool_maxsize=8))
 _http.mount("https://", HTTPAdapter(max_retries=0, pool_connections=4, pool_maxsize=8))
+
+# Last crash log captured when the inference server process dies unexpectedly.
+# Persists in memory so it survives PID file cleanup across multiple status polls.
+_last_crash_log: str | None = None
+
+# Set to True while stop_server() is executing an intentional shutdown so that
+# get_server_status() does not misinterpret the dead process as a crash.
+_intentional_stop_in_progress: bool = False
+
+# Lock protecting both _last_crash_log and _intentional_stop_in_progress from
+# concurrent reads and writes across the Streamlit rerun thread and the
+# background monitor thread.
+_server_state_lock = threading.Lock()
 
 
 def _force_ipv4_url(url: str) -> str:
@@ -125,6 +138,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "rerank_model": "",
     "enable_metrics": False,
     "offline": False,
+    # v0.2.9: SSD KV cache tiering (spill KV blocks to disk for long-context)
+    "ssd_cache_dir": "",
+    "ssd_cache_max_gb": 0,
+    # v0.2.9: Pre-warm KV cache on startup (reduces cold-start TTFT for agents)
+    "warm_prompts": "",
+    # v0.2.9: Chunked prefill tuning (tokens per prefill step)
+    "prefill_step_size": 0,
     # Dashboard network settings (controls the Streamlit UI, not the inference server)
     "ui_host": "127.0.0.1",
     "ui_port": 8501,
@@ -243,6 +263,19 @@ def _load_local_config() -> dict[str, Any]:
 
 
 def load_config() -> dict[str, Any]:
+    """Load server configuration, merging remote config when in remote mode.
+
+    In local mode reads from CONFIG_FILE on disk and merges with DEFAULT_CONFIG.
+    In remote mode (active Streamlit session + connection_mode == "remote") fetches
+    config from the management API and overlays local connectivity keys so the
+    address used to reach the remote machine is never overwritten.
+
+    A 10-second session-state cache prevents repeated HTTP calls on fast Streamlit
+    reruns (fragment auto-refresh fires every 5 s).
+
+    Returns:
+        Merged config dict with all DEFAULT_CONFIG keys guaranteed present.
+    """
     _ensure_state_dir()
     local: dict[str, Any] = DEFAULT_CONFIG.copy()
     if CONFIG_FILE.exists():
@@ -309,6 +342,17 @@ _LOCAL_ONLY_KEYS = frozenset({
 
 
 def save_config(config: dict[str, Any]) -> None:
+    """Persist the given config dict to disk and optionally sync to the remote machine.
+
+    Backs up the previous config file with a .bak suffix before overwriting.
+    Invalidates the Streamlit session-state config cache so the next
+    load_config() call returns fresh data.  When remote mode is active, pushes
+    the config to the management API (local-only connectivity keys stripped).
+
+    Args:
+        config: Full config dict to persist.  All keys in DEFAULT_CONFIG should
+            be present; extra keys are written as-is.
+    """
     _ensure_state_dir()
     # Backup previous config before overwriting (gives users a recovery path)
     if CONFIG_FILE.exists():
@@ -424,10 +468,36 @@ def get_server_status() -> dict[str, Any]:
     # Local mode
     pid = _get_pid()
     if pid is None:
-        return {"running": False, "healthy": False, "pid": None, "health": {}}
+        result: dict[str, Any] = {"running": False, "healthy": False, "pid": None, "health": {}}
+        with _server_state_lock:
+            if _last_crash_log:
+                result["crash_log"] = _last_crash_log
+        return result
     if not _is_process_alive(pid):
         PID_FILE.unlink(missing_ok=True)
-        return {"running": False, "healthy": False, "pid": None, "health": {}}
+        # Only capture crash log when the stop was NOT intentional (real crash).
+        # During a planned model switch/restart, _intentional_stop_in_progress is
+        # True and we skip this so the UI doesn't flash a false crash banner.
+        with _server_state_lock:
+            intentional = _intentional_stop_in_progress
+        if intentional:
+            with _server_state_lock:
+                global _last_crash_log
+                _last_crash_log = None
+            return {"running": False, "healthy": False, "pid": None, "health": {}}
+        crash_log = ""
+        try:
+            if LOG_FILE.exists():
+                lines = LOG_FILE.read_text(errors="replace").splitlines()
+                crash_log = "\n".join(lines[-40:])
+        except Exception:
+            pass
+        with _server_state_lock:
+            _last_crash_log = crash_log or None
+        return {"running": False, "healthy": False, "pid": None, "health": {}, "crash_log": crash_log}
+    # Running — clear any stale crash log
+    with _server_state_lock:
+        _last_crash_log = None
     healthy, health_data = check_health()
     return {
         "running": True,
@@ -437,10 +507,38 @@ def get_server_status() -> dict[str, Any]:
     }
 
 
+# Model name patterns → reasoning parser name. Checked in order; first match wins.
+_REASONING_PARSER_PATTERNS: list[tuple[str, str]] = [
+    ("gemma-4", "gemma4"),
+    ("gemma4", "gemma4"),
+    ("qwen3", "qwen3"),
+    ("qwq", "qwen3"),
+    ("deepseek-r1", "deepseek_r1"),
+    ("deepseek_r1", "deepseek_r1"),
+    ("harmony", "harmony"),
+    ("glm-4", "glm4"),
+    ("glm4", "glm4"),
+]
+
+
+def _auto_detect_reasoning_parser(model_name: str) -> str:
+    """Return the reasoning parser name for *model_name*, or '' if none known."""
+    lower = model_name.lower()
+    for fragment, parser in _REASONING_PARSER_PATTERNS:
+        if fragment in lower:
+            return parser
+    return ""
+
+
 def _build_command(config: dict[str, Any]) -> list[str]:
-    """Build the vllm-mlx serve command from config."""
-    binary = shutil.which("vllm-mlx")
-    cmd = [binary] if binary else [sys.executable, "-m", "vllm_mlx.cli"]
+    """Build the vllm-mlx serve command from config.
+
+    Always use sys.executable so the inference server runs in the same Python
+    environment as the mgmt server (dev install or Homebrew, never mixed).
+    Using shutil.which("vllm-mlx") could find a Homebrew-frozen binary even
+    when the mgmt server is running from the dev install, causing version skew.
+    """
+    cmd = [sys.executable, "-m", "vllm_mlx.cli"]
     cmd += ["serve", config["model"]]
 
     cmd += ["--host", str(config.get("host", "127.0.0.1"))]
@@ -462,8 +560,11 @@ def _build_command(config: dict[str, Any]) -> list[str]:
         _max_req = _max_tok
     if _max_tok != 32768 or _max_req != 32768:
         cmd += ["--max-tokens", str(_max_tok), "--max-request-tokens", str(_max_req)]
-    if config.get("reasoning_parser"):
-        cmd += ["--reasoning-parser", config["reasoning_parser"]]
+
+    # Reasoning parser: explicit config wins; otherwise auto-detect from model name.
+    _reasoning_parser = config.get("reasoning_parser") or _auto_detect_reasoning_parser(config.get("model", ""))
+    if _reasoning_parser:
+        cmd += ["--reasoning-parser", _reasoning_parser]
     if config.get("tool_call_parser"):
         cmd += ["--tool-call-parser", config["tool_call_parser"]]
     if config.get("enable_auto_tool_choice") and config.get("tool_call_parser"):
@@ -500,6 +601,15 @@ def _build_command(config: dict[str, Any]) -> list[str]:
         cmd += ["--enable-metrics"]
     if config.get("offline"):
         cmd += ["--offline"]
+    # v0.2.9 additions
+    if config.get("ssd_cache_dir"):
+        cmd += ["--ssd-cache-dir", config["ssd_cache_dir"]]
+        if config.get("ssd_cache_max_gb", 0) > 0:
+            cmd += ["--ssd-cache-max-gb", str(config["ssd_cache_max_gb"])]
+    if config.get("warm_prompts"):
+        cmd += ["--warm-prompts", config["warm_prompts"]]
+    if config.get("prefill_step_size", 0) > 0:
+        cmd += ["--prefill-step-size", str(config["prefill_step_size"])]
 
     return cmd
 
@@ -579,13 +689,18 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
             f"Click **Kill stale server** below to free the port, then try again."
         )
 
+    global _last_crash_log, _intentional_stop_in_progress
     save_config(config)
     _ensure_state_dir()
+    with _server_state_lock:
+        _last_crash_log = None  # clear any previous crash before starting fresh
+        _intentional_stop_in_progress = False  # we're starting fresh
 
     cmd = _build_command(config)
     with open(LOG_FILE, "w") as log_fh:
         proc = subprocess.Popen(
             cmd,
+            stdin=subprocess.DEVNULL,
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             start_new_session=True,
@@ -608,6 +723,7 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
 
 def stop_server() -> tuple[bool, str]:
     """Send SIGTERM to the server process (local) or via mgmt API (remote)."""
+    global _intentional_stop_in_progress
     cfg = load_config()
     mgmt = _mgmt_base(cfg)
     if mgmt:
@@ -626,6 +742,8 @@ def stop_server() -> tuple[bool, str]:
         return False, "Server was not running (cleaned up stale PID file)."
 
     try:
+        with _server_state_lock:
+            _intentional_stop_in_progress = True
         os.kill(pid, signal.SIGTERM)
         for _ in range(10):
             time.sleep(0.5)
@@ -637,16 +755,37 @@ def stop_server() -> tuple[bool, str]:
         return True, "Server stopped."
     except Exception as e:
         return False, f"Error stopping server: {e}"
+    finally:
+        with _server_state_lock:
+            _intentional_stop_in_progress = False
 
 
 def get_logs(last_n_lines: int = 150) -> str:
+    """Return the tail of the inference server log as a single string.
+
+    In remote mode fetches from the management API.  In local mode reads
+    directly from LOG_FILE.
+
+    Args:
+        last_n_lines: Maximum number of trailing lines to return.
+
+    Returns:
+        A newline-joined string of the most recent log lines, or a
+        human-readable placeholder when no log file exists yet.
+
+    Note:
+        Remote mode bug: the mgmt API returns ``{"lines": [...]}`` but this
+        function currently calls ``.get("logs", "")``; remote logs always
+        return an empty string.  Use the ``/logs`` endpoint directly when
+        high-fidelity remote log tailing is needed.
+    """
     cfg = load_config()
     mgmt = _mgmt_base(cfg)
     if mgmt:
         try:
             r = _http.get(f"{mgmt}/logs", params={"lines": last_n_lines},
                              headers=_mgmt_headers(cfg), timeout=5)
-            return r.json().get("logs", "")
+            return r.json().get("lines", [])
         except Exception as e:
             return f"(Could not fetch remote logs: {e})"
     if not LOG_FILE.exists():
