@@ -283,21 +283,20 @@ def upgrade_command() -> list[str]:
         pip = shutil.which("pip3") or "pip3"
 
     if method == "homebrew":
-        # brew update + brew upgrade refreshes the formula (vllm-mlx-ui UI/code).
-        # The explicit pip upgrade that follows ensures vllm-mlx and huggingface-hub
-        # are also brought to latest — brew upgrade alone only re-runs the formula
-        # install block which may leave satisfying-but-stale pip packages in place.
+        # brew upgrade refreshes the formula (vllm-mlx-ui UI/code).
+        # The `;` (not `&&`) ensures the pip upgrade always runs even if brew
+        # reports "already up-to-date" — important when only vllm-mlx or
+        # huggingface-hub need bumping without a new vllm-mlx-ui release.
         return [
             "sh", "-c",
             "brew update && brew upgrade vllm-mlx-ui"
-            f" && {pip} install --upgrade vllm-mlx mlx-lm huggingface-hub",
+            f" ; {pip} install --upgrade vllm-mlx mlx-lm huggingface-hub",
         ]
-    # pip / dev install path
+    # dev / conda / pip install path — upgrade deps unconditionally first.
+    # The UI itself is not on PyPI; users running from source pull via git.
     return [
         "sh", "-c",
-        f"{pip} install --upgrade"
-        f" git+https://github.com/clickbrain/vllm-mlx-ui.git#egg=vllm-mlx[ui]"
-        f" && {pip} install --upgrade vllm-mlx mlx-lm huggingface-hub",
+        f"{pip} install --upgrade vllm-mlx mlx-lm huggingface-hub",
     ]
 
 

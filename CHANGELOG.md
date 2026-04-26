@@ -4,6 +4,17 @@ All notable changes to the dashboard UI are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Dashboard UI version is tracked separately from the core vllm-mlx version.
 
+## [0.3.44] — 2026-04-27
+
+### Fixed
+- **Install Update never upgraded vllm-mlx / huggingface-hub when running from conda/dev**
+  — server was running from `/opt/miniconda3` (non-homebrew), so `upgrade_command()` used
+  the pip path which tried `git+github install && pip deps`. If the git install failed,
+  the `&&` chain stopped and deps were never upgraded.
+  Non-homebrew path now runs `pip install --upgrade vllm-mlx mlx-lm huggingface-hub`
+  directly (no git install step). Homebrew path changed `&&` → `;` so pip dep upgrade
+  runs even when `brew upgrade` exits 0 with "already up-to-date".
+
 ## [0.3.39] — 2026-04-26
 
 ### Fixed
