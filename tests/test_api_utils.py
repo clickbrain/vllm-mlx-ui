@@ -22,49 +22,63 @@ class TestCleanOutputText:
     """Tests for clean_output_text function."""
 
     def test_empty_string(self):
+        """Empty string."""
         assert clean_output_text("") == ""
 
     def test_none_returns_none(self):
+        """None returns none."""
         assert clean_output_text(None) is None
 
     def test_plain_text_unchanged(self):
+        """Plain text unchanged."""
         assert clean_output_text("Hello world") == "Hello world"
 
     def test_removes_im_end(self):
+        """Removes im end."""
         assert clean_output_text("Hello<|im_end|>") == "Hello"
 
     def test_removes_im_start(self):
+        """Removes im start."""
         assert clean_output_text("<|im_start|>Hello") == "Hello"
 
     def test_removes_endoftext(self):
+        """Removes endoftext."""
         assert clean_output_text("Hello<|endoftext|>") == "Hello"
 
     def test_removes_eot_id(self):
+        """Removes eot id."""
         assert clean_output_text("Hello<|eot_id|>") == "Hello"
 
     def test_removes_end_token(self):
+        """Removes end token."""
         assert clean_output_text("Hello<|end|>") == "Hello"
 
     def test_removes_start_header_id(self):
+        """Removes start header id."""
         result = clean_output_text("<|start_header_id|>assistant<|end_header_id|>Hello")
         assert "<|start_header_id|>" not in result
         assert "<|end_header_id|>" not in result
 
     def test_removes_s_tags(self):
+        """Removes s tags."""
         assert clean_output_text("<s>Hello</s>") == "Hello"
 
     def test_removes_pad_tokens(self):
+        """Removes pad tokens."""
         assert clean_output_text("[PAD]Hello[PAD]") == "Hello"
 
     def test_removes_sep_cls(self):
+        """Removes sep cls."""
         assert clean_output_text("[CLS]Hello[SEP]") == "Hello"
 
     def test_removes_multiple_special_tokens(self):
+        """Removes multiple special tokens."""
         text = "<|im_start|>assistant\nHello world<|im_end|><|endoftext|>"
         result = clean_output_text(text)
         assert result == "assistant\nHello world"
 
     def test_preserves_think_tags(self):
+        """Preserves think tags."""
         text = "<think>Let me think about this.</think>The answer is 42."
         result = clean_output_text(text)
         assert "<think>" in result
@@ -72,20 +86,24 @@ class TestCleanOutputText:
         assert "The answer is 42." in result
 
     def test_adds_missing_opening_think_tag(self):
+        """Adds missing opening think tag."""
         text = "Some thinking content.</think>The answer is 42."
         result = clean_output_text(text)
         assert result.startswith("<think>")
         assert "</think>" in result
 
     def test_no_extra_think_tag_when_already_present(self):
+        """No extra think tag when already present."""
         text = "<think>Thinking.</think>Answer."
         result = clean_output_text(text)
         assert result.count("<think>") == 1
 
     def test_strips_whitespace(self):
+        """Strips whitespace."""
         assert clean_output_text("  Hello  ") == "Hello"
 
     def test_combined_special_tokens_and_think(self):
+        """Combined special tokens and think."""
         text = "<|im_start|><think>I need to think.</think>42<|im_end|>"
         result = clean_output_text(text)
         assert "<think>" in result
@@ -98,6 +116,7 @@ class TestSpecialTokensPattern:
     """Tests for the special tokens regex pattern."""
 
     def test_matches_all_expected_tokens(self):
+        """Matches all expected tokens."""
         tokens = [
             "<|im_end|>",
             "<|im_start|>",
@@ -119,10 +138,12 @@ class TestSpecialTokensPattern:
             ), f"Pattern should match {token}"
 
     def test_does_not_match_think_tags(self):
+        """Does not match think tags."""
         assert SPECIAL_TOKENS_PATTERN.search("<think>") is None
         assert SPECIAL_TOKENS_PATTERN.search("</think>") is None
 
     def test_does_not_match_normal_text(self):
+        """Does not match normal text."""
         assert SPECIAL_TOKENS_PATTERN.search("Hello world") is None
 
 
@@ -130,66 +151,82 @@ class TestIsMllmModel:
     """Tests for is_mllm_model function."""
 
     def test_qwen_vl_models(self):
+        """Qwen vl models."""
         assert is_mllm_model("mlx-community/Qwen3-VL-4B-Instruct-3bit") is True
         assert is_mllm_model("mlx-community/Qwen2-VL-7B-Instruct-4bit") is True
 
     def test_llava_models(self):
+        """Llava models."""
         assert is_mllm_model("mlx-community/llava-1.5-7b-4bit") is True
         assert is_mllm_model("mlx-community/LLaVA-NeXT-7b") is True
 
     def test_idefics_models(self):
+        """Idefics models."""
         assert is_mllm_model("mlx-community/Idefics3-8B-Llama3-4bit") is True
         assert is_mllm_model("mlx-community/idefics2-8b-4bit") is True
 
     def test_paligemma_models(self):
+        """Paligemma models."""
         assert is_mllm_model("mlx-community/paligemma2-3b-mix-224-4bit") is True
         assert is_mllm_model("mlx-community/PaliGemma-3b-mix") is True
 
     def test_gemma3_models(self):
+        """Gemma3 models."""
         assert is_mllm_model("mlx-community/gemma-3-12b-it-4bit") is True
         assert is_mllm_model("mlx-community/gemma3-4b-it-4bit") is True
 
     def test_medgemma_models(self):
+        """Medgemma models."""
         assert is_mllm_model("mlx-community/MedGemma-4b-it-4bit") is True
         assert is_mllm_model("mlx-community/medgemma-4b") is True
 
     def test_pixtral_models(self):
+        """Pixtral models."""
         assert is_mllm_model("mlx-community/pixtral-12b-4bit") is True
         assert is_mllm_model("mlx-community/Pixtral-12b-8bit") is True
 
     def test_molmo_models(self):
+        """Molmo models."""
         assert is_mllm_model("mlx-community/Molmo-7B-D-0924-4bit") is True
         assert is_mllm_model("mlx-community/molmo-7b") is True
 
     def test_phi3_vision(self):
+        """Phi3 vision."""
         assert is_mllm_model("mlx-community/phi3-vision-128k") is True
         assert is_mllm_model("mlx-community/phi-3-vision-128k-instruct-4bit") is True
 
     def test_cogvlm(self):
+        """Cogvlm."""
         assert is_mllm_model("mlx-community/CogVLM-chat-hf") is True
         assert is_mllm_model("mlx-community/cogvlm-chat-hf") is True
 
     def test_internvl(self):
+        """Internvl."""
         assert is_mllm_model("mlx-community/InternVL2-8B") is True
 
     def test_deepseek_vl(self):
+        """Deepseek vl."""
         assert is_mllm_model("mlx-community/deepseek-vl-7b-chat-4bit") is True
         assert is_mllm_model("mlx-community/DeepSeek-VL2-small-4bit") is True
 
     def test_non_mllm_models(self):
+        """Non mllm models."""
         assert is_mllm_model("mlx-community/Llama-3.2-3B-Instruct-4bit") is False
         assert is_mllm_model("mlx-community/Qwen3-8B-4bit") is False
         assert is_mllm_model("mlx-community/Mistral-7B-Instruct-v0.3-4bit") is False
         assert is_mllm_model("mlx-community/DeepSeek-R1-Distill-Qwen-7B") is False
 
     def test_case_insensitive(self):
+        """Case insensitive."""
         assert is_mllm_model("LLAVA-7B") is True
         assert is_mllm_model("pixtral-12b") is True
 
     def test_backwards_compatibility_alias(self):
+        """Backwards compatibility alias."""
         assert is_vlm_model is is_mllm_model
 
     def test_all_patterns_defined(self):
+        """All patterns defined."""
         assert len(MLLM_PATTERNS) > 20
 
 
@@ -197,6 +234,7 @@ class TestExtractMultimodalContent:
     """Tests for extract_multimodal_content function."""
 
     def test_simple_text_messages(self):
+        """Simple text messages."""
         messages = [
             Message(role="system", content="You are helpful."),
             Message(role="user", content="Hello"),
@@ -210,11 +248,13 @@ class TestExtractMultimodalContent:
         assert videos == []
 
     def test_none_content(self):
+        """None content."""
         messages = [Message(role="assistant", content=None)]
         processed, images, videos = extract_multimodal_content(messages)
         assert processed[0] == {"role": "assistant", "content": ""}
 
     def test_multimodal_with_image_url(self):
+        """Multimodal with image url."""
         messages = [
             Message(
                 role="user",
@@ -235,6 +275,7 @@ class TestExtractMultimodalContent:
         assert videos == []
 
     def test_multimodal_with_dict_image_url(self):
+        """Multimodal with dict image url."""
         messages = [
             Message(
                 role="user",
@@ -251,6 +292,7 @@ class TestExtractMultimodalContent:
         assert images == ["data:image/png;base64,abc"]
 
     def test_multimodal_with_string_image_url(self):
+        """Multimodal with string image url."""
         messages = [
             Message(
                 role="user",
@@ -264,6 +306,7 @@ class TestExtractMultimodalContent:
         assert images == ["https://example.com/img.png"]
 
     def test_multimodal_with_video(self):
+        """Multimodal with video."""
         messages = [
             Message(
                 role="user",
@@ -277,6 +320,7 @@ class TestExtractMultimodalContent:
         assert videos == ["/path/to/video.mp4"]
 
     def test_multimodal_with_video_url(self):
+        """Multimodal with video url."""
         messages = [
             Message(
                 role="user",
@@ -293,6 +337,7 @@ class TestExtractMultimodalContent:
         assert videos == ["https://example.com/v.mp4"]
 
     def test_multimodal_with_string_video_url(self):
+        """Multimodal with string video url."""
         messages = [
             Message(
                 role="user",
@@ -306,6 +351,7 @@ class TestExtractMultimodalContent:
         assert videos == ["https://example.com/v.mp4"]
 
     def test_multiple_images(self):
+        """Multiple images."""
         messages = [
             Message(
                 role="user",
@@ -320,6 +366,7 @@ class TestExtractMultimodalContent:
         assert len(images) == 2
 
     def test_tool_response_message(self):
+        """Tool response message."""
         messages = [
             Message(role="tool", content="72F and sunny", tool_call_id="call_1")
         ]
@@ -329,6 +376,7 @@ class TestExtractMultimodalContent:
         assert "call_1" in processed[0]["content"]
 
     def test_tool_response_preserve_native(self):
+        """Tool response preserve native."""
         messages = [
             Message(role="tool", content="72F and sunny", tool_call_id="call_1")
         ]
@@ -340,6 +388,7 @@ class TestExtractMultimodalContent:
         assert processed[0]["content"] == "72F and sunny"
 
     def test_assistant_with_tool_calls(self):
+        """Assistant with tool calls."""
         messages = [
             Message(
                 role="assistant",
@@ -361,6 +410,7 @@ class TestExtractMultimodalContent:
         assert "get_weather" in processed[0]["content"]
 
     def test_assistant_with_tool_calls_preserve_native(self):
+        """Assistant with tool calls preserve native."""
         messages = [
             Message(
                 role="assistant",
@@ -386,6 +436,7 @@ class TestExtractMultimodalContent:
         assert len(processed[0]["tool_calls"]) == 1
 
     def test_dict_messages(self):
+        """Dict messages."""
         messages = [
             Message(role="user", content="Hello"),
         ]
@@ -396,6 +447,7 @@ class TestExtractMultimodalContent:
     def test_image_type_content_with_raw_dicts(self):
         # type="image" path handles raw dict content (not Pydantic ContentPart)
         # Pass a raw dict message to avoid Pydantic stripping unknown fields
+        """Image type content with raw dicts."""
         raw_messages = [
             type(
                 "Msg",
@@ -415,18 +467,21 @@ class TestExtractMultimodalContent:
         assert images == ["https://example.com/img.png"]
 
     def test_empty_messages(self):
+        """Empty messages."""
         processed, images, videos = extract_multimodal_content([])
         assert processed == []
         assert images == []
         assert videos == []
 
     def test_tool_response_none_content(self):
+        """Tool response none content."""
         messages = [Message(role="tool", content=None, tool_call_id="call_1")]
         processed, images, videos = extract_multimodal_content(messages)
         assert processed[0]["role"] == "user"
         assert "call_1" in processed[0]["content"]
 
     def test_multiple_text_parts_combined(self):
+        """Multiple text parts combined."""
         messages = [
             Message(
                 role="user",
@@ -493,15 +548,19 @@ class TestContentToText:
     """Tests for the _content_to_text helper."""
 
     def test_none(self):
+        """None."""
         assert _content_to_text(None) == ""
 
     def test_string(self):
+        """String."""
         assert _content_to_text("hello") == "hello"
 
     def test_empty_string(self):
+        """Empty string."""
         assert _content_to_text("") == ""
 
     def test_list_of_content_parts(self):
+        """List of content parts."""
         parts = [
             ContentPart(type="text", text="Hello"),
             ContentPart(type="text", text="World"),
@@ -509,6 +568,7 @@ class TestContentToText:
         assert _content_to_text(parts) == "Hello\nWorld"
 
     def test_list_of_dicts(self):
+        """List of dicts."""
         parts = [
             {"type": "text", "text": "foo"},
             {"type": "image_url", "image_url": "http://img"},
@@ -516,10 +576,12 @@ class TestContentToText:
         assert _content_to_text(parts) == "foo"
 
     def test_list_with_no_text_parts(self):
+        """List with no text parts."""
         parts = [{"type": "image_url", "image_url": "http://img"}]
         assert _content_to_text(parts) == ""
 
     def test_empty_list(self):
+        """Empty list."""
         assert _content_to_text([]) == ""
 
 
@@ -527,21 +589,27 @@ class TestGptOssSpecialTokens:
     """Tests for GPT-OSS channel token handling in utils."""
 
     def test_pattern_matches_channel_token(self):
+        """Pattern matches channel token."""
         assert SPECIAL_TOKENS_PATTERN.search("<|channel|>") is not None
 
     def test_pattern_matches_message_token(self):
+        """Pattern matches message token."""
         assert SPECIAL_TOKENS_PATTERN.search("<|message|>") is not None
 
     def test_pattern_matches_start_token(self):
+        """Pattern matches start token."""
         assert SPECIAL_TOKENS_PATTERN.search("<|start|>") is not None
 
     def test_pattern_matches_return_token(self):
+        """Pattern matches return token."""
         assert SPECIAL_TOKENS_PATTERN.search("<|return|>") is not None
 
     def test_pattern_matches_call_token(self):
+        """Pattern matches call token."""
         assert SPECIAL_TOKENS_PATTERN.search("<|call|>") is not None
 
     def test_clean_output_extracts_final_channel(self):
+        """Clean output extracts final channel."""
         text = (
             "<|channel|>analysis<|message|>Thinking about it"
             "<|start|>assistant<|channel|>final<|message|>The answer is 42<|return|>"
@@ -551,22 +619,26 @@ class TestGptOssSpecialTokens:
         assert "<|" not in result
 
     def test_clean_output_final_only(self):
+        """Clean output final only."""
         text = "<|channel|>final<|message|>Just the answer<|return|>"
         result = clean_output_text(text)
         assert result == "Just the answer"
 
     def test_clean_output_strips_return_token(self):
+        """Clean output strips return token."""
         text = "<|channel|>final<|message|>Hello world<|return|>"
         result = clean_output_text(text)
         assert "<|return|>" not in result
         assert result == "Hello world"
 
     def test_clean_output_no_channel_tokens_passthrough(self):
+        """Clean output no channel tokens passthrough."""
         text = "Normal text without any channel tokens."
         result = clean_output_text(text)
         assert result == text
 
     def test_pattern_matches_constrain_token(self):
+        """Pattern matches constrain token."""
         assert SPECIAL_TOKENS_PATTERN.search("<|constrain|>") is not None
 
     def test_clean_output_constrain_format(self):

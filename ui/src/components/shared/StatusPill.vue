@@ -1,9 +1,15 @@
-<script setup lang="ts">
-import { computed } from 'vue'
+<!--
+  StatusPill — compact inline indicator for server/process lifecycle states.
 
-interface Props {
-  status: 'running' | 'stopped' | 'loading' | 'error'
-}
+  Props:
+  - status: 'running' | 'stopped' | 'loading' | 'error'
+
+  Renders a coloured dot + label. Colour mapping is controlled by CSS
+  .status-pill--{status} classes defined in this component's scoped styles.
+
+  Usage: <StatusPill :status="serverStore.status" />
+-->
+<script setup lang="ts">
 
 const props = defineProps<Props>()
 

@@ -7,6 +7,7 @@ and persists results history to ~/.vllm_mlx_ui/benchmark_results.json.
 """
 
 import json
+import statistics
 import subprocess
 import sys
 import time
@@ -24,6 +25,11 @@ def _ensure_state_dir() -> Path:
 
 
 def load_results() -> list[dict[str, Any]]:
+    """Load all persisted benchmark results from disk.
+
+    Returns:
+        List of result dicts, or an empty list if the file is missing or corrupt.
+    """
     if not RESULTS_FILE.exists():
         return []
     try:
@@ -34,6 +40,11 @@ def load_results() -> list[dict[str, Any]]:
 
 
 def save_result(result: dict[str, Any]) -> None:
+    """Append a benchmark result dict to the persisted results file.
+
+    Args:
+        result: A benchmark result dict to append.
+    """
     _ensure_state_dir()
     results = load_results()
     results.append(result)
@@ -42,6 +53,12 @@ def save_result(result: dict[str, Any]) -> None:
 
 
 def delete_result(index: int) -> None:
+    """Remove a benchmark result by its list index and persist the change.
+
+    Args:
+        index: Zero-based index into the results list. Out-of-range values are
+            silently ignored.
+    """
     results = load_results()
     if 0 <= index < len(results):
         results.pop(index)
@@ -50,6 +67,7 @@ def delete_result(index: int) -> None:
 
 
 def clear_all_results() -> None:
+    """Delete the entire benchmark results file from disk."""
     if RESULTS_FILE.exists():
         RESULTS_FILE.unlink()
 
@@ -270,5 +288,144 @@ def run_benchmark(
     }
     if is_oom:
         result["error"] = "out_of_memory"
+    save_result(result)
+    return result
+
+
+_TEST_PROMPTS = [
+    "Explain the concept of machine learning in simple terms.",
+    "Write a short story about a robot learning to paint.",
+    "What are the key differences between Python and JavaScript?",
+    "Describe the water cycle in three sentences.",
+    "What is the Pythagorean theorem and how is it used?",
+]
+
+
+def run_live_benchmark(
+    model_id: str,
+    server_url: str = "http://127.0.0.1:8000",
+    prompts: int = 3,
+    max_tokens: int = 256,
+    output_callback: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """Benchmark the RUNNING inference server by sending live requests.
+
+    Unlike run_benchmark(), this does not load the model — it uses the already-running
+    inference server. Results are stored in the benchmark history.
+    """
+    import requests as _req
+
+    _ensure_state_dir()
+
+    if output_callback:
+        output_callback(f"Running live benchmark against {server_url}...\n")
+        output_callback(f"Model: {model_id}\nPrompts: {prompts}\nMax tokens: {max_tokens}\n")
+
+    tps_list: list[float] = []
+    ttft_list: list[float] = []
+    raw_lines: list[str] = []
+
+    # Verify the server is running
+    try:
+        health = _req.get(f"{server_url}/health", timeout=5)
+        if health.status_code != 200:
+            raise RuntimeError("Inference server not responding")
+    except Exception as e:
+        result: dict[str, Any] = {
+            "model": model_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "prompts": prompts,
+            "max_tokens": max_tokens,
+            "success": False,
+            "error": f"Server not reachable: {e}",
+            "raw_output": str(e),
+        }
+        save_result(result)
+        return result
+
+    for i in range(prompts):
+        prompt = _TEST_PROMPTS[i % len(_TEST_PROMPTS)]
+        if output_callback:
+            output_callback(f"\n[{i+1}/{prompts}] {prompt[:60]}...\n")
+
+        start = time.monotonic()
+        first_token_time: float | None = None
+        token_count = 0
+        content_buffer = ""
+
+        try:
+            resp = _req.post(
+                f"{server_url}/v1/chat/completions",
+                json={
+                    "model": model_id,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": max_tokens,
+                    "stream": True,
+                    "temperature": 0.0,
+                },
+                stream=True,
+                timeout=120,
+            )
+            resp.raise_for_status()
+
+            end = start
+            for raw_line in resp.iter_lines():
+                if not raw_line:
+                    continue
+                line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+                if not line.startswith("data: ") or line == "data: [DONE]":
+                    continue
+                data_str = line[6:]
+                try:
+                    data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                delta = data.get("choices", [{}])[0].get("delta", {})
+                content = delta.get("content", "")
+                if content:
+                    if first_token_time is None:
+                        first_token_time = time.monotonic()
+                    token_count += len(content.split())  # rough token count
+                    content_buffer += content
+                end = time.monotonic()
+
+            if first_token_time is not None and token_count > 0:
+                ttft = first_token_time - start
+                gen_time = end - first_token_time
+                tps = token_count / gen_time if gen_time > 0.01 else 0
+                ttft_list.append(ttft)
+                tps_list.append(tps)
+                raw_lines.append(f"Run {i+1}: {tps:.1f} tok/s, TTFT {ttft*1000:.0f}ms, {token_count} tokens")
+                if output_callback:
+                    output_callback(f"  → {tps:.1f} tok/s (TTFT {ttft*1000:.0f}ms)\n")
+        except Exception as e:
+            raw_lines.append(f"Run {i+1} error: {e}")
+            if output_callback:
+                output_callback(f"  Error: {e}\n")
+
+    success = len(tps_list) > 0
+    avg_tps = statistics.mean(tps_list) if tps_list else 0.0
+    median_tps = statistics.median(tps_list) if tps_list else 0.0
+    min_tps = min(tps_list) if tps_list else 0.0
+    max_tps = max(tps_list) if tps_list else 0.0
+    avg_ttft_ms = statistics.mean(ttft_list) * 1000 if ttft_list else 0.0
+
+    result = {
+        "model": model_id,
+        "timestamp": datetime.utcnow().isoformat(),
+        "prompts": prompts,
+        "max_tokens": max_tokens,
+        "success": success,
+        "avg_tps": round(avg_tps, 2),
+        "median_tps": round(median_tps, 2),
+        "min_tps": round(min_tps, 2),
+        "max_tps": round(max_tps, 2),
+        "avg_ttft_ms": round(avg_ttft_ms, 1),
+        "raw_output": "\n".join(raw_lines),
+        "live": True,  # flag to distinguish from subprocess benchmark
+    }
+    if not success:
+        result["error"] = "No successful runs completed"
+
     save_result(result)
     return result

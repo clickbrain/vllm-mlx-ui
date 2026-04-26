@@ -1,3 +1,10 @@
+<!--
+  DownloadQueueCard — floating card showing active model downloads.
+
+  Reads downloadQueue from modelsStore and renders a progress bar per item.
+  Only mounts when there is at least one download in progress (v-if guard).
+  No props — driven entirely by store state.
+-->
 <script setup lang="ts">
 import { useModelsStore } from '@/stores/models'
 

@@ -1,3 +1,11 @@
+<!--
+  MetricCard — compact key/value metric tile for the Serve dashboard.
+
+  Props:
+  - label: short descriptor (e.g. "Tokens/s", "Uptime")
+  - value: numeric or string value to display prominently
+  - unit: optional suffix rendered in smaller type after the value (e.g. "tok/s", "GB")
+-->
 <script setup lang="ts">
 defineProps<{
   label: string

@@ -1,3 +1,14 @@
+/**
+ * Machines store — manages the list of vmUI inference servers (local + remote).
+ *
+ * Persists to localStorage so the machine list survives page reloads.
+ * The "local" machine (id: 'local') is always present and cannot be removed.
+ *
+ * Key behaviours:
+ * - activeMachineId drives which server the api/client BASE URL targets.
+ * - pingMachine does a 3-second /health probe to set online status.
+ * - scanNetwork delegates to the backend /network/scan endpoint (mDNS + ARP).
+ */
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { api } from '@/api/client'

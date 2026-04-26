@@ -1,4 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
+/**
+ * Updates store — checks for vmUI and vllm-mlx package updates.
+ *
+ * checkUpdates() hits GET /updates (or /updates?force=true) which returns a
+ * list of pip-inspected packages with installed vs latest versions.
+ *
+ * installUpdates() triggers POST /updates/install. The backend runs pip upgrade
+ * and restarts itself; this store waits ~35s then polls /health every 2s,
+ * reloading the page once the server is back up.
+ *
+ * anyUpdate is the reactive flag used by AppTopbar to show the update dot.
+ */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api } from '../api/client'

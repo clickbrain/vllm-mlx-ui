@@ -36,21 +36,27 @@ class TestConvertStopReason:
     """Tests for _convert_stop_reason."""
 
     def test_stop_to_end_turn(self):
+        """Stop to end turn."""
         assert _convert_stop_reason("stop") == "end_turn"
 
     def test_tool_calls_to_tool_use(self):
+        """Tool calls to tool use."""
         assert _convert_stop_reason("tool_calls") == "tool_use"
 
     def test_length_to_max_tokens(self):
+        """Length to max tokens."""
         assert _convert_stop_reason("length") == "max_tokens"
 
     def test_content_filter_to_end_turn(self):
+        """Content filter to end turn."""
         assert _convert_stop_reason("content_filter") == "end_turn"
 
     def test_none_to_end_turn(self):
+        """None to end turn."""
         assert _convert_stop_reason(None) == "end_turn"
 
     def test_unknown_to_end_turn(self):
+        """Unknown to end turn."""
         assert _convert_stop_reason("something_else") == "end_turn"
 
 
@@ -58,15 +64,19 @@ class TestConvertToolChoice:
     """Tests for _convert_tool_choice."""
 
     def test_auto(self):
+        """Auto."""
         assert _convert_tool_choice({"type": "auto"}) == "auto"
 
     def test_any_to_required(self):
+        """Any to required."""
         assert _convert_tool_choice({"type": "any"}) == "required"
 
     def test_none_type(self):
+        """None type."""
         assert _convert_tool_choice({"type": "none"}) == "none"
 
     def test_specific_tool(self):
+        """Specific tool."""
         result = _convert_tool_choice({"type": "tool", "name": "search"})
         assert result == {
             "type": "function",
@@ -74,9 +84,11 @@ class TestConvertToolChoice:
         }
 
     def test_missing_type_defaults_to_auto(self):
+        """Missing type defaults to auto."""
         assert _convert_tool_choice({}) == "auto"
 
     def test_unknown_type_defaults_to_auto(self):
+        """Unknown type defaults to auto."""
         assert _convert_tool_choice({"type": "unknown"}) == "auto"
 
 
@@ -84,6 +96,7 @@ class TestConvertTool:
     """Tests for _convert_tool."""
 
     def test_minimal_tool(self):
+        """Minimal tool."""
         tool = AnthropicToolDef(name="search")
         result = _convert_tool(tool)
         assert result.type == "function"
@@ -92,6 +105,7 @@ class TestConvertTool:
         assert result.function["parameters"] == {"type": "object", "properties": {}}
 
     def test_full_tool(self):
+        """Full tool."""
         tool = AnthropicToolDef(
             name="get_weather",
             description="Get weather for a city",
@@ -111,6 +125,7 @@ class TestConvertMessage:
     """Tests for _convert_message."""
 
     def test_simple_user_string(self):
+        """Simple user string."""
         msg = AnthropicMessage(role="user", content="hello")
         result = _convert_message(msg)
         assert len(result) == 1
@@ -118,6 +133,7 @@ class TestConvertMessage:
         assert result[0].content == "hello"
 
     def test_simple_assistant_string(self):
+        """Simple assistant string."""
         msg = AnthropicMessage(role="assistant", content="hi there")
         result = _convert_message(msg)
         assert len(result) == 1
@@ -125,6 +141,7 @@ class TestConvertMessage:
         assert result[0].content == "hi there"
 
     def test_user_with_text_blocks(self):
+        """User with text blocks."""
         msg = AnthropicMessage(
             role="user",
             content=[
@@ -138,6 +155,7 @@ class TestConvertMessage:
         assert result[0].content == "first\nsecond"
 
     def test_user_with_tool_results(self):
+        """User with tool results."""
         msg = AnthropicMessage(
             role="user",
             content=[
@@ -162,6 +180,7 @@ class TestConvertMessage:
         assert result[1].content == "rainy, 15C"
 
     def test_user_with_text_and_tool_results(self):
+        """User with text and tool results."""
         msg = AnthropicMessage(
             role="user",
             content=[
@@ -180,6 +199,7 @@ class TestConvertMessage:
         assert result[1].role == "tool"
 
     def test_tool_result_with_list_content(self):
+        """Tool result with list content."""
         msg = AnthropicMessage(
             role="user",
             content=[
@@ -198,6 +218,7 @@ class TestConvertMessage:
         assert result[0].content == "line one\nline two"
 
     def test_tool_result_with_none_content(self):
+        """Tool result with none content."""
         msg = AnthropicMessage(
             role="user",
             content=[
@@ -212,6 +233,7 @@ class TestConvertMessage:
         assert result[0].content == ""
 
     def test_assistant_with_tool_use(self):
+        """Assistant with tool use."""
         msg = AnthropicMessage(
             role="assistant",
             content=[
@@ -234,6 +256,7 @@ class TestConvertMessage:
         assert args == {"q": "weather"}
 
     def test_assistant_empty_content(self):
+        """Assistant empty content."""
         msg = AnthropicMessage(
             role="assistant",
             content=[],
@@ -244,6 +267,7 @@ class TestConvertMessage:
         assert result[0].content == ""
 
     def test_user_empty_content(self):
+        """User empty content."""
         msg = AnthropicMessage(
             role="user",
             content=[],
@@ -267,6 +291,7 @@ class TestAnthropicToOpenai:
         return AnthropicRequest(**defaults)
 
     def test_simple_request(self):
+        """Simple request."""
         req = self._make_request()
         result = anthropic_to_openai(req)
         assert result.model == "default"
@@ -276,6 +301,7 @@ class TestAnthropicToOpenai:
         assert result.messages[0].content == "hi"
 
     def test_system_string(self):
+        """System string."""
         req = self._make_request(system="Be helpful.")
         result = anthropic_to_openai(req)
         assert len(result.messages) == 2
@@ -284,42 +310,50 @@ class TestAnthropicToOpenai:
         assert result.messages[1].role == "user"
 
     def test_system_list(self):
+        """System list."""
         req = self._make_request(system=[{"type": "text", "text": "Be concise."}])
         result = anthropic_to_openai(req)
         assert result.messages[0].role == "system"
         assert result.messages[0].content == "Be concise."
 
     def test_temperature_default(self):
+        """Temperature default."""
         req = self._make_request()
         result = anthropic_to_openai(req)
         assert result.temperature == 0.7
 
     def test_temperature_explicit(self):
+        """Temperature explicit."""
         req = self._make_request(temperature=0.3)
         result = anthropic_to_openai(req)
         assert result.temperature == 0.3
 
     def test_top_p_default(self):
+        """Top p default."""
         req = self._make_request()
         result = anthropic_to_openai(req)
         assert result.top_p == 0.9
 
     def test_top_p_explicit(self):
+        """Top p explicit."""
         req = self._make_request(top_p=0.5)
         result = anthropic_to_openai(req)
         assert result.top_p == 0.5
 
     def test_stop_sequences(self):
+        """Stop sequences."""
         req = self._make_request(stop_sequences=["END", "STOP"])
         result = anthropic_to_openai(req)
         assert result.stop == ["END", "STOP"]
 
     def test_stream_flag(self):
+        """Stream flag."""
         req = self._make_request(stream=True)
         result = anthropic_to_openai(req)
         assert result.stream is True
 
     def test_tools_conversion(self):
+        """Tools conversion."""
         req = self._make_request(
             tools=[
                 AnthropicToolDef(
@@ -337,17 +371,20 @@ class TestAnthropicToOpenai:
         assert result.tools[0].function["name"] == "search"
 
     def test_tool_choice_conversion(self):
+        """Tool choice conversion."""
         req = self._make_request(tool_choice={"type": "any"})
         result = anthropic_to_openai(req)
         assert result.tool_choice == "required"
 
     def test_no_tools(self):
+        """No tools."""
         req = self._make_request()
         result = anthropic_to_openai(req)
         assert result.tools is None
         assert result.tool_choice is None
 
     def test_multiple_messages(self):
+        """Multiple messages."""
         msgs = [
             AnthropicMessage(role="user", content="hello"),
             AnthropicMessage(role="assistant", content="hi"),
@@ -374,6 +411,7 @@ class TestOpenaiToAnthropic:
         )
 
     def test_simple_text_response(self):
+        """Simple text response."""
         resp = self._make_response(content="hi there")
         result = openai_to_anthropic(resp, "default")
         assert result.model == "default"
@@ -385,12 +423,14 @@ class TestOpenaiToAnthropic:
         assert result.stop_reason == "end_turn"
 
     def test_usage_mapping(self):
+        """Usage mapping."""
         resp = self._make_response()
         result = openai_to_anthropic(resp, "default")
         assert result.usage.input_tokens == 10
         assert result.usage.output_tokens == 5
 
     def test_tool_calls_response(self):
+        """Tool calls response."""
         tc = ToolCall(
             id="call_1",
             type="function",
@@ -414,6 +454,7 @@ class TestOpenaiToAnthropic:
         assert result.stop_reason == "tool_use"
 
     def test_tool_call_invalid_json_arguments(self):
+        """Tool call invalid json arguments."""
         tc = ToolCall(
             id="call_1",
             type="function",
@@ -427,6 +468,7 @@ class TestOpenaiToAnthropic:
         assert tool_block.input == {}
 
     def test_empty_choices(self):
+        """Empty choices."""
         resp = ChatCompletionResponse(
             model="default",
             choices=[],
@@ -439,6 +481,7 @@ class TestOpenaiToAnthropic:
         assert result.content[0].text == ""
 
     def test_no_content_adds_empty_text(self):
+        """No content adds empty text."""
         resp = self._make_response(content=None)
         result = openai_to_anthropic(resp, "default")
         assert len(result.content) >= 1
@@ -446,11 +489,13 @@ class TestOpenaiToAnthropic:
         assert has_text
 
     def test_stop_reason_length(self):
+        """Stop reason length."""
         resp = self._make_response(finish_reason="length")
         result = openai_to_anthropic(resp, "default")
         assert result.stop_reason == "max_tokens"
 
     def test_response_has_id(self):
+        """Response has id."""
         resp = self._make_response()
         result = openai_to_anthropic(resp, "test-model")
         assert result.id.startswith("msg_")

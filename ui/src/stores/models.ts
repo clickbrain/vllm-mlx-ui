@@ -1,5 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+/**
+ * Models store — manages cached models, HuggingFace search, download queue, and benchmarks.
+ *
+ * Fit level thresholds (model size as % of available RAM):
+ *   FIT_PERFECT  < 50 %
+ *   FIT_GOOD     50–75 %
+ *   FIT_MARGINAL 75–90 %
+ *   FIT_TOO_TIGHT > 90 %
+ */
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { api } from '@/api/client'
 import { useServerStore } from './server'
 
@@ -18,6 +28,9 @@ export interface HFModel {
   likes: number
   is_mlx: boolean
   tags: string[]
+  last_modified?: string
+  size_gb?: number
+  fit_level?: string  // perfect | good | marginal | too_tight
 }
 
 export interface DownloadQueueItem {
@@ -35,6 +48,7 @@ export interface BenchmarkResult {
   min_tps: number
   max_tps: number
   runs: number
+  avg_ttft_ms?: number
 }
 
 export interface BenchmarkHistoryEntry {
@@ -62,6 +76,21 @@ function deriveQuantization(modelId: string): string {
   return 'unknown'
 }
 
+/**
+ * Classify model size against available RAM.
+ * Returns keys matching HFSearchResult's fitInfo map: perfect | good | marginal | too_tight
+ * @param sizeGb   Model file size in GB
+ * @param ramGb    Currently available GPU/unified memory in GB
+ */
+function computeFitLevel(sizeGb: number, ramGb: number): string {
+  if (!ramGb || ramGb <= 0) return 'unknown'
+  const pct = (sizeGb / ramGb) * 100
+  if (pct < 50) return 'perfect'
+  if (pct < 75) return 'good'
+  if (pct < 90) return 'marginal'
+  return 'too_tight'
+}
+
 export const useModelsStore = defineStore('models', () => {
   const serverStore = useServerStore()
   const models = ref<Model[]>([])
@@ -70,6 +99,9 @@ export const useModelsStore = defineStore('models', () => {
   const searchQuery = ref('')
   const searchResults = ref<HFModel[]>([])
   const searching = ref(false)
+  const searchOffset = ref(0)
+  const searchHasMore = ref(false)
+  const mlxOnly = ref(true)
 
   const downloadQueue = ref<DownloadQueueItem[]>([])
   const pollIntervals: Record<string, number> = {}
@@ -80,6 +112,7 @@ export const useModelsStore = defineStore('models', () => {
   const benchmarkRunning = ref(false)
   const loadingModelId = ref<string | null>(null)
   const actionError = ref<string | null>(null)
+  const serverRestartingFor = ref<string | null>(null)
 
   async function fetchModels() {
     loading.value = true
@@ -157,10 +190,29 @@ export const useModelsStore = defineStore('models', () => {
     loadingModelId.value = modelId
     actionError.value = null
     try {
-      await api.post<void>('/server/load', { model_id: modelId })
-      await fetchModels()
-      await serverStore.fetchStatus()
+      const result = await api.post<{ ok: boolean; restarted: boolean; model: string }>('/server/load', { model_id: modelId })
       await serverStore.fetchConfig()
+      await serverStore.fetchStatus()
+      await fetchModels()
+      if (result.restarted) {
+        serverRestartingFor.value = modelId
+        // Poll until server is running again (max 90s)
+        await new Promise<void>(resolve => {
+          let elapsed = 0
+          const poll = setInterval(async () => {
+            elapsed += 2
+            await serverStore.fetchStatus()
+            await serverStore.fetchMetrics()
+            if (serverStore.isRunning || elapsed >= 90) {
+              clearInterval(poll)
+              serverRestartingFor.value = null
+              await fetchModels() // re-fetch to update active flag with real metrics
+              resolve()
+            }
+          }, 2000)
+        })
+      }
+      return result
     } catch (e) {
       actionError.value = String(e)
       throw e
@@ -174,26 +226,48 @@ export const useModelsStore = defineStore('models', () => {
     models.value = models.value.filter(m => m.id !== modelId)
   }
 
-  async function searchHF(query: string, mlxOnly = false) {
-    searchQuery.value = query
+  async function searchHF(query: string, mlxOnlyFlag = false, offset = 0, sort = 'downloads', append = false) {
+    if (!append) {
+      searchQuery.value = query
+      searchOffset.value = 0
+    }
     searching.value = true
     actionError.value = null
     try {
       const params = new URLSearchParams()
       if (query.trim()) params.set('q', query.trim())
-      if (mlxOnly) params.set('tags', 'mlx')
-      params.set('limit', '40')
-      const results = await api.get<Array<HFModel & { error?: string }>>(`/models/search?${params}`)
-      searchResults.value = results.filter(r => !r.error)
-      if (searchResults.value.length === 0 && results.length > 0 && results[0].error) {
-        actionError.value = `Search error: ${results[0].error}`
+      if (mlxOnlyFlag) params.set('tags', 'mlx')
+      params.set('limit', '30')
+      params.set('offset', String(offset))
+      params.set('sort', sort)
+      const resp = await api.get<{ results: Array<HFModel & { error?: string }>; has_more: boolean }>(`/models/search?${params}`)
+      const results = resp.results.filter(r => !r.error)
+      // Annotate each result with fit_level based on current available RAM
+      const availableGb = serverStore.memory?.available_gb ?? 0
+      const annotated = results.map(r => ({
+        ...r,
+        fit_level: r.size_gb ? computeFitLevel(r.size_gb, availableGb) : undefined,
+      }))
+      searchHasMore.value = resp.has_more
+      searchOffset.value = offset + results.length
+      if (append) {
+        searchResults.value = [...searchResults.value, ...annotated]
+      } else {
+        searchResults.value = annotated
+      }
+      if (!append && searchResults.value.length === 0 && resp.results.length > 0 && resp.results[0].error) {
+        actionError.value = `Search error: ${resp.results[0].error}`
       }
     } catch (e) {
       actionError.value = String(e)
-      searchResults.value = []
+      if (!append) searchResults.value = []
     } finally {
       searching.value = false
     }
+  }
+
+  async function searchHFMore(sort = 'downloads') {
+    await searchHF(searchQuery.value, mlxOnly.value, searchOffset.value, sort, true)
   }
 
   async function runBenchmark(modelIds: string[], cfg: BenchmarkConfig) {
@@ -222,21 +296,65 @@ export const useModelsStore = defineStore('models', () => {
 
   async function fetchBenchmarkResults() {
     const raw = await api.get<Array<Record<string, unknown>>>('/benchmarks')
-    // Server returns stored benchmark records; map to our shape
-    benchmarkResults.value = raw.map(r => ({
-      model_id: String(r.model ?? r.model_id ?? ''),
-      avg_tps: Number(r.avg_tps ?? r.tokens_per_second ?? 0),
-      median_tps: Number(r.median_tps ?? r.avg_tps ?? 0),
-      min_tps: Number(r.min_tps ?? 0),
-      max_tps: Number(r.max_tps ?? r.avg_tps ?? 0),
-      runs: Number(r.runs ?? r.num_runs ?? 1),
-    }))
-    benchmarkHistory.value = raw.map((r, idx) => ({
-      id: Number(r.id ?? idx),
-      timestamp: String(r.timestamp ?? r.created_at ?? ''),
-      model_id: String(r.model ?? r.model_id ?? ''),
-      avg_tps: Number(r.avg_tps ?? r.tokens_per_second ?? 0),
-    }))
+
+    /**
+     * The API returns tokens_per_second as an object:
+     *   { generation_mean, generation_max, processing_mean, total_throughput }
+     * ttft_ms is also an object: { mean, min, max, p50, p95 }
+     * tpot_ms: { mean, min, max }
+     * We must extract sub-fields — Number({...}) yields NaN.
+     */
+    function parseTps(r: Record<string, unknown>): {
+      avg_tps: number; median_tps: number; min_tps: number; max_tps: number
+    } {
+      const raw = r.tokens_per_second
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const t = raw as Record<string, number>
+        return {
+          avg_tps: t.generation_mean ?? t.total_throughput ?? 0,
+          median_tps: t.generation_mean ?? 0,
+          min_tps: t.processing_mean ?? t.generation_mean ?? 0,
+          max_tps: t.generation_max ?? t.generation_mean ?? 0,
+        }
+      }
+      // Flat numeric fallback for older or custom records
+      const flat = Number(r.avg_tps ?? r.tokens_per_second ?? 0)
+      return {
+        avg_tps: flat,
+        median_tps: Number(r.median_tps ?? flat),
+        min_tps: Number(r.min_tps ?? 0),
+        max_tps: Number(r.max_tps ?? flat),
+      }
+    }
+
+    function parseTtft(r: Record<string, unknown>): number | undefined {
+      const raw = r.ttft_ms
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        return (raw as Record<string, number>).mean
+      }
+      if (r.avg_ttft_ms !== undefined) return Number(r.avg_ttft_ms)
+      return undefined
+    }
+
+    benchmarkResults.value = raw.map(r => {
+      const tps = parseTps(r)
+      return {
+        model_id: String(r.model ?? r.model_id ?? ''),
+        ...tps,
+        runs: Number(r.runs ?? r.num_runs ?? 1),
+        avg_ttft_ms: parseTtft(r),
+      }
+    })
+
+    benchmarkHistory.value = raw.map((r, idx) => {
+      const tps = parseTps(r)
+      return {
+        id: Number(r.id ?? idx),
+        timestamp: String(r.timestamp ?? r.created_at ?? ''),
+        model_id: String(r.model ?? r.model_id ?? ''),
+        avg_tps: tps.avg_tps,
+      }
+    })
   }
 
   async function deleteBenchmarkResult(id: number) {
@@ -244,16 +362,34 @@ export const useModelsStore = defineStore('models', () => {
     await fetchBenchmarkResults()
   }
 
+  async function clearAllBenchmarks() {
+    await api.delete('/benchmarks')
+    benchmarkResults.value = null
+    benchmarkHistory.value = []
+  }
+
+  /** Best (highest avg_tps) benchmark result per model_id, for display in library cards. */
+  const bestBenchmarkPerModel = computed(() => {
+    const map = new Map<string, BenchmarkHistoryEntry>()
+    for (const entry of benchmarkHistory.value) {
+      const existing = map.get(entry.model_id)
+      if (!existing || entry.avg_tps > existing.avg_tps)
+        map.set(entry.model_id, entry)
+    }
+    return map
+  })
+
   return {
     models, loading,
-    searchQuery, searchResults, searching,
+    searchQuery, searchResults, searching, searchOffset, searchHasMore, mlxOnly,
     downloadQueue,
     benchmarkResults, benchmarkHistory, benchmarking, benchmarkRunning,
-    loadingModelId, actionError,
+    bestBenchmarkPerModel,
+    loadingModelId, actionError, serverRestartingFor,
     fetchModels, downloadModel, pollDownloadStatus,
     loadModel, deleteModel,
-    searchHF,
-    runBenchmark, fetchBenchmarkResults, deleteBenchmarkResult,
+    searchHF, searchHFMore,
+    runBenchmark, fetchBenchmarkResults, deleteBenchmarkResult, clearAllBenchmarks,
   }
 })
 

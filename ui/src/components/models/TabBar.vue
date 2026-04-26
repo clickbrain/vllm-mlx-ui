@@ -1,3 +1,13 @@
+<!--
+  TabBar — horizontally-arranged tab selector for multi-section views.
+
+  Props:
+  - tabs: string array of tab labels to render
+  - modelValue (v-model): the currently active tab label
+
+  Emits 'update:modelValue' on click so v-model wiring works.
+  Renders with proper ARIA roles (tablist / tab) for accessibility.
+-->
 <script setup lang="ts">
 defineProps<{
   tabs: string[]

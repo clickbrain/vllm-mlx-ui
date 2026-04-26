@@ -1,12 +1,12 @@
 # vLLM-MLX Documentation
 
-**Apple Silicon MLX Backend for vLLM** - GPU-accelerated Text, Image, Video & Audio on Mac
+**vllm-MLX: High-Performance Local AI Inference** - GPU-accelerated Text, Image, Video & Audio inference on Apple Silicon and beyond
 
 ## What is vLLM-MLX?
 
-vllm-mlx brings native Apple Silicon GPU acceleration to vLLM by integrating:
+vllm-mlx provides high-performance local AI inference with a unified API. Primary acceleration is via the MLX framework on Apple Silicon, with support for additional inference backends (llama.cpp, Ollama, remote engines) on other platforms:
 
-- **[MLX](https://github.com/ml-explore/mlx)**: Apple's ML framework with unified memory and Metal kernels
+- **[MLX](https://github.com/ml-explore/mlx)**: Apple's ML framework with unified memory and Metal kernels (Apple Silicon)
 - **[mlx-lm](https://github.com/ml-explore/mlx-lm)**: Optimized LLM inference with KV cache and quantization
 - **[mlx-vlm](https://github.com/Blaizzy/mlx-vlm)**: Vision-language models for multimodal inference
 - **[mlx-audio](https://github.com/Blaizzy/mlx-audio)**: Text-to-Speech and Speech-to-Text with native voices
@@ -15,7 +15,7 @@ vllm-mlx brings native Apple Silicon GPU acceleration to vLLM by integrating:
 ## Key Features
 
 - **Multimodal** - Text, Image, Video & Audio in one platform
-- **Native GPU acceleration** on Apple Silicon (M1, M2, M3, M4)
+- **Native GPU acceleration** on Apple Silicon (M1–M4); additional inference backends for other platforms
 - **Native TTS voices** - Spanish, French, Chinese, Japanese + 5 more languages
 - **OpenAI API compatible** - drop-in replacement for OpenAI client
 - **Embeddings** - OpenAI-compatible `/v1/embeddings` endpoint
@@ -60,7 +60,8 @@ vllm-mlx brings native Apple Silicon GPU acceleration to vLLM by integrating:
 
 ## Requirements
 
-- macOS on Apple Silicon (M1/M2/M3/M4)
+- **Apple Silicon (M1/M2/M3/M4)** — full MLX acceleration (recommended)
+- **Linux / Windows** — supported via alternative inference backends
 - Python 3.10+
 - 8GB+ RAM recommended
 

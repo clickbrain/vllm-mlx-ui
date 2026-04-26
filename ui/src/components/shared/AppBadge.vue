@@ -1,10 +1,14 @@
-<script setup lang="ts">
-import { computed } from 'vue'
+<!--
+  AppBadge — inline pill/badge for status labels, tags, and metadata.
 
-interface Props {
-  variant?: 'success' | 'warning' | 'error' | 'info' | 'neutral'
-  size?: 'sm' | 'md'
-}
+  Props:
+  - variant: colour scheme — 'success' | 'warning' | 'error' | 'info' | 'neutral' (default)
+  - size: 'sm' | 'md' (default)
+
+  Usage: <AppBadge variant="success">MLX</AppBadge>
+  Content is provided via the default slot.
+-->
+<script setup lang="ts">
 
 const props = withDefaults(defineProps<Props>(), {
   variant: 'neutral',

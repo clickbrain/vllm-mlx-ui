@@ -1,3 +1,17 @@
+<!--
+  HFSearchResult — one result card from a HuggingFace model search.
+
+  Props:
+  - id: HuggingFace model repo ID (e.g. "mlx-community/Qwen3-8B-4bit")
+  - downloads: total HF download count (abbreviated to k/M notation)
+  - likes: HF "like" count
+  - is_mlx: true when the model has the mlx tag (shows MLX badge)
+  - tags: array of HF topic tags
+  - size_gb: pre-download weight file size in GB (optional)
+  - fit_level: 'perfect' | 'good' | 'marginal' | 'too_tight' from check_model_fit
+
+  Emits: download — user clicked the Download button
+-->
 <script setup lang="ts">
 import { computed } from 'vue'
 import AppBadge from '@/components/shared/AppBadge.vue'
@@ -9,6 +23,8 @@ const props = defineProps<{
   likes: number
   is_mlx: boolean
   tags: string[]
+  size_gb?: number
+  fit_level?: string
 }>()
 
 const emit = defineEmits<{
@@ -23,6 +39,21 @@ function abbreviate(n: number): string {
 
 const downloadsFormatted = computed(() => abbreviate(props.downloads))
 const likesFormatted = computed(() => abbreviate(props.likes))
+
+const sizeLabel = computed(() => {
+  if (!props.size_gb) return null
+  return `~${props.size_gb.toFixed(1)} GB`
+})
+
+const fitInfo = computed(() => {
+  const map: Record<string, { dot: string; label: string; color: string }> = {
+    perfect:   { dot: '●', label: 'Fits great', color: 'var(--ph-400)' },
+    good:      { dot: '●', label: 'Fits well',  color: '#facc15' },
+    marginal:  { dot: '●', label: 'Tight fit',  color: '#f97316' },
+    too_tight: { dot: '●', label: 'Too large',  color: 'var(--cr-400)' },
+  }
+  return props.fit_level ? (map[props.fit_level] ?? null) : null
+})
 </script>
 
 <template>
@@ -31,9 +62,18 @@ const likesFormatted = computed(() => abbreviate(props.likes))
       <span class="model-id">{{ id }}</span>
       <AppBadge v-if="is_mlx" variant="info" size="sm">MLX</AppBadge>
     </div>
-    <div class="result-stats">
-      <span class="stat">↓ {{ downloadsFormatted }}</span>
-      <span class="stat">♥ {{ likesFormatted }}</span>
+    <!-- Size / Fit column — aligns with col-fit header -->
+    <div class="result-fit">
+      <span v-if="sizeLabel" class="size-label">{{ sizeLabel }}</span>
+      <span v-if="fitInfo" class="fit-pill" :style="{ color: fitInfo.color }">
+        {{ fitInfo.dot }} {{ fitInfo.label }}
+      </span>
+      <span v-else-if="sizeLabel" class="fit-unknown">—</span>
+    </div>
+  <div class="result-stats">
+      <span class="stat stat-downloads">↓ {{ downloadsFormatted }}</span>
+      <span class="stat stat-likes">♥ {{ likesFormatted }}</span>
+      <span class="stat stat-trending" />
     </div>
     <AppButton variant="secondary" size="sm" @click="emit('download')">Download</AppButton>
   </div>
@@ -69,9 +109,36 @@ const likesFormatted = computed(() => abbreviate(props.likes))
   white-space: nowrap;
 }
 
+/* Aligns with .col-fit header */
+.result-fit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 90px;
+  flex-shrink: 0;
+}
+
+.size-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--tx-secondary);
+}
+
+.fit-pill {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.fit-unknown {
+  font-size: 11px;
+  color: var(--tx-muted);
+}
+
 .result-stats {
   display: flex;
-  gap: var(--space-5);
+  gap: 0;
   flex-shrink: 0;
 }
 
@@ -79,7 +146,21 @@ const likesFormatted = computed(() => abbreviate(props.likes))
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--tx-muted);
-  min-width: 60px;
+  flex-shrink: 0;
+}
+
+.stat-downloads {
+  min-width: 72px;
+  text-align: right;
+}
+
+.stat-likes {
+  min-width: 72px;
+  text-align: right;
+}
+
+.stat-trending {
+  min-width: 72px;
   text-align: right;
 }
 </style>

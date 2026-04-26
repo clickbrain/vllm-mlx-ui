@@ -687,3 +687,4 @@ class TestModelSerialization:
         )
         data = schema.model_dump(by_alias=True)
         assert "schema" in data
+

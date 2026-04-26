@@ -1,3 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+/**
+ * Server store — manages inference server status, metrics, memory, and config.
+ *
+ * Polling strategy (startPolling):
+ *   - status, memory, config: every 3 s always
+ *   - metrics: every 3 s only while server is running
+ *
+ * Key derived values:
+ *   - tps: returns 0 (not null) when server is running but has processed no tokens yet,
+ *     so the UI can display "0.0 tok/s" instead of "—"
+ *   - metricsError: set when metrics fetch fails; cleared on next success
+ */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/api/client'
@@ -6,17 +19,21 @@ interface ServerStatus {
   running: boolean
   healthy: boolean
   pid: number | null
+  crash_log?: string
 }
 
-interface Metrics {
+export interface Metrics {
   status: string
   model: string | null
   uptime_s: number
   num_running: number
   num_waiting: number
   total_requests_processed: number
+  total_prompt_tokens: number
   total_completion_tokens: number
   metal: { active_memory_gb: number | null; peak_memory_gb: number | null }
+  /** Live list of active request objects (optional, presence depends on server version) */
+  requests?: Array<{ id: string; model: string; tokens_generated: number; elapsed_s: number }>
 }
 
 interface MemoryStats {
@@ -27,12 +44,17 @@ interface MemoryStats {
   pressure: 'low' | 'medium' | 'high' | 'critical' | 'unknown'
 }
 
-interface ServerConfig {
+export interface ServerConfig {
   model?: string
   port?: number
   host?: string
   max_tokens?: number
   context_size?: number
+  startup_model_behavior?: 'auto' | 'ask' | 'none'
+  api_key?: string
+  hf_token?: string
+  offline_mode?: boolean
+  auto_model_switch?: boolean
 }
 
 export const useServerStore = defineStore('server', () => {
@@ -42,6 +64,14 @@ export const useServerStore = defineStore('server', () => {
   const config = ref<ServerConfig | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  const crashLog = ref<string | null>(null)
+  /** Set when /metrics fetch fails; cleared on next successful fetch */
+  const metricsError = ref(false)
+  /** Ring buffer of sampled metrics — max 120 entries (~10 min at 5 s interval) */
+  const metricsHistory = ref<Array<{
+    time: string; active: number; queued: number; total: number; memory_gb: number
+  }>>([])
+  const MAX_HISTORY = 120
 
   const isRunning = computed(() => status.value?.running ?? false)
   const memoryPercent = computed(() => memory.value?.percent ?? 0)
@@ -50,11 +80,28 @@ export const useServerStore = defineStore('server', () => {
   // Derived display values combining status + metrics + config
   const modelId = computed(() => metrics.value?.model ?? config.value?.model ?? null)
   const uptimeSeconds = computed(() => metrics.value?.uptime_s ?? 0)
+  const numRunning = computed(() => metrics.value?.num_running ?? 0)
+  const numWaiting = computed(() => metrics.value?.num_waiting ?? 0)
+  const totalRequests = computed(() => metrics.value?.total_requests_processed ?? 0)
+  const totalPromptTokens = computed(() => metrics.value?.total_prompt_tokens ?? 0)
+  const totalCompletionTokens = computed(() => metrics.value?.total_completion_tokens ?? 0)
+  const metalMemoryGb = computed(() => metrics.value?.metal?.active_memory_gb ?? null)
+  const peakMemoryGb = computed(() => metrics.value?.metal?.peak_memory_gb ?? null)
+
+  /**
+   * Returns tokens/sec as a number.
+   * Returns 0 (not null) when server is running but no tokens processed yet,
+   * so the UI shows "0.0 tok/s" rather than "—".
+   * Returns null only when the server is not running (no metrics available).
+   */
   const tps = computed<number | null>(() => {
+    if (!isRunning.value) return null
     const m = metrics.value
-    if (!m || !m.total_completion_tokens || !m.uptime_s || m.uptime_s < 1) return null
+    if (!m || m.uptime_s < 1) return 0
+    if (!m.total_completion_tokens) return 0
     return Math.round(m.total_completion_tokens / m.uptime_s * 10) / 10
   })
+
   const baseUrl = computed(() => {
     if (!isRunning.value) return null
     const port = config.value?.port ?? 8080
@@ -63,7 +110,14 @@ export const useServerStore = defineStore('server', () => {
 
   async function fetchStatus() {
     try {
-      status.value = await api.get<ServerStatus>('/status')
+      const s = await api.get<ServerStatus>('/status')
+      status.value = s
+      // Capture crash log when process died; clear it when running
+      if (s.running) {
+        crashLog.value = null
+      } else if (s.crash_log) {
+        crashLog.value = s.crash_log
+      }
       error.value = null
     } catch (e) {
       error.value = String(e)
@@ -75,9 +129,23 @@ export const useServerStore = defineStore('server', () => {
     if (!isRunning.value) return
     try {
       const m = await api.get<Metrics>('/metrics')
-      if (m && Object.keys(m).length) metrics.value = m
+      if (m && Object.keys(m).length) {
+        metrics.value = m
+        metricsError.value = false
+        // Append to history ring buffer
+        metricsHistory.value.push({
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          active: m.num_running ?? 0,
+          queued: m.num_waiting ?? 0,
+          total: m.total_requests_processed ?? 0,
+          memory_gb: m.metal?.active_memory_gb ?? 0,
+        })
+        if (metricsHistory.value.length > MAX_HISTORY)
+          metricsHistory.value = metricsHistory.value.slice(-MAX_HISTORY)
+      }
     } catch {
-      // silent — metrics are best-effort while server is starting
+      // Metrics are best-effort during server startup; flag for UI staleness indicator
+      metricsError.value = true
     }
   }
 
@@ -99,9 +167,17 @@ export const useServerStore = defineStore('server', () => {
 
   async function startServer() {
     loading.value = true
+    crashLog.value = null
     try {
       await api.post('/start')
-      await fetchStatus()
+      // Poll until running — inference server takes 30–90 s to boot a model
+      const deadline = Date.now() + 120_000
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2500))
+        await fetchStatus()
+        if (isRunning.value) break
+        if (crashLog.value) break  // crash detected — abort early
+      }
     } finally { loading.value = false }
   }
 
@@ -110,6 +186,7 @@ export const useServerStore = defineStore('server', () => {
     try {
       await api.post('/stop')
       metrics.value = null
+      metricsError.value = false
       await fetchStatus()
     } finally { loading.value = false }
   }
@@ -126,6 +203,15 @@ export const useServerStore = defineStore('server', () => {
     await fetchConfig()
   }
 
+  async function fetchCacheStats(): Promise<Record<string, unknown> | null> {
+    try { return await api.get<Record<string, unknown>>('/cache/stats') }
+    catch { return null }
+  }
+
+  /**
+   * Starts background polling for all server state.
+   * Returns a cleanup function to stop polling.
+   */
   function startPolling(intervalMs = 3000): () => void {
     fetchStatus()
     fetchMemory()
@@ -157,10 +243,12 @@ export const useServerStore = defineStore('server', () => {
   }
 
   return {
-    status, metrics, memory, config, loading, error,
+    status, metrics, memory, config, loading, error, crashLog, metricsError, metricsHistory,
     isRunning, memoryPercent, underPressure,
     modelId, uptimeSeconds, tps, baseUrl,
-    fetchStatus, fetchMetrics, fetchConfig, fetchMemory,
+    numRunning, numWaiting, totalRequests, totalPromptTokens, totalCompletionTokens,
+    metalMemoryGb, peakMemoryGb,
+    fetchStatus, fetchMetrics, fetchConfig, fetchMemory, fetchCacheStats,
     startServer, stopServer, fetchLogs, startPolling, releaseMemory, saveConfig,
     shutdown, restart, clearCache,
   }

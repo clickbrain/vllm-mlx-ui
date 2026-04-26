@@ -1,6 +1,20 @@
+<!--
+  App.vue — root application shell.
+
+  Renders the persistent layout (AppSidebar + AppTopbar) and <RouterView>
+  for the active page. Also kicks off the server store's periodic status poll
+  on mount so all views share live inference server state.
+-->
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppTopbar from '@/components/layout/AppTopbar.vue'
+import { useServerStore } from '@/stores/server'
+import { useModelsStore } from '@/stores/models'
+
+const serverStore = useServerStore()
+const modelsStore = useModelsStore()
+onMounted(() => { serverStore.startPolling() })
 </script>
 
 <template>
@@ -8,6 +22,14 @@ import AppTopbar from '@/components/layout/AppTopbar.vue'
     <AppSidebar />
     <div class="app-main">
       <AppTopbar />
+      <!-- Global model-switch banner; appears on all pages during server restart for model load -->
+      <div v-if="modelsStore.serverRestartingFor" class="model-switch-banner" role="status">
+        <span class="banner-spinner" aria-hidden="true" />
+        <span>
+          Loading <strong>{{ (modelsStore.serverRestartingFor || '').split('/').pop() }}</strong>
+          — server restarting, requests will resume shortly
+        </span>
+      </div>
       <main class="app-content">
         <RouterView />
       </main>
@@ -43,5 +65,33 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-6);
+}
+
+/* Model-switch global banner */
+.model-switch-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px var(--space-4);
+  background: rgba(245, 158, 11, 0.12);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.25);
+  color: #F59E0B;
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+}
+
+.banner-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(245, 158, 11, 0.3);
+  border-top-color: #F59E0B;
+  border-radius: 50%;
+  animation: banner-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes banner-spin {
+  to { transform: rotate(360deg); }
 }
 </style>

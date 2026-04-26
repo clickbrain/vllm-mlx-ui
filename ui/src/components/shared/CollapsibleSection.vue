@@ -1,10 +1,14 @@
-<script setup lang="ts">
-import { ref, onMounted } from 'vue'
+<!--
+  CollapsibleSection — a toggleable expand/collapse container.
 
-const props = defineProps<{
-  title: string
-  defaultOpen?: boolean
-}>()
+  Props:
+  - title: section header text shown in the clickable button
+  - defaultOpen: whether the section starts expanded (default: false)
+
+  Content is provided via the default slot and is conditionally rendered
+  (v-if, not v-show) — complex children are unmounted when collapsed.
+-->
+<script setup lang="ts">
 
 const open = ref(false)
 onMounted(() => { open.value = props.defaultOpen ?? false })

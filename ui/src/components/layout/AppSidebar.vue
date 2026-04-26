@@ -1,3 +1,18 @@
+<!--
+  AppSidebar — primary navigation sidebar rendered on every page.
+
+  Responsibilities:
+  - Navigation links: Serve, Models, Benchmark, Chat, Docs, Settings
+  - Machine switcher: select between Local and configured remote machines;
+    shows online/offline status with a colour dot
+  - Inference server status pill: running / stopped / loading / error
+  - Update badge: shows a dot when updatesStore.anyUpdate is true
+  - Remote connection UI: form to add a new remote machine by host:port
+  - Server start/stop shortcut from the sidebar status area
+
+  Uses ConfirmModal for the "Remove machine" destructive action.
+  Subscribes to updatesStore.checkUpdates() on mount.
+-->
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'

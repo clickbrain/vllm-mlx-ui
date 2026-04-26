@@ -1,3 +1,14 @@
+<!--
+  EndpointCard — displays a single API endpoint label and its value.
+
+  Props:
+  - label: short descriptor (e.g. "Base URL", "API Key")
+  - value: the actual endpoint string or credential
+  - copyable: shows a copy-to-clipboard button (default: false)
+  - dimWhenEmpty: renders the value in muted style when it is empty or '—'
+
+  Used in ServeView to surface the inference server's base URL and key.
+-->
 <script setup lang="ts">
 import { ref } from 'vue'
 

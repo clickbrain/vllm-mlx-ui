@@ -1,8 +1,22 @@
+<!--
+  LibCard — card representing a locally-cached model in the Models library view.
+
+  Props:
+  - modelId: HuggingFace repo ID (e.g. "mlx-community/Qwen3-8B-4bit")
+  - sizeGb: disk size of the model in gigabytes
+  - quantization: short quantization label (e.g. "4-bit", "8-bit")
+  - active: true when this model is currently loaded in the inference server
+  - cached: true when the model is already downloaded to local HF cache
+
+  Emits (internal): routes to /serve to load the model via serverStore.
+-->
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import AppBadge from '@/components/shared/AppBadge.vue'
 import AppButton from '@/components/shared/AppButton.vue'
 import { useModelsStore } from '@/stores/models'
+import { useServerStore } from '@/stores/server'
 
 const props = defineProps<{
   modelId: string
@@ -19,6 +33,8 @@ const emit = defineEmits<{
 }>()
 
 const modelsStore = useModelsStore()
+const serverStore = useServerStore()
+const router = useRouter()
 
 const org = computed(() => props.modelId.split('/')[0] ?? '')
 const shortName = computed(() => props.modelId.split('/').pop() ?? props.modelId)
@@ -33,11 +49,25 @@ const isDownloading = computed(() =>
 )
 
 const isLoading = computed(() => modelsStore.loadingModelId === props.modelId)
+const isRestarting = computed(() => modelsStore.serverRestartingFor === props.modelId)
 
 const quantLabel = computed(() => {
   const q = props.quantization
   return q === 'unknown' ? '—' : q
 })
+
+const fitInfo = computed(() => {
+  const avail = serverStore.memory?.available_gb
+  if (!avail || !props.sizeGb) return null
+  const ratio = props.sizeGb / avail
+  if (ratio < 0.5)  return { label: 'Fits great', color: 'var(--ph-400)' }
+  if (ratio < 0.75) return { label: 'Fits well',  color: '#facc15' }
+  if (ratio < 0.90) return { label: 'Tight fit',  color: '#f97316' }
+  return { label: 'Too large', color: 'var(--cr-400)' }
+})
+
+/** Best benchmark result for this model from history, for the inline badge. */
+const bestBench = computed(() => modelsStore.bestBenchmarkPerModel.get(props.modelId) ?? null)
 </script>
 
 <template>
@@ -47,12 +77,23 @@ const quantLabel = computed(() => {
         <a :href="hfUrl" target="_blank" rel="noopener" class="model-link" :title="modelId">
           <span class="org-prefix">{{ org }}/</span><span class="model-name">{{ shortName }}</span>
         </a>
-        <AppBadge v-if="active" variant="success" size="sm">Serving</AppBadge>
+        <AppBadge v-if="isRestarting" variant="warning" size="sm">Restarting…</AppBadge>
+        <AppBadge v-else-if="active" variant="success" size="sm">Serving</AppBadge>
       </div>
       <div class="meta-row">
         <span class="meta-chip">{{ quantLabel }}</span>
         <span class="meta-sep">·</span>
         <span class="meta-chip">{{ sizeGb.toFixed(1) }} GB</span>
+        <template v-if="fitInfo && !active">
+          <span class="meta-sep">·</span>
+          <span class="fit-chip" :style="{ color: fitInfo.color }">● {{ fitInfo.label }}</span>
+        </template>
+        <template v-if="bestBench && cached">
+          <span class="meta-sep">·</span>
+          <button class="bench-badge" @click.stop="router.push('/benchmarks')" title="View in Benchmarks">
+            {{ bestBench.avg_tps.toFixed(1) }} t/s
+          </button>
+        </template>
       </div>
     </div>
 
@@ -147,6 +188,25 @@ const quantLabel = computed(() => {
   font-size: 11px;
   margin: 0 1px;
 }
+
+.fit-chip {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.bench-badge {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--si-300);
+  background: var(--ac-bg);
+  border: 1px solid var(--ac-border);
+  border-radius: var(--r-pill);
+  padding: 1px 7px;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.bench-badge:hover { background: rgba(91,106,208,.18); border-color: var(--si-400); }
 
 .card-actions {
   display: flex;

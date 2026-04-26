@@ -20,6 +20,7 @@ import platform
 import re
 import signal
 import subprocess
+import sys
 import time
 from datetime import datetime
 from typing import Any
@@ -2899,7 +2900,7 @@ def page_settings() -> None:
         if not _host_rs:
             st.error("❌ Please enter a server address.")
         else:
-            from vllm_mlx.dashboard.server_manager import _force_ipv4_url, _http as _sm_http, CONFIG_FILE, _ensure_state_dir
+            from vllm_mlx.dashboard.server_manager import _force_ipv4_url, _http as _sm_http
 
             _infer_url_save = f"http://{_host_rs}:{int(infer_port)}"
             _mgmt_url_save  = f"http://{_host_rs}:{int(mgmt_port_input)}"
@@ -3017,7 +3018,6 @@ def page_settings() -> None:
     with _fw_c1:
         _fw_label = "✅ Re-apply Firewall Rule" if _fw_done else "🔒 Fix Firewall (one-time)"
         if st.button(_fw_label, type="primary" if not _fw_done else "secondary", key="_fw_btn"):
-            from vllm_mlx.dashboard.server_manager import CONFIG_FILE, _ensure_state_dir
             try:
                 _res = subprocess.run([
                     "osascript", "-e",

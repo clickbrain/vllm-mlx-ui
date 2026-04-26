@@ -1,3 +1,13 @@
+<!--
+  BenchmarkPanel — run and display inference performance benchmarks.
+
+  Provides a form to select model, prompt count, and token limit; runs the
+  benchmark via modelsStore.runBenchmark(); and renders a bar chart (vue-chartjs)
+  comparing tokens/s across saved runs.
+
+  All historical results are persisted in modelsStore.benchmarkResults so they
+  survive navigation. The Saved tab lists past runs with delete controls.
+-->
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { Bar } from 'vue-chartjs'
@@ -50,21 +60,25 @@ const chartData = computed((): ChartData<'bar'> | null => {
   const results = modelsStore.benchmarkResults
   if (!results || results.length === 0) return null
 
-  const maxIdx = results.reduce(
+  // Only render bars for results with valid TPS
+  const valid = results.filter(r => r.avg_tps > 0 && !isNaN(r.avg_tps))
+  if (valid.length === 0) return null
+
+  const maxIdx = valid.reduce(
     (best, r, idx, arr) => (r.avg_tps > arr[best].avg_tps ? idx : best),
     0
   )
 
   return {
-    labels: results.map(r => r.model_id.split('/').pop() ?? r.model_id),
+    labels: valid.map(r => (r.model_id || '').split('/').pop() || r.model_id || '—'),
     datasets: [
       {
         label: 'Avg tokens/sec',
-        data: results.map(r => r.avg_tps),
-        backgroundColor: results.map((_, idx) =>
+        data: valid.map(r => r.avg_tps),
+        backgroundColor: valid.map((_, idx) =>
           idx === maxIdx ? 'rgba(245, 158, 11, 0.70)' : 'rgba(91, 106, 208, 0.70)'
         ),
-        borderColor: results.map((_, idx) =>
+        borderColor: valid.map((_, idx) =>
           idx === maxIdx ? '#F59E0B' : '#5B6AD0'
         ),
         borderWidth: 1,
@@ -222,16 +236,18 @@ function formatDate(ts: string): string {
               <th class="num">Median t/s</th>
               <th class="num">Min</th>
               <th class="num">Max</th>
+              <th class="num">TTFT (ms)</th>
               <th class="num">Runs</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="r in modelsStore.benchmarkResults" :key="r.model_id">
-              <td class="mono-cell">{{ r.model_id.split('/').pop() }}</td>
-              <td class="num mono-cell">{{ r.avg_tps.toFixed(1) }}</td>
-              <td class="num mono-cell">{{ r.median_tps.toFixed(1) }}</td>
-              <td class="num mono-cell">{{ r.min_tps.toFixed(1) }}</td>
-              <td class="num mono-cell">{{ r.max_tps.toFixed(1) }}</td>
+              <td class="mono-cell">{{ (r.model_id || '').split('/').pop() || r.model_id || '—' }}</td>
+              <td class="num mono-cell">{{ isNaN(r.avg_tps) ? '—' : r.avg_tps.toFixed(1) }}</td>
+              <td class="num mono-cell">{{ isNaN(r.median_tps) ? '—' : r.median_tps.toFixed(1) }}</td>
+              <td class="num mono-cell">{{ isNaN(r.min_tps) ? '—' : r.min_tps.toFixed(1) }}</td>
+              <td class="num mono-cell">{{ isNaN(r.max_tps) ? '—' : r.max_tps.toFixed(1) }}</td>
+              <td class="num mono-cell">{{ r.avg_ttft_ms !== undefined ? r.avg_ttft_ms.toFixed(0) : '—' }}</td>
               <td class="num mono-cell">{{ r.runs }}</td>
             </tr>
           </tbody>
@@ -265,8 +281,8 @@ function formatDate(ts: string): string {
         <div class="history-list">
           <div v-for="run in modelsStore.benchmarkHistory.slice(1)" :key="run.id" class="history-row">
             <span class="history-date">{{ formatDate(run.timestamp) }}</span>
-            <span class="history-models">{{ run.model_id.split('/').pop() }}</span>
-            <span class="history-tps">{{ run.avg_tps?.toFixed(1) }} t/s avg</span>
+            <span class="history-models">{{ (run.model_id || '').split('/').pop() || run.model_id || '—' }}</span>
+            <span class="history-tps">{{ run.avg_tps > 0 && !isNaN(run.avg_tps) ? run.avg_tps.toFixed(1) + ' t/s avg' : '—' }}</span>
             <button class="history-del" @click="modelsStore.deleteBenchmarkResult(run.id)" title="Delete">✕</button>
           </div>
         </div>

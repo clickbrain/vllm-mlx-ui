@@ -125,6 +125,16 @@ def _kill_stale_ui(ui_pid_file: Path) -> bool:
 
 
 def main() -> None:
+    """CLI entry point for ``vllm-mlx-ui``.
+
+    Handles ``--stop`` to terminate running instances, kills any stale previous
+    instance that is holding our ports, writes a PID file, optionally auto-starts
+    the inference server, opens the browser, then blocks serving the management
+    API + Vue UI until Ctrl-C or SIGTERM.
+
+    On SIGTERM or KeyboardInterrupt checks for a RELAUNCH_FLAG (written by the
+    upgrade workflow) and spawns a fresh process before exiting.
+    """
     # Handle --stop flag before anything else
     if "--stop" in sys.argv:
         stop_all()

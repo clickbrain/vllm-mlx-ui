@@ -5,10 +5,9 @@ Update checker for vllm-mlx-ui and its key dependencies.
 Checks for newer versions of:
 - vllm-mlx-ui (this project)  — compares installed commit hash vs latest commit on main
 - vllm-mlx (upstream engine)  — compares installed version vs latest GitHub tag
-- mlx-lm                      — compares installed version vs PyPI
 - huggingface-hub             — compares installed version vs PyPI
 
-Results are cached in session state for 1 hour to avoid hammering GitHub/PyPI.
+Results are cached in a module-level dict for 1 hour to avoid hammering GitHub/PyPI.
 """
 
 from __future__ import annotations
@@ -29,11 +28,21 @@ _cache: dict = {}
 
 
 class PackageInfo(NamedTuple):
-    name: str           # display name
-    installed: str      # currently installed version / commit
-    latest: str         # latest available version / commit
+    """Metadata for a single trackable package's update state.
+
+    Attributes:
+        name: Human-readable display name (e.g. "vllm-mlx (inference engine)").
+        installed: Currently installed version string or commit SHA.
+        latest: Latest available version string or commit SHA.
+        update_available: True when an upgrade is ready to install.
+        url: Link to the project's releases page or changelog.
+    """
+
+    name: str
+    installed: str
+    latest: str
     update_available: bool
-    url: str            # link to releases / changelog
+    url: str
 
 
 def _installed_version(package: str) -> str:

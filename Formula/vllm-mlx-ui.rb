@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+require "json"
 
 # Homebrew formula for vllm-mlx-ui
 # Tap:  brew tap clickbrain/vllm-mlx-ui https://github.com/clickbrain/vllm-mlx-ui
@@ -86,24 +87,48 @@ class VllmMlxUi < Formula
     end
   end
 
+  # ── Post-install: download starter model & write default config ──────────
+  def post_install
+    venv   = libexec/"venv"
+    python = venv/"bin/python3"
+    model  = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+
+    ohai "Downloading starter model: #{model} (~1.8 GB)"
+    ohai "This happens once. Grab a coffee ☕ — it takes a few minutes."
+
+    # Download the model into the default HuggingFace cache
+    system python, "-c", <<~PY
+      from huggingface_hub import snapshot_download
+      snapshot_download("#{model}")
+    PY
+
+    # Write the default config so the UI knows which model to use immediately
+    config_dir = Pathname("#{Dir.home}/.vllm_mlx_ui")
+    config_dir.mkpath
+    config_file = config_dir/"server_config.json"
+    unless config_file.exist?
+      config_file.write(JSON.generate({
+        "model"        => model,
+        "port"         => 8080,
+        "host"         => "127.0.0.1",
+        "max_tokens"   => 4096,
+        "context_size" => 8192,
+      }))
+    end
+
+    ohai "Starter model ready! Run: vllm-mlx-ui"
+  end
+
   # ── Post-install message ──────────────────────────────────
   def caveats
     <<~EOS
-      ✅  vllm-mlx and the dashboard UI are installed.
+      ✅  vllm-mlx is installed with a starter model ready to use.
 
-      To start the dashboard:
+      Start the dashboard:
           vllm-mlx-ui
 
-      The browser will open automatically at http://127.0.0.1:8502
-
-      Quick start:
-        1. Go to the Server page
-        2. Select a model from the dropdown and click ▶ Start Server
-        3. Go to Chat to start chatting!
-
-      To download the recommended starter model (~1.8 GB), run:
-          python3.11 -c "from huggingface_hub import snapshot_download; \\
-            snapshot_download('mlx-community/Llama-3.2-3B-Instruct-4bit')"
+      The browser opens automatically at http://127.0.0.1:8502
+      Click ▶ Start Server on the Serve page — the model loads in ~30s.
 
       Docs & source:  https://github.com/clickbrain/vllm-mlx-ui
     EOS

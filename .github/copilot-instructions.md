@@ -1,17 +1,72 @@
-# vllm-mlx Copilot Instructions
+# vllm-mlx-ui Copilot Instructions
 
-## Project Context: Kilroy Forge
-This repo is used for two things:
-1. **Kilroy Forge Dashboard** (`vllm_mlx/dashboard/`) — Streamlit UI distributed via Homebrew from `clickbrain/vllm-mlx-ui`. **This is the primary active work.**
-2. **Inference Engine** (`vllm_mlx/` except dashboard/) — upstream MLX inference server from `waybarrios/vllm-mlx`.
+## ⚠️ CRITICAL: WHO WE ARE — READ THIS FIRST
 
-**Deploy workflow (dashboard changes):**
+**This repo is `Clickbrain/vllm-mlx-ui`.**
+
+We are a **dashboard UI and management layer** built ON TOP of inference engines.
+We are NOT a fork. We are NOT an inference engine project.
+
+The inference engines (vllm-mlx, llama.cpp, Ollama, etc.) are **upstream packages we install**.
+We ALWAYS install them from their upstream repositories. We NEVER modify their source code.
+
+---
+
+## ⛔ THE ABSOLUTE HARD RULE
+
+**NEVER modify any file in `vllm_mlx/` except `vllm_mlx/dashboard/`.**
+
+The entire `vllm_mlx/` package (except `vllm_mlx/dashboard/`) is upstream code from
+`waybarrios/vllm-mlx`. It must be treated as a read-only installed dependency.
+
+Specifically, NEVER touch:
+- `vllm_mlx/server.py`
+- `vllm_mlx/engine/`
+- `vllm_mlx/api/`
+- `vllm_mlx/paged_cache.py`, `prefix_cache.py`, `ssd_cache.py`
+- `vllm_mlx/mcp/`
+- `vllm_mlx/models/`
+- `vllm_mlx/constrained/`
+- `vllm_mlx/reasoning/`
+- `vllm_mlx/tool_parsers/`
+- Any other `vllm_mlx/` file NOT inside `vllm_mlx/dashboard/`
+
+**If you find a bug in upstream engine code:**
+- Do NOT patch it here
+- Note it for a PR submission to the upstream project
+- Work around it via CLI args or UI settings if possible
+
+**Files we OWN and CAN freely modify:**
+- `vllm_mlx/dashboard/` — our management server backend
+- `ui/` — Vue 3 dashboard frontend
+- `docs/` — documentation
+- `tests/` — tests for our dashboard/UI code only
+- `scripts/` — build and deploy scripts
+- `.github/` — CI and Copilot config
+
+---
+
+## Project Identity
+
+**`Clickbrain/vllm-mlx-ui`** — a cross-platform UI for managing local AI inference.
+
+- Manages one or more inference engines (vllm-mlx, llama.cpp, Ollama, Remote)
+- Engines are INSTALLED packages, not our code
+- Our value: the dashboard, benchmarking, chat UI, model management, Kilroy Forge integration
+- Future product: **Kilroy Forge** — distributed AI inference swarm platform
+
+**Git remotes:**
+- `origin` → `https://github.com/clickbrain/vllm-mlx-ui.git` ← our repo
+- `upstream` → `https://github.com/waybarrios/vllm-mlx.git` ← pull only, never push, never modify
+
+**Deploy workflow:**
 ```bash
-bash scripts/validate_dashboard.sh                                              # must pass all 15 checks
+bash scripts/validate_dashboard.sh
 rsync -a --delete /Users/bradn/Documents/dev/vllm-mlx/ /tmp/vllm-mlx-ui-repo/ --exclude='.git'
-cd /tmp/vllm-mlx-ui-repo && git add -A && git commit -m "..." && git push      # push to clickbrain/vllm-mlx-ui
+cd /tmp/vllm-mlx-ui-repo && git add -A && git commit -m "..." && git push
 ```
-**Never push to `waybarrios/vllm-mlx` (upstream engine — pull only).**
+
+---
 
 ## Build & Install
 

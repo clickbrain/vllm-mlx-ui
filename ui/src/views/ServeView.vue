@@ -1,5 +1,18 @@
+<!--
+  ServeView — inference server control panel.
+
+  Provides:
+  - Server start / stop with model and parameter selection
+  - Live status metrics: uptime, tokens/s, active requests, memory
+  - API endpoint display (base URL + API key)
+  - Optimal Settings button: auto-configures parameters based on selected model
+
+  This is the primary landing view (`/` → `/serve`). All parameter changes
+  are reflected immediately to the server config via the settings store.
+-->
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
 import StatusPill from '@/components/shared/StatusPill.vue'
@@ -10,9 +23,10 @@ import EndpointCard from '@/components/serve/EndpointCard.vue'
 import MetricCard from '@/components/serve/MetricCard.vue'
 import { api } from '@/api/client'
 
+const router = useRouter()
+
 const serverStore = useServerStore()
 const modelsStore = useModelsStore()
-let stopPolling: (() => void) | null = null
 
 interface NetworkInterface {
   ip: string
@@ -27,12 +41,11 @@ const confirmClearPrefix = ref(false)
 const cacheMsg = ref<string | null>(null)
 
 onMounted(() => {
-  stopPolling = serverStore.startPolling()
   modelsStore.fetchModels()
   refreshLogs()
   api.get<NetworkInterface[]>('/network/interfaces').then(r => { networkInterfaces.value = r }).catch(() => {})
+  api.get<{ enabled: boolean }>('/auto_switch_enabled').then(r => { autoSwitchEnabled.value = r.enabled }).catch(() => {})
 })
-onUnmounted(() => { stopPolling?.() })
 
 const status = computed(() => {
   if (serverStore.loading) return 'loading' as const
@@ -72,6 +85,14 @@ async function refreshLogs() {
 // Model picker
 const switchingModel = ref(false)
 const switchError = ref<string | null>(null)
+
+// Show last 20 lines of crash log so the banner stays compact
+const crashLogTail = computed(() => {
+  const log = serverStore.crashLog
+  if (!log) return ''
+  const lines = log.split('\n')
+  return lines.slice(-20).join('\n')
+})
 
 async function handleModelSwitch(e: Event) {
   const target = e.target as HTMLSelectElement
@@ -121,6 +142,11 @@ async function saveConfig() {
 const serverPort = computed(() => serverStore.config?.port ?? 8080)
 const serverHost = computed(() => serverStore.config?.host ?? '127.0.0.1')
 const localOnly = computed(() => serverHost.value.startsWith('127'))
+const mgmtPort = computed(() => {
+  if (import.meta.env.DEV) return 8502
+  return parseInt(window.location.port || '8502', 10)
+})
+const autoSwitchEnabled = ref(false)
 
 function connectionUrl(ip: string) {
   return `http://${ip}:${serverPort.value}/v1`
@@ -137,6 +163,13 @@ const OPENAI_PATHS = [
 function openAiEndpoints(ip: string) {
   const base = `http://${ip}:${serverPort.value}`
   return OPENAI_PATHS.map(ep => ({ tag: ep.tag, path: ep.path, url: base + ep.path }))
+}
+
+function proxyEndpoints(ip: string) {
+  return [
+    { tag: 'Base URL', path: '/v1', url: `http://${ip}:${mgmtPort.value}/v1` },
+    { tag: 'Chat (auto-switch)', path: '/v1/chat/completions', url: `http://${ip}:${mgmtPort.value}/v1/chat/completions` },
+  ]
 }
 
 async function copyUrl(url: string) {
@@ -217,6 +250,15 @@ async function doClearCache(type: string) {
       <button class="error-dismiss" @click="switchError = null">✕</button>
     </div>
 
+    <!-- Server crash log -->
+    <div v-if="serverStore.crashLog && !serverStore.isRunning" class="crash-banner">
+      <div class="crash-header">
+        <span>⚠ Server failed to start</span>
+        <button class="error-dismiss" @click="serverStore.crashLog = null">✕</button>
+      </div>
+      <pre class="crash-log">{{ crashLogTail }}</pre>
+    </div>
+
     <!-- Connection endpoints -->
     <section class="page-section">
       <div class="section-label">Connection</div>
@@ -228,7 +270,11 @@ async function doClearCache(type: string) {
 
     <!-- Live metrics -->
     <section class="page-section">
-      <div class="section-label">Live Metrics</div>
+      <div class="section-label">
+        Live Metrics
+        <span v-if="serverStore.metricsError && serverStore.isRunning" class="metrics-stale-badge">metrics unavailable</span>
+        <button class="view-full-link" @click="router.push('/benchmarks')">View full metrics →</button>
+      </div>
       <div class="metrics-grid">
         <MetricCard label="Tokens / sec" :value="tps" />
         <MetricCard label="Memory Used" :value="memUsed" :unit="`/ ${memTotal} GB`" />
@@ -278,6 +324,35 @@ async function doClearCache(type: string) {
           </div>
         </div>
         <p v-else class="conn-empty">No network interfaces found.</p>
+
+        <!-- Proxy endpoints for auto-switch -->
+        <div v-if="networkInterfaces.length" class="conn-proxy-section">
+          <div class="conn-proxy-header">
+            <span class="conn-proxy-title">Via Dashboard Proxy</span>
+            <span class="conn-proxy-badge" :class="autoSwitchEnabled ? 'proxy-on' : 'proxy-off'">
+              Auto-switch {{ autoSwitchEnabled ? 'ON' : 'OFF' }}
+            </span>
+          </div>
+          <p class="conn-proxy-note">Use these URLs if you want automatic model switching — when a client requests a different model it will be loaded automatically and the client notified. Enable in Settings → Network &amp; Access → Auto Model Switch.</p>
+          <div v-for="iface in networkInterfaces" :key="'proxy-'+iface.ip" class="conn-iface-block">
+            <div class="conn-iface-label">{{ iface.label }} — {{ iface.ip }}</div>
+            <div class="conn-endpoint-table">
+              <div
+                v-for="ep in proxyEndpoints(iface.ip)"
+                :key="ep.path"
+                class="conn-endpoint-row"
+              >
+                <span class="ep-tag">{{ ep.tag }}</span>
+                <code class="ep-url">{{ ep.url }}</code>
+                <button
+                  class="copy-btn"
+                  :class="{ copied: copiedUrl === ep.url }"
+                  @click="copyUrl(ep.url)"
+                >{{ copiedUrl === ep.url ? '✓' : 'Copy' }}</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </CollapsibleSection>
 
@@ -409,6 +484,36 @@ async function doClearCache(type: string) {
   border-radius: 2px;
   flex-shrink: 0;
 }
+
+/* Shown when /metrics fetch fails while server is running */
+.metrics-stale-badge {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #f97316;
+  background: rgba(249, 115, 22, 0.10);
+  border: 1px solid rgba(249, 115, 22, 0.25);
+  border-radius: var(--r-pill);
+  padding: 1px 7px;
+}
+
+.view-full-link {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--tx-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 2px 6px;
+  border-radius: var(--r-md);
+  transition: color var(--transition-fast);
+}
+.view-full-link:hover { color: var(--tx-secondary); }
 
 .endpoint-grid {
   display: grid;
@@ -656,6 +761,46 @@ async function doClearCache(type: string) {
 
 .conn-empty { font-size: 12px; color: var(--tx-muted); font-style: italic; }
 
+/* Proxy section */
+.conn-proxy-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--bd-subtle);
+  margin-top: var(--space-2);
+}
+
+.conn-proxy-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.conn-proxy-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--tx-muted);
+}
+
+.conn-proxy-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+}
+.proxy-on { color: var(--ph-400); background: rgba(74,222,128,.10); border: 1px solid rgba(74,222,128,.25); }
+.proxy-off { color: var(--tx-muted); background: var(--bg-elevated); border: 1px solid var(--bd-subtle); }
+
+.conn-proxy-note {
+  font-size: 11.5px;
+  color: var(--tx-muted);
+  line-height: 1.5;
+}
+
 /* Error banner */
 .error-banner {
   display: flex;
@@ -680,6 +825,35 @@ async function doClearCache(type: string) {
   opacity: 0.7;
 }
 .error-dismiss:hover { opacity: 1; }
+
+/* Crash log banner */
+.crash-banner {
+  border: 1px solid rgba(239,68,68,.3);
+  border-radius: var(--r-md);
+  background: rgba(239,68,68,.06);
+  overflow: hidden;
+}
+.crash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--cr-300);
+}
+.crash-log {
+  margin: 0;
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--tx-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-top: 1px solid rgba(239,68,68,.15);
+  max-height: 220px;
+  overflow-y: auto;
+}
 
 /* Logs */
 .logs-body { min-height: 80px; }

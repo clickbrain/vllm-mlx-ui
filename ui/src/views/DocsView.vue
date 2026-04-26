@@ -1,3 +1,13 @@
+<!--
+  DocsView — in-app documentation viewer.
+
+  Fetches markdown content from /api/docs and renders it in-page so users
+  never leave the dashboard to read documentation. The sidebar is dynamically
+  built from the docs index returned by the API.
+
+  Navigation: anchors in the rendered HTML are intercepted and resolved
+  against the in-app docs tree rather than triggering full page loads.
+-->
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { marked } from 'marked'

@@ -727,6 +727,7 @@ class TestBlockAwarePrefixCache:
         assert stats["allocated_blocks"] == 1  # only null block
 
     def test_reconstructs_hybrid_cache_from_boundary_snapshot(self):
+        """Reconstructs hybrid cache from boundary snapshot."""
         from mlx_lm.models.cache import ArraysCache, KVCache
         import mlx.core as mx
 
@@ -777,6 +778,7 @@ class TestBlockAwarePrefixCache:
         assert reconstructed[1].state[1].tolist() == linear_state[1].tolist()
 
     def test_rejects_hybrid_prefix_without_boundary_snapshot(self):
+        """Rejects hybrid prefix without boundary snapshot."""
         from mlx_lm.models.cache import ArraysCache, KVCache
         import mlx.core as mx
 
@@ -817,6 +819,7 @@ class TestBlockAwarePrefixCache:
         assert cache.reconstruct_cache(prefix_table) is None
 
     def test_reconstructs_3d_kv_prefix_cache(self):
+        """Reconstructs 3d kv prefix cache."""
         from mlx_lm.models.cache import KVCache
         import mlx.core as mx
 

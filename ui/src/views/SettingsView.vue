@@ -1,3 +1,15 @@
+<!--
+  SettingsView — global configuration for the vmUI management server.
+
+  Sections:
+  - Remote Server: host/port/API key for connecting to a remote vmUI instance
+  - Authentication: management API key for securing the dashboard itself
+  - Network: bind host and port for the management server
+  - Startup: auto-start inference server on dashboard launch
+
+  Changes are saved via POST /api/settings and take effect immediately or on
+  next server restart depending on the setting type.
+-->
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useMachinesStore } from '@/stores/machines'

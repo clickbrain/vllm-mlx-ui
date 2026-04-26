@@ -314,16 +314,25 @@ class DownloadManager:
         return True
 
     def get_queue(self) -> list[dict]:
+        """Return a snapshot copy of the current download queue.
+
+        Returns:
+            List of item dicts with keys: model_id, status, pct, bytes_dl,
+            total_bytes, error.  Each dict is a copy — mutations do not affect
+            the internal queue.
+        """
         with self._lock:
             return [dict(i) for i in self._queue]
 
     def clear_finished(self) -> None:
+        """Remove all completed (done/error) entries from the queue."""
         with self._lock:
             self._queue = [
                 i for i in self._queue if i["status"] not in ("done", "error")
             ]
 
     def has_active(self) -> bool:
+        """Return True if any download is currently queued or in-progress."""
         with self._lock:
             return any(i["status"] in ("queued", "downloading") for i in self._queue)
 
@@ -763,18 +772,63 @@ def check_model_fit(
     }
 
 
+def _estimate_model_gb(model_id: str) -> float | None:
+    """Estimate model size in GB from model ID name patterns."""
+    id_lower = model_id.lower()
+
+    # Try to extract parameter count
+    param_match = re.search(r'(\d+(?:\.\d+)?)\s*[bB](?![a-z])', id_lower)
+    if not param_match:
+        return None
+
+    params_b = float(param_match.group(1))
+
+    # Estimate bits per parameter from quantization hints
+    if any(q in id_lower for q in ['8bit', '8-bit', 'q8', 'int8']):
+        bits = 8
+    elif any(q in id_lower for q in ['6bit', '6-bit', 'q6']):
+        bits = 6
+    elif any(q in id_lower for q in ['4bit', '4-bit', 'q4']):
+        bits = 4
+    elif any(q in id_lower for q in ['3bit', '3-bit', 'q3']):
+        bits = 3
+    elif any(q in id_lower for q in ['2bit', '2-bit', 'q2']):
+        bits = 2
+    elif any(q in id_lower for q in ['fp16', 'float16', 'bf16', 'bfloat16']):
+        bits = 16
+    else:
+        bits = 4  # default assumption for mlx-community models
+
+    # bytes = params * bits / 8, plus ~10% overhead
+    size_gb = (params_b * 1e9 * bits / 8) / (1024**3) * 1.1
+    return round(size_gb, 1)
+
+
 def search_hf_models(
     query: str = "",
     tags: list[str] | None = None,
     limit: int = 50,
+    offset: int = 0,
+    sort: str = "downloads",
 ) -> list[dict]:
     """Search all of HuggingFace Hub (not just mlx-community) via REST API."""
     import urllib.parse
 
+    # Map sort value to HF API sort parameter
+    hf_sort_map = {
+        "downloads": "downloads",
+        "likes": "likes",
+        "trending": "trendingScore",
+    }
+    hf_sort = hf_sort_map.get(sort, "downloads")
+
+    # Fetch enough results to support offset slicing
+    fetch_limit = min(offset + limit, 100)
+
     params: dict[str, Any] = {
-        "sort": "downloads",
+        "sort": hf_sort,
         "direction": "-1",
-        "limit": str(min(limit, 100)),
+        "limit": str(fetch_limit),
         "full": "false",
         "config": "false",
     }
@@ -785,6 +839,14 @@ def search_hf_models(
     elif tags:
         params["filter"] = ",".join(tags)
     url = "https://huggingface.co/api/models?" + urllib.parse.urlencode(params)
+
+    # Get total RAM for fit calculation
+    try:
+        import psutil
+        total_gb = psutil.virtual_memory().total / (1024**3)
+    except Exception:
+        total_gb = 0.0
+
     try:
         resp = _requests.get(url, timeout=15)
         resp.raise_for_status()
@@ -794,6 +856,10 @@ def search_hf_models(
             if not model_id:
                 continue
             model_tags = list(m.get("tags") or [])
+            size_gb = _estimate_model_gb(model_id)
+            fit_level = None
+            if size_gb is not None and total_gb > 0:
+                fit_level = _score_fit(size_gb, total_gb)
             results.append(
                 {
                     "id": model_id,
@@ -802,8 +868,10 @@ def search_hf_models(
                     "tags": model_tags,
                     "last_modified": str(m.get("lastModified") or ""),
                     "is_mlx": "mlx" in [t.lower() for t in model_tags],
+                    "size_gb": size_gb,
+                    "fit_level": fit_level,
                 }
             )
-        return results
+        return results[offset:offset + limit]
     except Exception as e:
         return [{"error": str(e)}]

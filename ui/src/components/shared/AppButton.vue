@@ -1,12 +1,16 @@
-<script setup lang="ts">
-import { computed } from 'vue'
+<!--
+  AppButton — standard button component with variant and loading state support.
 
-interface Props {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
-  size?: 'sm' | 'md'
-  loading?: boolean
-  disabled?: boolean
-}
+  Props:
+  - variant: 'primary' | 'secondary' (default) | 'ghost' | 'danger'
+  - size: 'sm' | 'md' (default)
+  - loading: shows a spinner and disables interaction
+  - disabled: disables without showing spinner
+
+  Forwards all other attrs (e.g. @click, type, title) to the native <button>.
+  Content is provided via the default slot.
+-->
+<script setup lang="ts">
 
 const props = withDefaults(defineProps<Props>(), {
   variant: 'secondary',
