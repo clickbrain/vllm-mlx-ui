@@ -6,6 +6,17 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
 
 ---
 
+## [0.3.37] — 2026-04-26
+
+### Fixed
+- **Version always showed `0.3.30`** — `importlib.metadata.version("vllm-mlx-ui")` silently
+  failed in dev/conda environments (the running Python had no package metadata for
+  vllm-mlx-ui), falling back to the stale hardcoded `"0.3.30"`. Replaced the try/except
+  pattern with a direct hardcoded version string in `__init__.py`, kept in sync with
+  `pyproject.toml` as part of our standard version bump process.
+
+---
+
 ## [0.3.36] — 2026-04-26
 
 ### Fixed
