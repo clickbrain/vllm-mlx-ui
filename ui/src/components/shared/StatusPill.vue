@@ -10,6 +10,11 @@
   Usage: <StatusPill :status="serverStore.status" />
 -->
 <script setup lang="ts">
+import { computed } from 'vue'
+
+interface Props {
+  status: 'running' | 'stopped' | 'loading' | 'error'
+}
 
 const props = defineProps<Props>()
 

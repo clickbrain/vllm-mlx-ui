@@ -13,6 +13,7 @@
  *  - Saved chats panel with New Chat (auto-saves current), Save, delete, load
  *  - Per-model inference parameters persisted to localStorage
  *  - Starter prompts in empty state
+ *  - Multimodal image/video attachment for MLLM models (auto-detected)
  */
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useServerStore } from '@/stores/server'
@@ -33,6 +34,8 @@ interface Message {
   reasoning?: string
   streaming?: boolean
   stopped?: boolean
+  /** Base64 data-URLs of images attached to a user message (multimodal only) */
+  images?: string[]
 }
 
 interface SavedChat {
@@ -114,6 +117,46 @@ const activeTitle = ref<string | null>(null)
 
 // AbortController for in-flight streaming requests
 let abortCtrl: AbortController | null = null
+
+// ── Multimodal attachment ─────────────────────────────────────────────────────
+// Only shown when the loaded model is MLLM (serverStore.isMultimodal).
+// Each entry is a base64 data-URL of the dropped/selected file.
+const attachedImages = ref<string[]>([])
+const imageInputEl = ref<HTMLInputElement | null>(null)
+
+/** Read a File as a base64 data-URL. */
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+async function onImageFiles(files: FileList | null) {
+  if (!files) return
+  for (const file of Array.from(files)) {
+    if (!file.type.startsWith('image/')) continue
+    const url = await fileToDataUrl(file)
+    attachedImages.value.push(url)
+  }
+}
+
+function onImageInputChange(e: Event) {
+  onImageFiles((e.target as HTMLInputElement).files)
+}
+
+function removeImage(idx: number) {
+  attachedImages.value.splice(idx, 1)
+}
+
+/** Handle drag-and-drop images onto the input area (only when multimodal). */
+async function onInputDrop(e: DragEvent) {
+  if (!serverStore.isMultimodal) return
+  e.preventDefault()
+  await onImageFiles(e.dataTransfer?.files ?? null)
+}
 
 // DOM refs
 const messagesEl = ref<HTMLElement | null>(null)
@@ -203,12 +246,27 @@ function buildBody(): Record<string, unknown> {
   const systemMsgs = systemPrompt.value.trim()
     ? [{ role: 'system', content: systemPrompt.value.trim() }]
     : []
+
+  // Build messages; user messages with attached images use the OpenAI
+  // multipart content array format instead of a plain string.
+  const msgList = chatStore.messages
+    .filter(m => !m.streaming)
+    .map(m => {
+      if (m.role === 'user' && m.images?.length) {
+        // Vision format: array of image_url + text content parts
+        const parts: unknown[] = m.images.map(url => ({
+          type: 'image_url',
+          image_url: { url },
+        }))
+        if (m.content) parts.push({ type: 'text', text: m.content })
+        return { role: m.role, content: parts }
+      }
+      return { role: m.role, content: m.content }
+    })
+
   const body: Record<string, unknown> = {
     model:       modelId.value ?? 'default',
-    messages: [
-      ...systemMsgs,
-      ...chatStore.messages.filter(m => !m.streaming).map(m => ({ role: m.role, content: m.content })),
-    ],
+    messages: [...systemMsgs, ...msgList],
     stream:              p.value.stream,
     temperature:         p.value.temperature,
     max_tokens:          p.value.maxTokens,
@@ -342,13 +400,17 @@ async function sendRequest() {
 // ── Public send (from input) ──────────────────────────────────────────────────
 async function send() {
   const text = input.value.trim()
-  if (!text || sending.value) return
+  const images = [...attachedImages.value]
+  if (!text && !images.length) return
+  if (sending.value) return
   if (!serverStore.isRunning) {
     error.value = 'The inference server is not running. Start it on the Serve page first.'
     return
   }
-  chatStore.addMessage({ role: 'user', content: text })
+  chatStore.addMessage({ role: 'user', content: text, images: images.length ? images : undefined })
   input.value = ''
+  attachedImages.value = []
+  if (imageInputEl.value) imageInputEl.value.value = ''
   resetInputHeight()
   activeTitle.value = null
   await sendRequest()
@@ -394,7 +456,11 @@ async function copyMessage(idx: number, content: string) {
 
 // ── Keyboard ──────────────────────────────────────────────────────────────────
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    // Allow sending with only an image attached (no text required for vision)
+    if (input.value.trim() || attachedImages.value.length) send()
+  }
 }
 
 // ── Chat management ───────────────────────────────────────────────────────────
@@ -560,6 +626,16 @@ onUnmounted(() => {
             :class="msg.role"
           >
             <div class="msg-content" :class="msg.role">
+              <!-- Attached images (user messages with multimodal content) -->
+              <div v-if="msg.images?.length" class="msg-images">
+                <img
+                  v-for="(img, imgIdx) in msg.images"
+                  :key="imgIdx"
+                  :src="img"
+                  class="msg-image-thumb"
+                  alt="Attached image"
+                />
+              </div>
               <div class="message-bubble" :class="{ streaming: msg.streaming, stopped: msg.stopped }">
                 <MarkdownMessage
                   v-if="msg.role === 'assistant'"
@@ -731,12 +807,45 @@ onUnmounted(() => {
         </div>
 
         <!-- Input row -->
-        <div class="input-row">
+        <div class="input-row" @dragover.prevent @drop="onInputDrop">
+          <!-- Image attachment preview strip (only visible for multimodal models) -->
+          <div v-if="serverStore.isMultimodal && attachedImages.length" class="image-preview-strip">
+            <div v-for="(img, idx) in attachedImages" :key="idx" class="preview-thumb-wrap">
+              <img :src="img" class="preview-thumb" alt="Image to send" />
+              <button class="remove-img-btn" title="Remove" @click="removeImage(idx)">×</button>
+            </div>
+          </div>
+
           <div class="textarea-wrap">
+            <!-- Hidden file input for image selection -->
+            <input
+              v-if="serverStore.isMultimodal"
+              ref="imageInputEl"
+              type="file"
+              accept="image/*"
+              multiple
+              style="display:none"
+              @change="onImageInputChange"
+            />
+            <!-- Image attach button — only shown for multimodal (MLLM) models -->
+            <button
+              v-if="serverStore.isMultimodal"
+              class="attach-img-btn"
+              title="Attach image(s)"
+              :disabled="sending"
+              @click="imageInputEl?.click()"
+            >
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
+                <rect x="2" y="4" width="16" height="13" rx="2"/>
+                <circle cx="7" cy="9" r="1.5"/>
+                <path d="M2 14l4-4 3 3 3-4 4 6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
             <textarea
               ref="inputEl"
               v-model="input"
               class="chat-input"
+              :class="{ 'with-attach': serverStore.isMultimodal }"
               placeholder="Message… (Enter to send, Shift+Enter for newline)"
               rows="1"
               :disabled="sending"
@@ -755,7 +864,7 @@ onUnmounted(() => {
               variant="primary"
               size="sm"
               :loading="false"
-              :disabled="!input.trim()"
+              :disabled="!input.trim() && !attachedImages.length"
               @click="send"
             >
               <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
@@ -763,7 +872,7 @@ onUnmounted(() => {
               </svg>
             </AppButton>
           </div>
-          <p class="input-hint">Enter to send · Shift+Enter for newline</p>
+          <p class="input-hint">Enter to send · Shift+Enter for newline<span v-if="serverStore.isMultimodal"> · Drag &amp; drop images</span></p>
         </div>
       </div>
     </div>
@@ -1058,6 +1167,83 @@ onUnmounted(() => {
 /* Subtle outline on stopped messages */
 .message-bubble.stopped {
   border-color: rgba(249, 115, 22, 0.30);
+}
+
+/* Image thumbnails attached to a user message */
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+  justify-content: flex-end;
+}
+.msg-image-thumb {
+  max-width: 220px;
+  max-height: 180px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--bd);
+  display: block;
+}
+
+/* Image preview strip above the input (pending images before send) */
+.image-preview-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 2px 4px;
+}
+.preview-thumb-wrap {
+  position: relative;
+}
+.preview-thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--bd);
+  display: block;
+}
+.remove-img-btn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  color: var(--tx2);
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.remove-img-btn:hover { background: var(--bg4); color: var(--tx1); }
+
+/* Image attach button in input row */
+.attach-img-btn {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  background: transparent;
+  border: none;
+  color: var(--tx3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+}
+.attach-img-btn:hover { color: var(--tx1); background: var(--bg3); }
+.attach-img-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Shift textarea right when attach button is visible */
+.chat-input.with-attach {
+  padding-left: 36px;
 }
 
 /* "(stopped)" label appended to aborted messages */

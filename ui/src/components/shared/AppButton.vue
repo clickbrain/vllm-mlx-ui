@@ -11,6 +11,14 @@
   Content is provided via the default slot.
 -->
 <script setup lang="ts">
+import { computed } from 'vue'
+
+interface Props {
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
+  size?: 'sm' | 'md'
+  loading?: boolean
+  disabled?: boolean
+}
 
 const props = withDefaults(defineProps<Props>(), {
   variant: 'secondary',

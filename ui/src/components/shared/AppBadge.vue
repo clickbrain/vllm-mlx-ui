@@ -9,6 +9,12 @@
   Content is provided via the default slot.
 -->
 <script setup lang="ts">
+import { computed } from 'vue'
+
+interface Props {
+  variant?: 'success' | 'warning' | 'error' | 'info' | 'neutral'
+  size?: 'sm' | 'md'
+}
 
 const props = withDefaults(defineProps<Props>(), {
   variant: 'neutral',

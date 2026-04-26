@@ -20,6 +20,12 @@ interface ServerStatus {
   healthy: boolean
   pid: number | null
   crash_log?: string
+  /** Health data from the inference server's /health endpoint */
+  health?: {
+    model_type?: 'llm' | 'mllm'
+    model_name?: string
+    [key: string]: unknown
+  }
 }
 
 export interface Metrics {
@@ -87,6 +93,12 @@ export const useServerStore = defineStore('server', () => {
   const totalCompletionTokens = computed(() => metrics.value?.total_completion_tokens ?? 0)
   const metalMemoryGb = computed(() => metrics.value?.metal?.active_memory_gb ?? null)
   const peakMemoryGb = computed(() => metrics.value?.metal?.peak_memory_gb ?? null)
+
+  /**
+   * True when the loaded model supports image/video inputs (mlx-vlm / MLLM).
+   * Derived from the health endpoint's model_type field ("mllm" vs "llm").
+   */
+  const isMultimodal = computed(() => status.value?.health?.model_type === 'mllm')
 
   /**
    * Returns tokens/sec as a number.
@@ -244,7 +256,7 @@ export const useServerStore = defineStore('server', () => {
 
   return {
     status, metrics, memory, config, loading, error, crashLog, metricsError, metricsHistory,
-    isRunning, memoryPercent, underPressure,
+    isRunning, memoryPercent, underPressure, isMultimodal,
     modelId, uptimeSeconds, tps, baseUrl,
     numRunning, numWaiting, totalRequests, totalPromptTokens, totalCompletionTokens,
     metalMemoryGb, peakMemoryGb,
