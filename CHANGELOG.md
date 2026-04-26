@@ -26,6 +26,18 @@ Dashboard UI version is tracked separately from the core vllm-mlx version.
   the manual formula-bump step that was causing stale tap versions.
 - Updated README install instructions to use the new tap (no explicit URL needed).
 
+## [0.3.41] — 2026-04-26
+
+### Fixed
+- **`post_install` fails with `PermissionError` on every upgrade** — `post_install` always
+  tried to re-download the starter model even when it was already cached from a prior install.
+  On upgrades, a running server holds a lock on the HuggingFace cache directory, causing
+  `[Errno 1] Operation not permitted`. Now checks for
+  `~/.cache/huggingface/hub/models--mlx-community--Llama-3.2-3B-Instruct-4bit` first and
+  skips the download entirely if the model is present.
+
+---
+
 ---
 
 ---
