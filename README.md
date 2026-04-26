@@ -102,7 +102,7 @@ This will:
 
 **Upgrading (curl install):**
 ```bash
-pip install --upgrade "git+https://github.com/clickbrain/vllm-mlx-ui.git#egg=vllm-mlx[ui]"
+bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/install.sh)
 ```
 
 **Uninstalling (curl install):**
@@ -141,7 +141,7 @@ This will:
 
 **Upgrading (remote install):**
 ```bash
-pip install --upgrade "git+https://github.com/clickbrain/vllm-mlx-ui.git#egg=vllm-mlx[ui]"
+bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/install-remote.sh)
 ```
 
 **Uninstalling (remote install):**
@@ -151,7 +151,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/clickbrain/vllm-mlx-ui/main/
 
 ---
 
-### Option C — Clone the repository (developers)
+### Option C — Clone the repository (contributors / developers)
+
+> **Regular users should use the Homebrew install (Option A1) instead.**
 
 ```bash
 git clone https://github.com/clickbrain/vllm-mlx-ui.git
@@ -459,7 +461,7 @@ No account required. No telemetry. No analytics. No backdoors.
 
 **Dashboard won't start:**
 ```bash
-pip install 'vllm-mlx[ui]'
+brew update && brew upgrade vllm-mlx-ui
 vllm-mlx-ui
 ```
 
