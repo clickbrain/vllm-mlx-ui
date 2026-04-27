@@ -249,6 +249,30 @@ const benchNumQuestions = ref(20)
 const cachedModels = computed(() => modelsStore.models.filter((m: { cached: boolean }) => m.cached))
 const benchSelectedModels = ref<string[]>([])
 
+// Model search/filter state (shared between Run Tests and Advisor)
+const modelSearch    = ref('')
+const modelSizeFilter = ref('all')
+const modelQuantFilter = ref('all')
+
+const filteredCachedModels = computed(() => {
+  const q = modelSearch.value.trim().toLowerCase()
+  return cachedModels.value.filter((m: { id: string; size_gb?: number; quantization?: string }) => {
+    if (q && !m.id.toLowerCase().includes(q)) return false
+    const gb = m.size_gb ?? 0
+    if (modelSizeFilter.value === '<4'  && gb >= 4)   return false
+    if (modelSizeFilter.value === '4-8'  && (gb < 4 || gb >= 8))  return false
+    if (modelSizeFilter.value === '8-16' && (gb < 8 || gb >= 16)) return false
+    if (modelSizeFilter.value === '>16' && gb < 16)  return false
+    if (modelQuantFilter.value !== 'all' && m.quantization !== modelQuantFilter.value) return false
+    return true
+  })
+})
+
+const availableQuants = computed(() => {
+  const quants = new Set(cachedModels.value.map((m: { quantization?: string }) => m.quantization).filter(Boolean))
+  return Array.from(quants).sort()
+})
+
 // Seed selection with the currently running model
 watch(
   () => serverStore.modelId,
@@ -262,6 +286,14 @@ function toggleBenchModel(id: string) {
   const idx = benchSelectedModels.value.indexOf(id)
   if (idx === -1) benchSelectedModels.value.push(id)
   else benchSelectedModels.value.splice(idx, 1)
+}
+
+function selectAllBenchModels() {
+  benchSelectedModels.value = filteredCachedModels.value.map((m: { id: string }) => m.id)
+}
+
+function clearBenchModels() {
+  benchSelectedModels.value = []
 }
 
 // Run state
@@ -550,6 +582,14 @@ function toggleAdvisorModel(id: string) {
   const idx = advisorModels.value.indexOf(id)
   if (idx === -1) advisorModels.value.push(id)
   else advisorModels.value.splice(idx, 1)
+}
+
+function selectAllAdvisorModels() {
+  advisorModels.value = filteredCachedModels.value.map((m: { id: string }) => m.id)
+}
+
+function clearAdvisorModels() {
+  advisorModels.value = []
 }
 
 // Score a model based on quality + speed results
@@ -1002,29 +1042,66 @@ watch(activeTab, (tab) => {
               <div v-if="cachedModels.length === 0" class="bench-no-models">
                 No downloaded models found — download a model on the Models page first.
               </div>
-              <div v-else class="bench-model-list">
-                <label
-                  v-for="m in cachedModels"
-                  :key="m.id"
-                  class="bench-check"
-                  :class="{ checked: benchSelectedModels.includes(m.id) }"
-                >
-                  <input
-                    type="checkbox"
-                    :disabled="benchRunning"
-                    :checked="benchSelectedModels.includes(m.id)"
-                    @change="toggleBenchModel(m.id)"
-                  />
-                  <div class="bench-check-info">
-                    <span class="bench-check-label mono">{{ m.id.split('/').pop() }}</span>
-                    <span class="bench-check-desc">{{ m.id.split('/')[0] }} &middot; {{ m.size_gb?.toFixed(1) ?? '?' }} GB</span>
+              <template v-else>
+                <!-- Search + filter bar -->
+                <div class="model-filter-bar">
+                  <div class="model-search-wrap">
+                    <svg class="model-search-icon" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="4" stroke="currentColor" stroke-width="1.4"/><path d="M10 10l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                    <input
+                      v-model="modelSearch"
+                      class="model-search-input"
+                      placeholder="Search models…"
+                      :disabled="benchRunning"
+                    />
+                    <button v-if="modelSearch" class="model-search-clear" @click="modelSearch = ''" :disabled="benchRunning">×</button>
                   </div>
-                  <span v-if="benchRunning && benchSelectedModels.includes(m.id)" class="bench-model-badge" :class="m.id === serverStore.modelId ? '' : 'badge-pending'">
-                    {{ m.id === serverStore.modelId ? 'running' : 'queued' }}
-                  </span>
-                  <span v-else-if="!benchRunning && m.id === serverStore.modelId" class="bench-model-badge">loaded</span>
-                </label>
-              </div>
+                  <div class="model-filter-row">
+                    <select v-model="modelSizeFilter" class="model-filter-select" :disabled="benchRunning">
+                      <option value="all">All sizes</option>
+                      <option value="<4">&lt; 4 GB</option>
+                      <option value="4-8">4 – 8 GB</option>
+                      <option value="8-16">8 – 16 GB</option>
+                      <option value=">16">&gt; 16 GB</option>
+                    </select>
+                    <select v-model="modelQuantFilter" class="model-filter-select" :disabled="benchRunning">
+                      <option value="all">All quant</option>
+                      <option v-for="q in availableQuants" :key="q" :value="q">{{ q }}</option>
+                    </select>
+                  </div>
+                  <div class="model-filter-actions">
+                    <span class="model-filter-count">{{ filteredCachedModels.length }} of {{ cachedModels.length }}</span>
+                    <button class="model-filter-link" :disabled="benchRunning" @click="selectAllBenchModels">All</button>
+                    <button class="model-filter-link" :disabled="benchRunning" @click="clearBenchModels">None</button>
+                  </div>
+                </div>
+
+                <div v-if="filteredCachedModels.length === 0" class="bench-no-models">
+                  No models match the current filters.
+                </div>
+                <div v-else class="bench-model-list">
+                  <label
+                    v-for="m in filteredCachedModels"
+                    :key="m.id"
+                    class="bench-check"
+                    :class="{ checked: benchSelectedModels.includes(m.id) }"
+                  >
+                    <input
+                      type="checkbox"
+                      :disabled="benchRunning"
+                      :checked="benchSelectedModels.includes(m.id)"
+                      @change="toggleBenchModel(m.id)"
+                    />
+                    <div class="bench-check-info">
+                      <span class="bench-check-label mono">{{ m.id.split('/').pop() }}</span>
+                      <span class="bench-check-desc">{{ m.id.split('/')[0] }} &middot; {{ m.size_gb?.toFixed(1) ?? '?' }} GB &middot; {{ m.quantization }}</span>
+                    </div>
+                    <span v-if="benchRunning && benchSelectedModels.includes(m.id)" class="bench-model-badge" :class="m.id === serverStore.modelId ? '' : 'badge-pending'">
+                      {{ m.id === serverStore.modelId ? 'running' : 'queued' }}
+                    </span>
+                    <span v-else-if="!benchRunning && m.id === serverStore.modelId" class="bench-model-badge">loaded</span>
+                  </label>
+                </div>
+              </template>
             </div>
 
             <!-- Divider -->
@@ -1478,24 +1555,59 @@ watch(activeTab, (tab) => {
           </div>
 
           <div class="bench-section-label" style="margin-top:var(--space-4)">Models to evaluate</div>
-          <div class="bench-model-list">
-            <div v-if="cachedModels.length === 0" class="bench-no-models">
-              No downloaded models — download one on the Models page.
-            </div>
-            <label
-              v-else
-              v-for="m in cachedModels"
-              :key="m.id"
-              class="bench-check"
-              :class="{ checked: advisorModels.includes(m.id) }"
-            >
-              <input type="checkbox" :disabled="advisorRunning" :checked="advisorModels.includes(m.id)" @change="toggleAdvisorModel(m.id)" />
-              <div class="bench-check-info">
-                <span class="bench-check-label mono">{{ m.id.split('/').pop() }}</span>
-                <span class="bench-check-desc">{{ m.id.split('/')[0] }} · {{ m.size_gb?.toFixed(1) ?? '?' }} GB</span>
-              </div>
-            </label>
+          <div v-if="cachedModels.length === 0" class="bench-no-models">
+            No downloaded models — download one on the Models page.
           </div>
+          <template v-else>
+            <!-- Search + filter bar -->
+            <div class="model-filter-bar" style="margin-bottom:8px">
+              <div class="model-search-wrap">
+                <svg class="model-search-icon" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="4" stroke="currentColor" stroke-width="1.4"/><path d="M10 10l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                <input
+                  v-model="modelSearch"
+                  class="model-search-input"
+                  placeholder="Search models…"
+                  :disabled="advisorRunning"
+                />
+                <button v-if="modelSearch" class="model-search-clear" @click="modelSearch = ''" :disabled="advisorRunning">×</button>
+              </div>
+              <div class="model-filter-row">
+                <select v-model="modelSizeFilter" class="model-filter-select" :disabled="advisorRunning">
+                  <option value="all">All sizes</option>
+                  <option value="<4">&lt; 4 GB</option>
+                  <option value="4-8">4 – 8 GB</option>
+                  <option value="8-16">8 – 16 GB</option>
+                  <option value=">16">&gt; 16 GB</option>
+                </select>
+                <select v-model="modelQuantFilter" class="model-filter-select" :disabled="advisorRunning">
+                  <option value="all">All quant</option>
+                  <option v-for="q in availableQuants" :key="q" :value="q">{{ q }}</option>
+                </select>
+              </div>
+              <div class="model-filter-actions">
+                <span class="model-filter-count">{{ filteredCachedModels.length }} of {{ cachedModels.length }}</span>
+                <button class="model-filter-link" :disabled="advisorRunning" @click="selectAllAdvisorModels">All</button>
+                <button class="model-filter-link" :disabled="advisorRunning" @click="clearAdvisorModels">None</button>
+              </div>
+            </div>
+            <div v-if="filteredCachedModels.length === 0" class="bench-no-models">
+              No models match the current filters.
+            </div>
+            <div v-else class="bench-model-list">
+              <label
+                v-for="m in filteredCachedModels"
+                :key="m.id"
+                class="bench-check"
+                :class="{ checked: advisorModels.includes(m.id) }"
+              >
+                <input type="checkbox" :disabled="advisorRunning" :checked="advisorModels.includes(m.id)" @change="toggleAdvisorModel(m.id)" />
+                <div class="bench-check-info">
+                  <span class="bench-check-label mono">{{ m.id.split('/').pop() }}</span>
+                  <span class="bench-check-desc">{{ m.id.split('/')[0] }} · {{ m.size_gb?.toFixed(1) ?? '?' }} GB · {{ m.quantization }}</span>
+                </div>
+              </label>
+            </div>
+          </template>
 
           <div class="bench-run-row" style="margin-top:var(--space-4)">
             <AppButton
@@ -1936,6 +2048,46 @@ watch(activeTab, (tab) => {
 
 .bench-model-list { display: flex; flex-direction: column; gap: 6px; }
 .bench-no-models { font-size: 14px; color: var(--tx-muted); padding: 8px 0; }
+
+/* Model search + filter bar */
+.model-filter-bar { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.model-search-wrap {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--bg-elevated); border: 1px solid var(--bd-default);
+  border-radius: 7px; padding: 0 10px; height: 34px;
+  transition: border-color 0.15s;
+}
+.model-search-wrap:focus-within { border-color: var(--si-400); }
+.model-search-icon { width: 14px; height: 14px; color: var(--tx-muted); flex-shrink: 0; }
+.model-search-input {
+  flex: 1; background: none; border: none; outline: none;
+  font-size: 14px; color: var(--tx-primary);
+}
+.model-search-input::placeholder { color: var(--tx-muted); }
+.model-search-clear {
+  background: none; border: none; cursor: pointer; color: var(--tx-muted);
+  font-size: 16px; line-height: 1; padding: 0 2px;
+  transition: color 0.15s;
+}
+.model-search-clear:hover { color: var(--tx-primary); }
+.model-filter-row { display: flex; gap: 8px; }
+.model-filter-select {
+  flex: 1; background: var(--bg-elevated); border: 1px solid var(--bd-default);
+  border-radius: 6px; color: var(--tx-primary); padding: 4px 8px; font-size: 13px;
+  cursor: pointer; transition: border-color 0.15s;
+}
+.model-filter-select:focus { border-color: var(--si-400); outline: none; }
+.model-filter-actions {
+  display: flex; align-items: center; gap: 10px;
+}
+.model-filter-count { font-size: 12px; color: var(--tx-muted); flex: 1; }
+.model-filter-link {
+  background: none; border: none; cursor: pointer; font-size: 12px;
+  color: var(--si-400); padding: 0; text-decoration: underline; text-underline-offset: 2px;
+  transition: opacity 0.15s;
+}
+.model-filter-link:hover { opacity: 0.75; }
+.model-filter-link:disabled { opacity: 0.4; cursor: default; }
 .bench-model-badge {
   font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
   padding: 2px 6px; border-radius: 4px; background: color-mix(in srgb, var(--si-400) 15%, transparent);
