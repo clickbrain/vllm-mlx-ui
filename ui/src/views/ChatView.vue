@@ -15,12 +15,14 @@
  *  - Starter prompts in empty state
  *  - Multimodal image/video attachment for MLLM models (auto-detected)
  */
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, onActivated, defineOptions } from 'vue'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
 import { useChatStore } from '@/stores/chat'
 import AppButton from '@/components/shared/AppButton.vue'
 import MarkdownMessage from '@/components/chat/MarkdownMessage.vue'
+
+defineOptions({ name: 'ChatView' })
 
 const serverStore = useServerStore()
 const modelsStore = useModelsStore()
@@ -528,6 +530,11 @@ onMounted(() => {
   nextTick(() => scrollToBottom(true))
 })
 
+// When user returns to the Chat tab, scroll to bottom so the latest message is visible
+onActivated(() => {
+  nextTick(() => scrollToBottom(false))
+})
+
 onUnmounted(() => {
   abortCtrl?.abort()
 })
@@ -728,12 +735,19 @@ onUnmounted(() => {
             </label>
 
             <!-- Task mode selector -->
-            <div class="task-mode-group" title="Select your task type — Optimal will tune parameters accordingly">
+            <div class="task-mode-group">
               <button
                 v-for="m in (['chat','code','creative','analysis','precise'] as const)"
                 :key="m"
                 class="task-mode-btn"
                 :class="{ active: taskMode === m }"
+                :title="({
+                  chat:     'Chat — Balanced, conversational (temp 0.7). Click Optimal to apply.',
+                  code:     'Code — Accurate code generation, low randomness (temp 0.2). Click Optimal to apply.',
+                  creative: 'Creative — High diversity for writing and brainstorming (temp 1.0). Click Optimal to apply.',
+                  analysis: 'Analysis — Careful, structured reasoning (temp 0.4). Click Optimal to apply.',
+                  precise:  'Precise — Factual, minimal responses (temp 0.1). Click Optimal to apply.',
+                } as Record<string,string>)[m]"
                 @click="setTaskMode(m)"
               >{{ m }}</button>
             </div>
@@ -743,7 +757,7 @@ onUnmounted(() => {
               :class="{ applied: optimalApplied }"
               :disabled="!modelId || loadingOptimal"
               @click="applyOptimalSettings"
-              :title="`Apply optimal parameters for ${taskMode} tasks using this model`"
+              :title="`Apply temperature, top-p, repeat-penalty, and max-tokens tuned for '${taskMode}' tasks with this specific model`"
             >
               <svg viewBox="0 0 20 20" fill="currentColor" width="11" height="11"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
               {{ loadingOptimal ? 'Loading…' : optimalApplied ? '✓ Applied' : 'Optimal' }}

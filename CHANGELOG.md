@@ -1,4 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.57 — 2026-04-27
+
+- Chat: navigating to another tab no longer aborts an in-progress generation — conversation continues in the background (`KeepAlive` + `defineOptions({ name: 'ChatView' })`)
+- Chat: returning to the Chat tab auto-scrolls to the latest message via `onActivated`
+- Chat: each mode button (Chat, Code, Creative, Analysis, Precise) now has a descriptive tooltip explaining its temperature setting and what it's suited for
+- Chat: Optimal button tooltip clarifies that it tunes temperature, top-p, repeat-penalty, and max-tokens for the selected mode + model
+
 ## v0.3.56 — 2026-04-27
 
 - Docs: bundled full documentation into `vllm_mlx/dashboard/docs_dist/` so docs work in the Homebrew-installed version (fixes "404" error in Docs tab)
