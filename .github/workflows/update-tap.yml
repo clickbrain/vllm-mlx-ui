@@ -12,6 +12,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.TAP_DEPLOY_TOKEN }}
+          ref: main
+          fetch-depth: 0
 
       - name: Get version from tag
         id: version
