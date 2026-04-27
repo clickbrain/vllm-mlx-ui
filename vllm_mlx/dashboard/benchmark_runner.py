@@ -458,6 +458,8 @@ def run_custom_benchmark(
     save_result(result)
     return result
 
+
+_TEST_PROMPTS = [
     "Explain the concept of machine learning in simple terms.",
     "Write a short story about a robot learning to paint.",
     "What are the key differences between Python and JavaScript?",
