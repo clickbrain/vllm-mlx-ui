@@ -682,14 +682,22 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
     if not config.get("model", "").strip():
         return False, "No model specified. Set a model in the configuration below."
 
-    # Check for a stale server occupying the port BEFORE spending minutes loading
     port = int(config.get("port", 8000))
     host = config.get("host", "127.0.0.1")
+
+    # Check for a stale server occupying the port BEFORE spending minutes loading.
+    # Brief retry loop: a just-stopped server may take a moment to release the port
+    # even after the process exits (kernel socket cleanup).
     if _port_in_use(port, host):
-        return False, (
-            f"⚠️ Port {port} is already in use by a previous server session.\n"
-            f"Click **Kill stale server** below to free the port, then try again."
-        )
+        for _ in range(10):
+            time.sleep(0.5)
+            if not _port_in_use(port, host):
+                break
+        else:
+            return False, (
+                f"⚠️ Port {port} is already in use by a previous server session.\n"
+                f"Click **Kill stale server** below to free the port, then try again."
+            )
 
     global _last_crash_log, _intentional_stop_in_progress
     save_config(config)
@@ -753,6 +761,12 @@ def stop_server() -> tuple[bool, str]:
                 break
         else:
             os.kill(pid, signal.SIGKILL)
+            # SIGKILL is asynchronous — wait for the kernel to actually kill the
+            # process and release its port before we return to the caller.
+            for _ in range(10):
+                time.sleep(0.2)
+                if not _is_process_alive(pid):
+                    break
         PID_FILE.unlink(missing_ok=True)
         return True, "Server stopped."
     except Exception as e:

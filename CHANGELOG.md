@@ -1,4 +1,9 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.67 — 2026-04-28
+
+- Fix: **3-model benchmark (2/3 ran bug)** — `stop_server()` sent SIGKILL but didn't wait for the process to die before returning; `start_server()` now also retries the port-in-use check for up to 5s before failing; added stop_server warning to quality benchmark log so failures are visible
+- Fix: **Speed (tok/s) and TTFT always showing `—` for quality/combined runs** — quality benchmark results were saved without `avg_tps`/`avg_ttft_ms` flat fields and `overall_speed`; fixed backend to include all three; also updated frontend `parseTps`/`parseTtft` to read `overall_speed` so existing history records show speed metrics too
+
 ## v0.3.66 — 2026-04-27
 
 - Fix: **Benchmark run persists when navigating away** — moved run state (`benchRunning`, `qualityPhase`, `qualityLines`, `qualityRunId`, etc.) into a singleton Pinia store (`benchmarkRun`); polling timers moved to module-level variables outside `setup()` so they survive component remount regardless of KeepAlive behaviour; reconnect logic on `onMounted` re-attaches poll if a run is active; `onUnmounted` no longer stops polls while a run is in progress

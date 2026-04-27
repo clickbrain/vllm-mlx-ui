@@ -1089,7 +1089,9 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
                     cfg = sm.load_config()
                     cfg["model"] = target_model
                     sm.save_config(cfg)
-                    sm.stop_server()
+                    stop_ok, stop_msg = sm.stop_server()
+                    if not stop_ok:
+                        _cb(f"[⚠ stop_server: {stop_msg}]\n")
                     ok, msg = sm.start_server(cfg)
                     if not ok:
                         _cb(f"[✗ Could not start {target_model}: {msg}]\n")
@@ -1132,6 +1134,7 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
                     stop_event=stop_event,
                 )
                 all_results.append(results)
+                overall_speed = results.get("overall_speed", {})
                 br.save_result({
                     "model": results.get("model", target_model),
                     "model_id": results.get("model", target_model),
@@ -1139,6 +1142,9 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
                     "benchmark_type": "quality",
                     "suites": results.get("suites", {}),
                     "overall_score": results.get("overall_score", 0.0),
+                    "overall_speed": overall_speed,
+                    "avg_tps": overall_speed.get("avg_tokens_per_sec"),
+                    "avg_ttft_ms": overall_speed.get("avg_ttft_ms"),
                     "success": True,
                     "label": label,
                 })

@@ -328,6 +328,12 @@ export const useModelsStore = defineStore('models', () => {
           max_tps: t.generation_max ?? t.generation_mean ?? 0,
         }
       }
+      // Quality benchmark results store speed under overall_speed.avg_tokens_per_sec
+      if (r.overall_speed && typeof r.overall_speed === 'object' && !Array.isArray(r.overall_speed)) {
+        const os = r.overall_speed as Record<string, number>
+        const tps = os.avg_tokens_per_sec ?? 0
+        return { avg_tps: tps, median_tps: tps, min_tps: tps, max_tps: tps }
+      }
       // Flat numeric fallback for older or custom records
       const flat = Number(r.avg_tps ?? r.tokens_per_second ?? 0)
       return {
@@ -344,6 +350,11 @@ export const useModelsStore = defineStore('models', () => {
         return (raw as Record<string, number>).mean
       }
       if (r.avg_ttft_ms !== undefined) return Number(r.avg_ttft_ms)
+      // Quality benchmark results store TTFT under overall_speed.avg_ttft_ms
+      if (r.overall_speed && typeof r.overall_speed === 'object' && !Array.isArray(r.overall_speed)) {
+        const os = r.overall_speed as Record<string, number>
+        if (os.avg_ttft_ms !== undefined) return Number(os.avg_ttft_ms)
+      }
       return undefined
     }
 
