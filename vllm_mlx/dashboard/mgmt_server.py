@@ -530,6 +530,7 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
     config: dict[str, Any] = req.get("config", {})
     runs = int(config.get("runs", 3))
     max_tokens = int(config.get("max_tokens", 256))
+    label = req.get("label", "") or config.get("label", "")
 
     if not model_ids:
         with _benchmark_lock:
@@ -549,6 +550,7 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
                         server_url=server_url,
                         prompts=runs,
                         max_tokens=max_tokens,
+                        label=label,
                     )
                 else:
                     br.run_benchmark(model_id, prompts=runs, max_tokens=max_tokens)
@@ -1041,10 +1043,12 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
     import uuid
     suites = req.get("suites", ["gsm8k"])
     num_questions = int(req.get("num_questions", 20))
+    label = req.get("label", "")
     server_url = sm.get_server_url()
 
     run_id = str(uuid.uuid4())[:8]
-    _quality_runs[run_id] = {"running": True, "lines": [], "results": None, "error": None}
+    stop_event = threading.Event()
+    _quality_runs[run_id] = {"running": True, "lines": [], "results": None, "error": None, "stop_event": stop_event, "label": label}
 
     def _run() -> None:
         def _cb(line: str) -> None:
@@ -1056,6 +1060,7 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
                 server_url=server_url,
                 num_questions=num_questions,
                 output_callback=_cb,
+                stop_event=stop_event,
             )
             _quality_runs[run_id]["results"] = results
             # Persist to shared benchmark history so it appears in /benchmarks
@@ -1067,6 +1072,7 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
                 "suites": results.get("suites", {}),
                 "overall_score": results.get("overall_score", 0.0),
                 "success": True,
+                "label": label,
             })
         except Exception as exc:
             _quality_runs[run_id]["error"] = str(exc)
@@ -1092,6 +1098,18 @@ def quality_benchmark_output(run_id: str, since: int = 0, _: None = Depends(_che
         "error": run.get("error"),
         "total_lines": len(run["lines"]),
     }
+
+
+@app.post("/quality-benchmark/stop/{run_id}")
+def stop_quality_benchmark(run_id: str, _: None = Depends(_check_auth)) -> dict:
+    """Set the stop flag on a running quality benchmark."""
+    if run_id not in _quality_runs:
+        raise HTTPException(status_code=404, detail="Unknown run_id")
+    stop_event = _quality_runs[run_id].get("stop_event")
+    if stop_event:
+        stop_event.set()
+    _quality_runs[run_id]["running"] = False
+    return {"ok": True}
 
 
 import os as _os_mod

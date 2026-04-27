@@ -1,4 +1,19 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.53 — 2026-04-27
+
+- UI: Benchmark tab renamed "Run Tests"; run button renamed "Run Benchmarks"
+- UI: Run Tests — add optional run name field to label benchmark runs in history
+- UI: Run Tests — Stop Run button to cancel in-flight benchmarks (sets stop flag on quality runner)
+- UI: Run Tests — quality log shown inline in right column directly below the Run button
+- UI: Run Tests — model list now shows `running` / `queued` / `loaded` states during a run
+- Backend: `/quality-benchmark/stop/{run_id}` endpoint — signals the quality runner to stop between questions
+- Backend: `run_quality_benchmark` accepts `stop_event: threading.Event` to support graceful stop
+- Backend: `label` field saved with both speed and quality benchmark results
+- UI: History — search/filter bar (by model name or label, type filter: All/Speed/Quality)
+- UI: History — run labels displayed in history rows
+- UI: History — Compare panel adds visual bar charts for Speed (tok/s) and Quality (overall %)
+- UI: Live tab — chart range selector for Requests Over Time and GPU Memory charts (1h / 6h / 24h); defaults to 24h
+
 ## v0.3.52 — 2026-04-27
 
 - Fix: Memory Used and Memory % now show consistent values — both now derived from `(total - available)` rather than psutil's `vm.used` which under-reports on macOS
