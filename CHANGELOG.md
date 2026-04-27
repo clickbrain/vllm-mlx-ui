@@ -1,4 +1,12 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.72 — 2026-04-27
+
+- Release: Re-release of v0.3.71 with formula update and fix for missing `_TEST_PROMPTS` definition that would cause a `NameError` when running the speed benchmark
+
+## v0.3.71 — 2026-04-27
+
+- Feature: **Custom Prompts benchmark mode** — new "Custom Prompts" tab in Run Tests; enter your own prompts, run them against any cached model, and get a per-prompt results table showing TTFT, tok/s, and total response time; results saved to benchmark history with `benchmark_type: custom`
+
 ## v0.3.70 — 2026-04-27
 
 - Fix: **Speed benchmark no longer reports impossible T/s values** (e.g. 6430 T/s for a 9B model) — root causes: (1) `gen_time` was measured from first content token to last SSE frame including non-content frames, so a buffered response gave near-zero gen_time → astronomical TPS; (2) token count used word-splitting (~0.75× real tokens). Fixed by tracking `last_content_time` (updated only on content chunks), using server-reported `completion_tokens` via `stream_options: {include_usage: true}`, falling back to `chars / 4` estimate, and skipping any run where all tokens arrived in under 100 ms (buffered stream — TPS is physically unmeasurable)
