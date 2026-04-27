@@ -189,12 +189,22 @@ export const useModelsStore = defineStore('models', () => {
           }
         }
       } catch {
-        window.clearInterval(interval)
-        delete pollIntervals[modelId]
+        // Don't clear the interval on a transient network error — keep the
+        // item visible and retry on the next tick.
       }
     }, 2000)
 
     pollIntervals[modelId] = interval
+  }
+
+  /** Re-attach polling for any downloads that are still in-progress but have
+   *  no active poll interval (e.g. after navigating away and back). */
+  function resumeActiveDownloadPolls() {
+    for (const item of downloadQueue.value) {
+      if (item.status === 'queued' || item.status === 'downloading') {
+        pollDownloadStatus(item.id)
+      }
+    }
   }
 
   async function loadModel(modelId: string) {
@@ -435,7 +445,7 @@ export const useModelsStore = defineStore('models', () => {
     benchmarkResults, benchmarkHistory, benchmarking, benchmarkRunning,
     bestBenchmarkPerModel,
     loadingModelId, actionError, serverRestartingFor,
-    fetchModels, downloadModel, pollDownloadStatus,
+    fetchModels, downloadModel, pollDownloadStatus, resumeActiveDownloadPolls,
     loadModel, deleteModel,
     searchHF, searchHFMore,
     runBenchmark, fetchBenchmarkResults, deleteBenchmarkResult, clearAllBenchmarks,

@@ -10,7 +10,7 @@
   helping users choose models before downloading.
 -->
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import { useModelsStore } from '@/stores/models'
 import { useServerStore } from '@/stores/server'
 import { useRouter } from 'vue-router'
@@ -227,6 +227,14 @@ async function handleDownload(modelId: string) {
 onMounted(() => {
   modelsStore.actionError = null
   modelsStore.fetchModels()
+  modelsStore.resumeActiveDownloadPolls()
+})
+
+// When navigating back to this tab (KeepAlive), refresh model list and
+// re-attach any download polls that may have been interrupted.
+onActivated(() => {
+  modelsStore.fetchModels()
+  modelsStore.resumeActiveDownloadPolls()
 })
 
 watch(activeTab, (tab) => {
