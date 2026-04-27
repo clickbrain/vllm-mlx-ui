@@ -235,6 +235,10 @@ def grade_humaneval(response: str, entry_point: str, test_code: str) -> tuple[bo
 
 # ── Main runner ───────────────────────────────────────────────────────────────
 
+import json
+import time as _time
+
+
 def _get_model_name(server_url: str) -> str:
     """Fetch the loaded model name from /v1/models."""
     try:
@@ -249,6 +253,69 @@ def _get_model_name(server_url: str) -> str:
     return "unknown"
 
 
+def _stream_completion(
+    server_url: str,
+    messages: list[dict],
+    max_tokens: int,
+    temperature: float = 0.0,
+    timeout: int = 90,
+) -> tuple[str, float | None, float, int, float]:
+    """
+    Stream a single chat completion and return timing metrics.
+
+    Returns:
+        (text, ttft_ms, total_ms, completion_tokens, tokens_per_sec)
+    """
+    t_start = _time.monotonic()
+    t_first: float | None = None
+    chunks: list[str] = []
+    token_count = 0
+
+    with requests.post(
+        f"{server_url}/v1/chat/completions",
+        json={
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        },
+        stream=True,
+        timeout=timeout,
+    ) as resp:
+        resp.raise_for_status()
+        for raw_line in resp.iter_lines():
+            if not raw_line:
+                continue
+            line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+            if not line.startswith("data: "):
+                continue
+            payload = line[6:].strip()
+            if payload == "[DONE]":
+                break
+            try:
+                obj = json.loads(payload)
+                content = obj["choices"][0]["delta"].get("content", "")
+                if content:
+                    if t_first is None:
+                        t_first = _time.monotonic()
+                    chunks.append(content)
+                    token_count += 1
+            except Exception:
+                pass
+
+    t_end = _time.monotonic()
+    text = "".join(chunks)
+    ttft_ms = (t_first - t_start) * 1000.0 if t_first is not None else None
+    total_ms = (t_end - t_start) * 1000.0
+    # Estimate completion tokens: SSE chunks are roughly 1 token each; use
+    # char-count fallback (avg 4 chars/token) as a sanity floor.
+    completion_tokens = max(token_count, len(text) // 4)
+    elapsed_s = (t_end - t_start) or 1e-6
+    tps = completion_tokens / elapsed_s
+    return text, ttft_ms, total_ms, completion_tokens, tps
+
+
+
 def run_quality_benchmark(
     suites: list[str],
     server_url: str,
@@ -256,8 +323,10 @@ def run_quality_benchmark(
     output_callback: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """
-    Run selected quality benchmark suites against the live server.
-    Returns structured results dict with per-suite accuracy.
+    Run selected quality benchmark suites against the live server using streaming.
+
+    Each question is streamed so TTFT and tok/s are captured alongside accuracy.
+    Returns structured results dict with per-suite accuracy and speed metrics.
     """
 
     def _cb(line: str) -> None:
@@ -289,9 +358,11 @@ def run_quality_benchmark(
         correct = 0
         total = len(questions)
         details: list[dict[str, Any]] = []
+        ttft_list: list[float] = []
+        tps_list: list[float] = []
+        total_tokens = 0
 
         for i, q in enumerate(questions, start=1):
-            # Build user message
             if suite == "mmlu":
                 choices_text = "\n".join(f"{k}. {v}" for k, v in q["choices"].items())
                 user_msg = f"{q['question']}\n\n{choices_text}"
@@ -300,79 +371,103 @@ def run_quality_benchmark(
             else:
                 user_msg = q["question"]
 
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg},
+            ]
+
             response_text = ""
+            ttft_ms: float | None = None
             try:
-                resp = requests.post(
-                    f"{server_url}/v1/chat/completions",
-                    json={
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_msg},
-                        ],
-                        "temperature": 0.0,
-                        "max_tokens": max_tokens,
-                    },
-                    timeout=60,
+                response_text, ttft_ms, _total_ms, comp_tokens, tps = _stream_completion(
+                    server_url, messages, max_tokens
                 )
-                resp.raise_for_status()
-                data = resp.json()
-                response_text = data["choices"][0]["message"]["content"]
+                total_tokens += comp_tokens
+                tps_list.append(tps)
+                if ttft_ms is not None:
+                    ttft_list.append(ttft_ms)
             except Exception as exc:
                 _cb(f"[{suite_upper} {i}/{total}] ✗ request error: {exc}\n")
                 details.append({"id": q["id"], "correct": False, "error": str(exc)})
                 continue
 
             # Grade
+            passed = False
             if suite == "gsm8k":
                 passed = grade_gsm8k(response_text, q["answer"])
                 nums = re.findall(r"-?\d+\.?\d*", response_text)
                 got_str = nums[-1] if nums else "?"
+                suffix = f"TTFT {ttft_ms:.0f}ms" if ttft_ms is not None else ""
                 if passed:
-                    _cb(f"[{suite_upper} {i}/{total}] ✓ {got_str} (expected {q['answer']})\n")
+                    _cb(f"[{suite_upper} {i}/{total}] ✓ {got_str} (expected {q['answer']}) {suffix}\n")
                 else:
-                    _cb(f"[{suite_upper} {i}/{total}] ✗ got {got_str}, expected {q['answer']}\n")
+                    _cb(f"[{suite_upper} {i}/{total}] ✗ got {got_str}, expected {q['answer']} {suffix}\n")
                 details.append({"id": q["id"], "correct": passed, "got": got_str, "expected": q["answer"]})
 
             elif suite == "mmlu":
                 passed = grade_mmlu(response_text, q["answer"])
                 m = re.search(r"\b([ABCD])\b", response_text.strip()[:200])
                 got_str = m.group(1) if m else "?"
+                suffix = f"TTFT {ttft_ms:.0f}ms" if ttft_ms is not None else ""
                 if passed:
-                    _cb(f"[{suite_upper} {i}/{total}] ✓ {got_str} (expected {q['answer']})\n")
+                    _cb(f"[{suite_upper} {i}/{total}] ✓ {got_str} (expected {q['answer']}) {suffix}\n")
                 else:
-                    _cb(f"[{suite_upper} {i}/{total}] ✗ got {got_str}, expected {q['answer']}\n")
+                    _cb(f"[{suite_upper} {i}/{total}] ✗ got {got_str}, expected {q['answer']} {suffix}\n")
                 details.append({"id": q["id"], "correct": passed, "got": got_str, "expected": q["answer"]})
 
             elif suite == "humaneval":
                 passed, err_msg = grade_humaneval(response_text, q["entry_point"], q["test_code"])
+                suffix = f"TTFT {ttft_ms:.0f}ms" if ttft_ms is not None else ""
                 if passed:
-                    _cb(f"[{suite_upper} {i}/{total}] ✓ {q['entry_point']} passed\n")
+                    _cb(f"[{suite_upper} {i}/{total}] ✓ {q['entry_point']} passed {suffix}\n")
                 else:
                     short_err = err_msg.split("\n")[-1][:80] if err_msg else "failed"
-                    _cb(f"[{suite_upper} {i}/{total}] ✗ {q['entry_point']}: {short_err}\n")
+                    _cb(f"[{suite_upper} {i}/{total}] ✗ {q['entry_point']}: {short_err} {suffix}\n")
                 details.append({"id": q["id"], "correct": passed, "error": err_msg if not passed else ""})
 
             if passed:
                 correct += 1
 
         accuracy = correct / total if total > 0 else 0.0
+        avg_ttft = sum(ttft_list) / len(ttft_list) if ttft_list else None
+        avg_tps = sum(tps_list) / len(tps_list) if tps_list else None
         suite_results[suite] = {
             "correct": correct,
             "total": total,
             "accuracy": round(accuracy, 4),
             "details": details,
+            "speed": {
+                "avg_ttft_ms": round(avg_ttft, 1) if avg_ttft is not None else None,
+                "avg_tokens_per_sec": round(avg_tps, 1) if avg_tps is not None else None,
+                "total_tokens": total_tokens,
+                "questions_timed": len(ttft_list),
+            },
         }
-        _cb(f"\n[{suite_upper}] Finished: {correct}/{total} ({accuracy:.0%})\n\n")
+        speed_str = ""
+        if avg_tps is not None:
+            speed_str = f" | {avg_tps:.1f} tok/s"
+        if avg_ttft is not None:
+            speed_str += f" | TTFT {avg_ttft:.0f}ms avg"
+        _cb(f"\n[{suite_upper}] Finished: {correct}/{total} ({accuracy:.0%}){speed_str}\n\n")
 
-    # Overall score: weighted average across suites
+    # Overall accuracy: weighted average across suites
     if suite_results:
         overall = sum(s["accuracy"] for s in suite_results.values()) / len(suite_results)
+        all_tps = [s["speed"]["avg_tokens_per_sec"] for s in suite_results.values() if s["speed"]["avg_tokens_per_sec"] is not None]
+        all_ttft = [s["speed"]["avg_ttft_ms"] for s in suite_results.values() if s["speed"]["avg_ttft_ms"] is not None]
+        overall_speed = {
+            "avg_tokens_per_sec": round(sum(all_tps) / len(all_tps), 1) if all_tps else None,
+            "avg_ttft_ms": round(sum(all_ttft) / len(all_ttft), 1) if all_ttft else None,
+            "total_tokens": sum(s["speed"]["total_tokens"] for s in suite_results.values()),
+        }
     else:
         overall = 0.0
+        overall_speed = {}
 
     return {
         "suites": suite_results,
         "overall_score": round(overall, 4),
+        "overall_speed": overall_speed,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "model": model_name,
         "server_url": server_url,
