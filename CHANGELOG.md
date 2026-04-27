@@ -4,6 +4,18 @@ All notable changes to the dashboard UI are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Dashboard UI version is tracked separately from the core vllm-mlx version.
 
+## [0.3.49] — 2026-04-27
+
+### Changed
+- Unified benchmark: quality runner now uses streaming for all questions
+  - TTFT and tok/s captured per question at zero extra cost; log lines show TTFT inline
+  - Results include `speed` per suite and `overall_speed` aggregate
+- Benchmark tab: replaced Speed/Quality checkboxes with 3-way mode selector
+  - **Speed + Quality** (default) — one pass captures accuracy + TTFT + tok/s
+  - **Speed only** — dedicated synthetic benchmark for isolated throughput
+  - **Quality only** — accuracy scores with speed shown as bonus stats
+- Result card shows speed stats row (tok/s, TTFT, total tokens) below accuracy scores
+
 ## [0.3.48] — 2026-04-27
 
 ### Fixed

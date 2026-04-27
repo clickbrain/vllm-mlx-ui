@@ -159,12 +159,21 @@ const QUALITY_SUITES = [
   { id: 'humaneval', label: 'HumanEval', description: 'Python coding tasks' },
 ]
 
-// Config
-const benchIncludeSpeed  = ref(true)
-const benchSuites        = ref<string[]>(['gsm8k', 'mmlu', 'humaneval'])
-const benchMaxTokens     = ref(256)
-const benchRuns          = ref(3)
-const benchNumQuestions  = ref(20)
+// Mode: combined runs quality questions with streaming → captures both accuracy + speed
+type BenchMode = 'combined' | 'speed' | 'quality'
+const benchMode = ref<BenchMode>('combined')
+const BENCH_MODES = [
+  { id: 'combined' as BenchMode, label: 'Speed + Quality', description: 'Accuracy & real-world speed in one pass' },
+  { id: 'speed'    as BenchMode, label: 'Speed only',      description: 'Throughput & TTFT with synthetic prompts' },
+  { id: 'quality'  as BenchMode, label: 'Quality only',    description: 'Accuracy scores (speed captured as bonus)' },
+]
+
+// Quality suite selection (shown when mode !== 'speed')
+const benchSuites       = ref<string[]>(['gsm8k', 'mmlu', 'humaneval'])
+// Speed-only options (shown when mode === 'speed')
+const benchMaxTokens    = ref(256)
+const benchRuns         = ref(3)
+const benchNumQuestions = ref(20)
 
 // Model selection
 const cachedModels = computed(() => modelsStore.models.filter((m: { cached: boolean }) => m.cached))
@@ -207,8 +216,8 @@ function stopBenchmarkPolls() {
 
 async function runBenchmark() {
   if (!serverStore.isRunning || benchRunning.value) return
-  if (!benchIncludeSpeed.value && !benchSuites.value.length) return
-  if (benchIncludeSpeed.value && benchSelectedModels.value.length === 0) return
+  if (benchMode.value === 'speed' && benchSelectedModels.value.length === 0) return
+  if (benchMode.value !== 'speed' && benchSuites.value.length === 0) return
 
   benchRunning.value = true
   speedPhase.value   = 'idle'
@@ -219,9 +228,11 @@ async function runBenchmark() {
   lastRunModel.value   = benchSelectedModels.value.join(', ')
   lastRunTime.value    = new Date().toLocaleTimeString()
 
-  // Track when each phase completes so we know when overall is done
-  let speedDone   = !benchIncludeSpeed.value
-  let qualityDone = benchSuites.value.length === 0
+  const runSpeed   = benchMode.value === 'speed'
+  const runQuality = benchMode.value !== 'speed'
+
+  let speedDone   = !runSpeed
+  let qualityDone = !runQuality
 
   function checkDone() {
     if (speedDone && qualityDone) {
@@ -230,8 +241,8 @@ async function runBenchmark() {
     }
   }
 
-  // Speed benchmark
-  if (benchIncludeSpeed.value) {
+  // Speed-only: synthetic benchmark (isolated throughput)
+  if (runSpeed) {
     speedPhase.value = 'running'
     const models = benchSelectedModels.value.length > 0 ? benchSelectedModels.value : [serverStore.modelId ?? '']
     try {
@@ -251,7 +262,6 @@ async function runBenchmark() {
           if (!status.running) {
             clearInterval(speedPollTimer!); speedPollTimer = null
             speedPhase.value = 'done'
-            // pick up latest result
             await modelsStore.fetchBenchmarkResults()
             const hist = modelsStore.benchmarkHistory
             lastRunSpeed.value = hist.length ? hist[hist.length - 1] : null
@@ -268,8 +278,8 @@ async function runBenchmark() {
     }
   }
 
-  // Quality benchmark
-  if (benchSuites.value.length) {
+  // Quality (or combined): streaming questions capture both accuracy + TTFT/tok/s
+  if (runQuality) {
     qualityPhase.value = 'running'
     try {
       const runData = await api.post<{ ok: boolean; run_id: string }>('/quality-benchmark/run', {
@@ -604,42 +614,50 @@ watch(activeTab, (tab) => {
             </label>
           </div>
 
-          <!-- Tests to run -->
-          <div class="bench-section-label">Tests to run</div>
-          <div class="bench-checks">
-
-            <!-- Speed -->
-            <label class="bench-check" :class="{ checked: benchIncludeSpeed }">
-              <input type="checkbox" v-model="benchIncludeSpeed" :disabled="benchRunning" />
-              <div class="bench-check-info">
-                <span class="bench-check-label">Speed</span>
-                <span class="bench-check-desc">Tokens/sec &middot; TTFT &middot; throughput</span>
-              </div>
-            </label>
-
-            <!-- Quality suites -->
+          <!-- Mode selector -->
+          <div class="bench-section-label">Mode</div>
+          <div class="bench-mode-row">
             <label
-              v-for="suite in QUALITY_SUITES"
-              :key="suite.id"
-              class="bench-check"
-              :class="{ checked: benchSuites.includes(suite.id) }"
+              v-for="mode in BENCH_MODES"
+              :key="mode.id"
+              class="bench-mode-option"
+              :class="{ active: benchMode === mode.id }"
             >
-              <input
-                type="checkbox"
-                :value="suite.id"
-                v-model="benchSuites"
-                :disabled="benchRunning"
-              />
+              <input type="radio" v-model="benchMode" :value="mode.id" :disabled="benchRunning" />
               <div class="bench-check-info">
-                <span class="bench-check-label">{{ suite.label }}</span>
-                <span class="bench-check-desc">{{ suite.description }}</span>
+                <span class="bench-check-label">{{ mode.label }}</span>
+                <span class="bench-check-desc">{{ mode.description }}</span>
               </div>
             </label>
           </div>
 
+          <!-- Quality suite checkboxes (hidden for speed-only mode) -->
+          <template v-if="benchMode !== 'speed'">
+            <div class="bench-section-label">Quality suites</div>
+            <div class="bench-checks">
+              <label
+                v-for="suite in QUALITY_SUITES"
+                :key="suite.id"
+                class="bench-check"
+                :class="{ checked: benchSuites.includes(suite.id) }"
+              >
+                <input
+                  type="checkbox"
+                  :value="suite.id"
+                  v-model="benchSuites"
+                  :disabled="benchRunning"
+                />
+                <div class="bench-check-info">
+                  <span class="bench-check-label">{{ suite.label }}</span>
+                  <span class="bench-check-desc">{{ suite.description }}</span>
+                </div>
+              </label>
+            </div>
+          </template>
+
           <!-- Options row -->
           <div class="bench-opts-row">
-            <label v-if="benchIncludeSpeed" class="opt-label">
+            <label v-if="benchMode === 'speed'" class="opt-label">
               Runs
               <select v-model="benchRuns" :disabled="benchRunning" class="opt-select">
                 <option :value="1">1</option>
@@ -647,7 +665,7 @@ watch(activeTab, (tab) => {
                 <option :value="5">5</option>
               </select>
             </label>
-            <label v-if="benchIncludeSpeed" class="opt-label">
+            <label v-if="benchMode === 'speed'" class="opt-label">
               Max tokens
               <select v-model="benchMaxTokens" :disabled="benchRunning" class="opt-select">
                 <option :value="128">128</option>
@@ -655,7 +673,7 @@ watch(activeTab, (tab) => {
                 <option :value="512">512</option>
               </select>
             </label>
-            <label v-if="benchSuites.length" class="opt-label">
+            <label v-if="benchMode !== 'speed'" class="opt-label">
               Questions / suite
               <select v-model="benchNumQuestions" :disabled="benchRunning" class="opt-select">
                 <option :value="5">5 (quick)</option>
@@ -669,7 +687,7 @@ watch(activeTab, (tab) => {
           <!-- Run button -->
           <div class="bench-run-row">
             <AppButton
-              :disabled="benchRunning || !serverStore.isRunning || (!benchIncludeSpeed.value && !benchSuites.length) || (benchIncludeSpeed.value && benchSelectedModels.length === 0)"
+              :disabled="benchRunning || !serverStore.isRunning || (benchMode === 'speed' && benchSelectedModels.length === 0) || (benchMode !== 'speed' && benchSuites.length === 0)"
               @click="runBenchmark"
             >
               {{ benchRunning ? 'Running…' : 'Run Benchmark' }}
@@ -681,8 +699,8 @@ watch(activeTab, (tab) => {
       <!-- Progress panels -->
       <div v-if="benchRunning || anyResultsReady" class="bench-progress-row">
 
-        <!-- Speed progress -->
-        <div v-if="benchIncludeSpeed" class="panel bench-phase-card">
+        <!-- Speed progress (speed-only mode) -->
+        <div v-if="benchMode === 'speed'" class="panel bench-phase-card">
           <div class="panel-header">
             <div class="panel-title">Speed</div>
             <span class="phase-badge" :class="speedPhase">
@@ -710,9 +728,9 @@ watch(activeTab, (tab) => {
         </div>
 
         <!-- Quality progress -->
-        <div v-if="benchSuites.length" class="panel bench-phase-card">
+        <div v-if="benchMode !== 'speed'" class="panel bench-phase-card">
           <div class="panel-header">
-            <div class="panel-title">Quality</div>
+            <div class="panel-title">{{ benchMode === 'combined' ? 'Quality + Speed' : 'Quality' }}</div>
             <span class="phase-badge" :class="qualityPhase">
               {{ qualityPhase === 'running' ? 'Running…' : qualityPhase === 'done' ? 'Done' : qualityPhase === 'error' ? 'Error' : '' }}
             </span>
@@ -744,6 +762,21 @@ watch(activeTab, (tab) => {
                 <div class="qsi-score" :class="lastRunQuality.overall_score >= 0.7 ? 'good' : lastRunQuality.overall_score >= 0.5 ? 'mid' : 'bad'">
                   {{ Math.round(lastRunQuality.overall_score * 100) }}%
                 </div>
+              </div>
+              <!-- Speed metrics captured during quality run -->
+              <div v-if="lastRunQuality.overall_speed?.avg_tokens_per_sec" class="qsi-speed-row">
+                <span class="qsi-speed-stat">
+                  <span class="qsi-speed-val">{{ lastRunQuality.overall_speed.avg_tokens_per_sec }}</span>
+                  <span class="qsi-speed-lbl">tok/s</span>
+                </span>
+                <span v-if="lastRunQuality.overall_speed.avg_ttft_ms" class="qsi-speed-stat">
+                  <span class="qsi-speed-val">{{ lastRunQuality.overall_speed.avg_ttft_ms }}</span>
+                  <span class="qsi-speed-lbl">ms TTFT</span>
+                </span>
+                <span class="qsi-speed-stat">
+                  <span class="qsi-speed-val">{{ lastRunQuality.overall_speed.total_tokens?.toLocaleString() }}</span>
+                  <span class="qsi-speed-lbl">tokens total</span>
+                </span>
               </div>
             </div>
             <div v-else-if="qualityPhase === 'error'" class="panel-empty warn">Quality benchmark failed.</div>
@@ -1255,6 +1288,16 @@ watch(activeTab, (tab) => {
   border-radius: 6px; color: var(--tx-primary); padding: 4px 8px; font-size: 12px;
 }
 
+.bench-mode-row { display: flex; flex-direction: column; gap: 6px; }
+.bench-mode-option {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+  border-radius: 8px; border: 1px solid var(--bd-default); cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.bench-mode-option:hover { background: var(--bg-elevated); }
+.bench-mode-option.active { border-color: var(--si-400); background: color-mix(in srgb, var(--si-400) 6%, transparent); }
+.bench-mode-option input { margin-top: 2px; accent-color: var(--si-400); flex-shrink: 0; }
+
 .bench-run-row { display: flex; align-items: center; gap: 12px; padding-top: 4px; }
 
 .bench-progress-row {
@@ -1321,6 +1364,13 @@ watch(activeTab, (tab) => {
 .qsi-score.bad  { color: #f87171; }
 .qsi-detail { font-size: 10px; color: var(--tx-muted); }
 .qsi-overall .qsi-score { font-size: 24px; }
+.qsi-speed-row {
+  width: 100%; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;
+  padding-top: 10px; margin-top: 8px; border-top: 1px solid var(--bd-subtle);
+}
+.qsi-speed-stat { display: flex; align-items: baseline; gap: 4px; }
+.qsi-speed-val { font-size: 15px; font-weight: 600; color: var(--tx-primary); font-variant-numeric: tabular-nums; }
+.qsi-speed-lbl { font-size: 10px; color: var(--tx-muted); }
 
 /* ── History tab ─────────────────────────────────────────────────────────── */
 .history-toolbar {
