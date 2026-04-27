@@ -1394,6 +1394,24 @@ _DOCS_DEV     = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname
 _DOCS_ROOT    = _DOCS_BUNDLED if _os.path.isdir(_DOCS_BUNDLED) else _DOCS_DEV
 
 
+@app.get("/browse-directory")
+def browse_directory(_: None = Depends(_check_auth)) -> dict:
+    """Open a native macOS folder picker and return the selected path."""
+    import subprocess as _sp
+    script = 'POSIX path of (choose folder with prompt "Select directory")'
+    try:
+        result = _sp.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            path = result.stdout.strip().rstrip("/")
+            return {"path": path}
+        raise HTTPException(status_code=204, detail="No directory selected")
+    except _sp.TimeoutExpired:
+        raise HTTPException(status_code=408, detail="Folder dialog timed out")
+
+
 @app.get("/api/docs/{doc_path:path}", include_in_schema=False)
 async def _serve_doc(doc_path: str) -> PlainTextResponse:
     """Serve raw markdown files from the docs directory for the in-app docs viewer."""
