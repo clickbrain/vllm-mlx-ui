@@ -351,7 +351,9 @@ def run_live_benchmark(
 
         start = time.monotonic()
         first_token_time: float | None = None
-        token_count = 0
+        last_content_time: float | None = None
+        char_count = 0          # sum of content char lengths for token estimation
+        completion_tokens: int | None = None   # from server usage field (preferred)
         content_buffer = ""
 
         try:
@@ -363,13 +365,14 @@ def run_live_benchmark(
                     "max_tokens": max_tokens,
                     "stream": True,
                     "temperature": 0.0,
+                    # Ask the server to include token usage in the final chunk
+                    "stream_options": {"include_usage": True},
                 },
                 stream=True,
                 timeout=120,
             )
             resp.raise_for_status()
 
-            end = start
             for raw_line in resp.iter_lines():
                 if not raw_line:
                     continue
@@ -381,24 +384,50 @@ def run_live_benchmark(
                     data = json.loads(data_str)
                 except json.JSONDecodeError:
                     continue
+                # Capture server-reported token counts when available
+                usage = data.get("usage") or {}
+                if usage.get("completion_tokens"):
+                    completion_tokens = int(usage["completion_tokens"])
                 delta = data.get("choices", [{}])[0].get("delta", {})
                 content = delta.get("content", "")
                 if content:
+                    now = time.monotonic()
                     if first_token_time is None:
-                        first_token_time = time.monotonic()
-                    token_count += len(content.split())  # rough token count
+                        first_token_time = now
+                    last_content_time = now
+                    char_count += len(content)
                     content_buffer += content
-                end = time.monotonic()
 
-            if first_token_time is not None and token_count > 0:
+            if first_token_time is not None and char_count > 0:
                 ttft = first_token_time - start
-                gen_time = end - first_token_time
-                tps = token_count / gen_time if gen_time > 0.01 else 0
-                ttft_list.append(ttft)
-                tps_list.append(tps)
-                raw_lines.append(f"Run {i+1}: {tps:.1f} tok/s, TTFT {ttft*1000:.0f}ms, {token_count} tokens")
-                if output_callback:
-                    output_callback(f"  → {tps:.1f} tok/s (TTFT {ttft*1000:.0f}ms)\n")
+                # Use server's completion_tokens if available; else estimate
+                # at 4 chars/token (better than word-splitting).
+                actual_tokens = completion_tokens if completion_tokens else max(1, char_count // 4)
+                gen_time = (last_content_time - first_token_time) if last_content_time else 0.0
+
+                # Sanity check: if all tokens arrived in under 100 ms the
+                # server buffered the entire response before streaming it —
+                # gen_time is meaningless.  Keep TTFT but skip TPS.
+                if gen_time < 0.1 and actual_tokens > 5:
+                    ttft_list.append(ttft)
+                    raw_lines.append(
+                        f"Run {i+1}: TPS skipped (buffered stream), "
+                        f"TTFT {ttft*1000:.0f}ms, {actual_tokens} tokens"
+                    )
+                    if output_callback:
+                        output_callback(
+                            f"  → TPS skipped (server buffered response), "
+                            f"TTFT {ttft*1000:.0f}ms\n"
+                        )
+                else:
+                    tps = actual_tokens / gen_time if gen_time > 0.01 else 0
+                    ttft_list.append(ttft)
+                    tps_list.append(tps)
+                    raw_lines.append(
+                        f"Run {i+1}: {tps:.1f} tok/s, TTFT {ttft*1000:.0f}ms, {actual_tokens} tokens"
+                    )
+                    if output_callback:
+                        output_callback(f"  → {tps:.1f} tok/s (TTFT {ttft*1000:.0f}ms)\n")
         except Exception as e:
             raw_lines.append(f"Run {i+1} error: {e}")
             if output_callback:

@@ -1,4 +1,8 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.70 — 2026-04-27
+
+- Fix: **Speed benchmark no longer reports impossible T/s values** (e.g. 6430 T/s for a 9B model) — root causes: (1) `gen_time` was measured from first content token to last SSE frame including non-content frames, so a buffered response gave near-zero gen_time → astronomical TPS; (2) token count used word-splitting (~0.75× real tokens). Fixed by tracking `last_content_time` (updated only on content chunks), using server-reported `completion_tokens` via `stream_options: {include_usage: true}`, falling back to `chars / 4` estimate, and skipping any run where all tokens arrived in under 100 ms (buffered stream — TPS is physically unmeasurable)
+
 ## v0.3.69 — 2026-04-28
 
 - Fix: **Downloads no longer disappear when navigating away from Models/Find** — `ModelsView` is now kept alive by Vue's `KeepAlive` so the component (and its download queue UI) is never destroyed on tab navigation; added `onActivated` hook to refresh the model list and re-attach any polling that may have been interrupted; `pollDownloadStatus` no longer clears its interval on a transient network error so in-flight downloads survive brief connectivity hiccups
