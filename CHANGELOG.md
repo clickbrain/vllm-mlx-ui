@@ -1,5 +1,9 @@
 # Changelog — vllm-mlx Dashboard UI
-## v0.3.61 — 2026-04-27
+## v0.3.62 — 2026-04-27
+
+- Fix: **Multi-model benchmark false-ready detection** — after switching models the server was declared ready as soon as the process started, but the model may still be loading; now polls `GET /v1/models` (up to 120 s) and only proceeds when the inference port actually responds 200
+
+
 
 - Fix: **Benchmark runs survive navigation** — BenchmarkView added to KeepAlive; polling timers keep running when navigating to other pages; Live tab polling pauses/resumes cleanly on deactivate/activate
 - Fix: **Multi-model quality benchmarks** — `/quality-benchmark/run` now accepts `model_ids`; backend iterates over each selected model, switching the server between them and restoring the original model when done; all results saved to history
