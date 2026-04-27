@@ -38,7 +38,7 @@ const serverStore = useServerStore()
 const modelsStore = useModelsStore()
 
 // ── Tab state ─────────────────────────────────────────────────────────────
-const tabs = ['Live', 'Benchmark', 'History', 'Advisor'] as const
+const tabs = ['Live', 'Run Tests', 'History', 'Advisor'] as const
 type Tab = typeof tabs[number]
 const activeTab = ref<Tab>('Live')
 
@@ -82,6 +82,15 @@ watch(() => serverStore.isRunning, (running) => {
 })
 
 // ── Live tab — chart data ──────────────────────────────────────────────────
+const chartRange = ref<'1h' | '6h' | '24h'>('24h')
+
+const visibleMetricsHistory = computed(() => {
+  const h = serverStore.metricsHistory
+  if (chartRange.value === '24h') return h
+  const pts = chartRange.value === '1h' ? 720 : 4320
+  return h.slice(-pts)
+})
+
 const lineOpts: ChartOptions<'line'> = {
   responsive: true,
   maintainAspectRatio: false,
@@ -100,7 +109,7 @@ const lineOpts: ChartOptions<'line'> = {
 }
 
 const requestsChartData = computed((): ChartData<'line'> => {
-  const h = serverStore.metricsHistory
+  const h = visibleMetricsHistory.value
   return {
     labels: h.map(e => e.time),
     datasets: [
@@ -129,7 +138,7 @@ const requestsChartData = computed((): ChartData<'line'> => {
 })
 
 const memoryChartData = computed((): ChartData<'line'> => {
-  const h = serverStore.metricsHistory
+  const h = visibleMetricsHistory.value
   return {
     labels: h.map(e => e.time),
     datasets: [{
@@ -244,10 +253,29 @@ const lastRunSpeed   = ref<typeof modelsStore.benchmarkResults extends (infer T)
 const lastRunQuality = ref<Record<string, any> | null>(null)
 const lastRunModel   = ref('')
 const lastRunTime    = ref('')
+const benchRunName    = ref('')
+const qualityRunId    = ref<string | null>(null)
+const benchStopping   = ref(false)
 
 function stopBenchmarkPolls() {
   if (qualityPollTimer) { clearInterval(qualityPollTimer); qualityPollTimer = null }
   if (speedPollTimer)   { clearInterval(speedPollTimer);   speedPollTimer   = null }
+}
+
+async function stopBenchmark() {
+  if (!benchRunning.value) return
+  benchStopping.value = true
+  try {
+    if (qualityRunId.value) {
+      await api.post(`/quality-benchmark/stop/${qualityRunId.value}`, {})
+    }
+    await api.post('/benchmark/stop', {}).catch(() => {})
+  } catch { /* ignore */ }
+  stopBenchmarkPolls()
+  benchRunning.value = false
+  benchStopping.value = false
+  if (qualityPhase.value === 'running') qualityPhase.value = 'error'
+  if (speedPhase.value === 'running') speedPhase.value = 'error'
 }
 
 async function runBenchmark() {
@@ -259,6 +287,7 @@ async function runBenchmark() {
   speedPhase.value   = 'idle'
   qualityPhase.value = 'idle'
   qualityLines.value = []
+  qualityRunId.value   = null
   lastRunSpeed.value   = null
   lastRunQuality.value = null
   lastRunModel.value   = benchSelectedModels.value.join(', ')
@@ -284,6 +313,7 @@ async function runBenchmark() {
     try {
       await api.post('/benchmark/run', {
         model_ids: models,
+        label: benchRunName.value,
         config: { runs: benchRuns.value, max_tokens: benchMaxTokens.value, prompt: 'Explain the concept of machine learning in simple terms.' },
       })
     } catch {
@@ -321,8 +351,10 @@ async function runBenchmark() {
       const runData = await api.post<{ ok: boolean; run_id: string }>('/quality-benchmark/run', {
         suites: benchSuites.value,
         num_questions: benchNumQuestions.value,
+        label: benchRunName.value,
       })
       const runId = runData.run_id
+      qualityRunId.value = runId
       let lineOffset = 0
       qualityPollTimer = setInterval(async () => {
         try {
@@ -365,13 +397,26 @@ const anyResultsReady = computed(() =>
 
 // ── HISTORY TAB ────────────────────────────────────────────────────────────
 // Most-recent first; loaded by onMounted
-const sortedHistory = computed(() =>
-  [...(modelsStore.benchmarkHistory ?? [])].sort((a, b) =>
+const sortedHistory = computed(() => {
+  let list = [...(modelsStore.benchmarkHistory ?? [])].sort((a, b) =>
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   )
-)
+  if (historySearch.value.trim()) {
+    const q = historySearch.value.toLowerCase()
+    list = list.filter(r =>
+      (r.model_id || '').toLowerCase().includes(q) ||
+      (r.label || '').toLowerCase().includes(q)
+    )
+  }
+  if (historyTypeFilter.value !== 'all') {
+    list = list.filter(r => r.benchmark_type === historyTypeFilter.value)
+  }
+  return list
+})
 
 const historySelected = ref<Set<number>>(new Set())
+const historySearch  = ref('')
+const historyTypeFilter = ref<'all' | 'speed' | 'quality'>('all')
 const comparePanelRef = ref<HTMLElement | null>(null)
 
 function toggleHistorySelect(id: number) {
@@ -526,14 +571,19 @@ watch(activeTab, (tab) => {
       <!-- Charts row -->
       <div class="charts-row">
         <div class="chart-card">
-          <div class="chart-title">Requests over time</div>
+          <div class="chart-header">
+            <div class="chart-title">Requests over time</div>
+            <div class="chart-range-btns">
+              <button v-for="r in ['1h','6h','24h']" :key="r" class="chart-range-btn" :class="{ active: chartRange === r }" @click="chartRange = r as any">{{ r }}</button>
+            </div>
+          </div>
           <div class="chart-legend">
             <span class="legend-dot" style="background:#a78bfa" />Active
             <span class="legend-dot" style="background:#f59e0b" />Queued
           </div>
           <div class="chart-area">
             <Line
-              v-if="serverStore.metricsHistory.length > 1"
+              v-if="visibleMetricsHistory.length > 1"
               :data="requestsChartData"
               :options="lineOpts"
             />
@@ -542,10 +592,15 @@ watch(activeTab, (tab) => {
         </div>
 
         <div class="chart-card">
-          <div class="chart-title">GPU memory (GB)</div>
+          <div class="chart-header">
+            <div class="chart-title">GPU memory (GB)</div>
+            <div class="chart-range-btns">
+              <button v-for="r in ['1h','6h','24h']" :key="r" class="chart-range-btn" :class="{ active: chartRange === r }" @click="chartRange = r as any">{{ r }}</button>
+            </div>
+          </div>
           <div class="chart-area">
             <Line
-              v-if="serverStore.metricsHistory.length > 1"
+              v-if="visibleMetricsHistory.length > 1"
               :data="memoryChartData"
               :options="lineOpts"
             />
@@ -610,7 +665,7 @@ watch(activeTab, (tab) => {
     </div>
 
     <!-- ── BENCHMARK TAB ──────────────────────────────────────────────────── -->
-    <div v-else-if="activeTab === 'Benchmark'" class="tab-body">
+    <div v-else-if="activeTab === 'Run Tests'" class="tab-body">
 
       <!-- Server warning -->
       <div v-if="!serverStore.isRunning" class="status-banner banner-red">
@@ -655,7 +710,10 @@ watch(activeTab, (tab) => {
                     <span class="bench-check-label mono">{{ m.id.split('/').pop() }}</span>
                     <span class="bench-check-desc">{{ m.id.split('/')[0] }} &middot; {{ m.size_gb?.toFixed(1) ?? '?' }} GB</span>
                   </div>
-                  <span v-if="m.id === serverStore.modelId" class="bench-model-badge">running</span>
+                  <span v-if="benchRunning && benchSelectedModels.includes(m.id)" class="bench-model-badge" :class="m.id === serverStore.modelId ? '' : 'badge-pending'">
+                    {{ m.id === serverStore.modelId ? 'running' : 'queued' }}
+                  </span>
+                  <span v-else-if="!benchRunning && m.id === serverStore.modelId" class="bench-model-badge">loaded</span>
                 </label>
               </div>
             </div>
@@ -746,14 +804,63 @@ watch(activeTab, (tab) => {
                 </label>
               </div>
 
+              <!-- Run name -->
+              <div class="bench-section-label">Run name <span class="opt-hint">(optional)</span></div>
+              <input
+                v-model="benchRunName"
+                type="text"
+                class="bench-name-input"
+                placeholder="e.g. baseline, after-tuning…"
+                :disabled="benchRunning"
+              />
+
               <!-- Run button -->
               <div class="bench-run-row">
                 <AppButton
                   :disabled="benchRunning || !serverStore.isRunning || benchSelectedModels.length === 0 || (benchMode !== 'speed' && benchSuites.length === 0)"
                   @click="runBenchmark"
                 >
-                  {{ benchRunning ? 'Running…' : 'Run Benchmark' }}
+                  <span v-if="benchRunning" class="spin" style="margin-right:6px" />
+                  {{ benchRunning ? 'Running…' : 'Run Benchmarks' }}
                 </AppButton>
+                <AppButton
+                  v-if="benchRunning"
+                  variant="secondary"
+                  :disabled="benchStopping"
+                  @click="stopBenchmark"
+                >
+                  {{ benchStopping ? 'Stopping…' : 'Stop Run' }}
+                </AppButton>
+              </div>
+
+              <!-- Inline quality log -->
+              <div v-if="benchMode !== 'speed' && (qualityPhase !== 'idle' || qualityLines.length > 0)" class="inline-log-wrap">
+                <pre ref="qualityLogRef" class="quality-log">{{ qualityLines.join('') }}</pre>
+                <div v-if="qualityPhase === 'done' && lastRunQuality" class="quality-scores-inline">
+                  <div v-for="(sr, key) in lastRunQuality.suites" :key="key" class="qsi">
+                    <div class="qsi-name">{{ String(key).toUpperCase() }}</div>
+                    <div class="qsi-score" :class="(sr as QualitySuiteResult).accuracy >= 0.7 ? 'good' : (sr as QualitySuiteResult).accuracy >= 0.5 ? 'mid' : 'bad'">
+                      {{ Math.round((sr as QualitySuiteResult).accuracy * 100) }}%
+                    </div>
+                    <div class="qsi-detail dim">{{ (sr as QualitySuiteResult).correct }}/{{ (sr as QualitySuiteResult).total }}</div>
+                  </div>
+                  <div class="qsi qsi-overall">
+                    <div class="qsi-name">Overall</div>
+                    <div class="qsi-score" :class="lastRunQuality.overall_score >= 0.7 ? 'good' : lastRunQuality.overall_score >= 0.5 ? 'mid' : 'bad'">
+                      {{ Math.round(lastRunQuality.overall_score * 100) }}%
+                    </div>
+                  </div>
+                  <div v-if="lastRunQuality.overall_speed?.avg_tokens_per_sec" class="qsi-speed-row">
+                    <span class="qsi-speed-stat">
+                      <span class="qsi-speed-val">{{ lastRunQuality.overall_speed.avg_tokens_per_sec }}</span>
+                      <span class="qsi-speed-lbl">tok/s</span>
+                    </span>
+                    <span v-if="lastRunQuality.overall_speed.avg_ttft_ms" class="qsi-speed-stat">
+                      <span class="qsi-speed-val">{{ lastRunQuality.overall_speed.avg_ttft_ms }}</span>
+                      <span class="qsi-speed-lbl">ms TTFT</span>
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -792,61 +899,6 @@ watch(activeTab, (tab) => {
           </div>
         </div>
 
-        <!-- Quality progress -->
-        <div v-if="benchMode !== 'speed'" class="panel bench-phase-card">
-          <div class="panel-header">
-            <div class="panel-title">{{ benchMode === 'combined' ? 'Quality + Speed' : 'Quality' }}</div>
-            <span class="phase-badge" :class="qualityPhase">
-              {{ qualityPhase === 'running' ? 'Running…' : qualityPhase === 'done' ? 'Done' : qualityPhase === 'error' ? 'Error' : '' }}
-            </span>
-          </div>
-          <div class="bench-phase-body">
-            <div v-if="qualityPhase === 'idle'" class="panel-empty">Waiting to start…</div>
-            <pre
-              v-else-if="qualityPhase === 'running' || qualityLines.length"
-              ref="qualityLogRef"
-              class="quality-log"
-            >{{ qualityLines.join('') }}</pre>
-            <div v-if="qualityPhase === 'done' && lastRunQuality" class="quality-scores-inline">
-              <div
-                v-for="(sr, key) in lastRunQuality.suites"
-                :key="key"
-                class="qsi"
-              >
-                <div class="qsi-name">{{ String(key).toUpperCase() }}</div>
-                <div
-                  class="qsi-score"
-                  :class="(sr as QualitySuiteResult).accuracy >= 0.7 ? 'good' : (sr as QualitySuiteResult).accuracy >= 0.5 ? 'mid' : 'bad'"
-                >
-                  {{ Math.round((sr as QualitySuiteResult).accuracy * 100) }}%
-                </div>
-                <div class="qsi-detail dim">{{ (sr as QualitySuiteResult).correct }}/{{ (sr as QualitySuiteResult).total }}</div>
-              </div>
-              <div class="qsi qsi-overall">
-                <div class="qsi-name">Overall</div>
-                <div class="qsi-score" :class="lastRunQuality.overall_score >= 0.7 ? 'good' : lastRunQuality.overall_score >= 0.5 ? 'mid' : 'bad'">
-                  {{ Math.round(lastRunQuality.overall_score * 100) }}%
-                </div>
-              </div>
-              <!-- Speed metrics captured during quality run -->
-              <div v-if="lastRunQuality.overall_speed?.avg_tokens_per_sec" class="qsi-speed-row">
-                <span class="qsi-speed-stat">
-                  <span class="qsi-speed-val">{{ lastRunQuality.overall_speed.avg_tokens_per_sec }}</span>
-                  <span class="qsi-speed-lbl">tok/s</span>
-                </span>
-                <span v-if="lastRunQuality.overall_speed.avg_ttft_ms" class="qsi-speed-stat">
-                  <span class="qsi-speed-val">{{ lastRunQuality.overall_speed.avg_ttft_ms }}</span>
-                  <span class="qsi-speed-lbl">ms TTFT</span>
-                </span>
-                <span class="qsi-speed-stat">
-                  <span class="qsi-speed-val">{{ lastRunQuality.overall_speed.total_tokens?.toLocaleString() }}</span>
-                  <span class="qsi-speed-lbl">tokens total</span>
-                </span>
-              </div>
-            </div>
-            <div v-else-if="qualityPhase === 'error'" class="panel-empty warn">Quality benchmark failed.</div>
-          </div>
-        </div>
       </div>
 
     </div>
@@ -884,6 +936,25 @@ watch(activeTab, (tab) => {
               <div class="cost-summary-sub">vs equivalent cloud API calls</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Filter bar -->
+      <div class="history-filter-bar">
+        <input
+          v-model="historySearch"
+          type="text"
+          class="history-search"
+          placeholder="Search by model or name…"
+        />
+        <div class="hf-type-btns">
+          <button
+            v-for="t in ['all', 'speed', 'quality']"
+            :key="t"
+            class="hf-btn"
+            :class="{ active: historyTypeFilter === t }"
+            @click="historyTypeFilter = t as any"
+          >{{ t === 'all' ? 'All' : t.charAt(0).toUpperCase() + t.slice(1) }}</button>
         </div>
       </div>
 
@@ -943,6 +1014,35 @@ watch(activeTab, (tab) => {
             </tbody>
           </table>
         </div>
+        <!-- Simple bar comparison charts -->
+        <div class="compare-charts">
+          <div class="compare-chart-group" v-if="compareRuns.some(r => r.avg_tps > 0)">
+            <div class="compare-chart-title">Speed (tok/s)</div>
+            <div v-for="run in compareRuns" :key="'spd-' + run.id" class="compare-bar-row">
+              <span class="compare-bar-label mono">{{ (run.model_id || '').split('/').pop()?.slice(0, 20) }}</span>
+              <div class="compare-bar-track">
+                <div
+                  class="compare-bar-fill speed-fill"
+                  :style="{ width: Math.min(100, (run.avg_tps / Math.max(...compareRuns.map(r => r.avg_tps || 0))) * 100) + '%' }"
+                />
+              </div>
+              <span class="compare-bar-val mono">{{ run.avg_tps > 0 ? run.avg_tps.toFixed(1) : '—' }}</span>
+            </div>
+          </div>
+          <div class="compare-chart-group" v-if="compareRuns.some(r => r.overall_score != null)">
+            <div class="compare-chart-title">Quality (overall %)</div>
+            <div v-for="run in compareRuns" :key="'q-' + run.id" class="compare-bar-row">
+              <span class="compare-bar-label mono">{{ (run.model_id || '').split('/').pop()?.slice(0, 20) }}</span>
+              <div class="compare-bar-track">
+                <div
+                  class="compare-bar-fill quality-fill"
+                  :style="{ width: (run.overall_score != null ? run.overall_score * 100 : 0) + '%' }"
+                />
+              </div>
+              <span class="compare-bar-val mono">{{ run.overall_score != null ? Math.round(run.overall_score * 100) + '%' : '—' }}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Runs list -->
@@ -964,6 +1064,7 @@ watch(activeTab, (tab) => {
               <span class="latest-badge" v-if="idx === 0">Latest</span>
               <span class="history-model mono">{{ (run.model_id || '').split('/').pop() || '—' }}</span>
               <span class="history-time dim">{{ formatRelTime(run.timestamp) }}</span>
+              <span v-if="run.label" class="history-label">"{{ run.label }}"</span>
             </div>
             <div class="history-badges">
               <span v-if="run.avg_tps > 0" class="h-badge speed-badge">
@@ -997,7 +1098,7 @@ watch(activeTab, (tab) => {
 
       <div v-else class="coming-soon-card">
         <h3>No benchmark history yet</h3>
-        <p>Run your first benchmark from the Benchmark tab — results appear here automatically.</p>
+        <p>Run your first benchmark from the Run Tests tab — results appear here automatically.</p>
       </div>
     </div>
 
@@ -1670,6 +1771,48 @@ watch(activeTab, (tab) => {
 }
 .icon-btn:hover { color: var(--tx-secondary); background: var(--bg-elevated); }
 .icon-btn.danger:hover { color: #f87171; }
+
+/* ── Bench run name input ────────────────────────────────────────────────── */
+.bench-name-input {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--bd-default);
+  background: var(--bg-elevated);
+  color: var(--tx-primary);
+  font-size: 13px;
+  font-family: inherit;
+}
+.bench-name-input:disabled { opacity: 0.5; }
+.opt-hint { font-size: 11px; color: var(--tx-muted); font-weight: 400; }
+.badge-pending { background: var(--bg-elevated); color: var(--tx-secondary); }
+.inline-log-wrap { margin-top: var(--space-3); }
+
+/* ── History filter bar ──────────────────────────────────────────────────── */
+.history-filter-bar { display: flex; gap: var(--space-3); align-items: center; margin-bottom: var(--space-3); }
+.history-search { flex: 1; padding: 6px 10px; border-radius: var(--r-sm); border: 1px solid var(--bd-default); background: var(--bg-elevated); color: var(--tx-primary); font-size: 13px; font-family: inherit; }
+.hf-type-btns { display: flex; gap: 4px; }
+.hf-btn { padding: 4px 10px; border-radius: var(--r-sm); border: 1px solid var(--bd-default); background: var(--bg-elevated); color: var(--tx-secondary); font-size: 12px; cursor: pointer; font-family: inherit; }
+.hf-btn.active { background: var(--si-400); color: #fff; border-color: var(--si-400); }
+.history-label { font-size: 11px; color: var(--tx-muted); font-style: italic; }
+
+/* ── Compare bar charts ──────────────────────────────────────────────────── */
+.compare-charts { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4); border-top: 1px solid var(--bd-default); margin-top: var(--space-3); }
+.compare-chart-group { display: flex; flex-direction: column; gap: var(--space-2); }
+.compare-chart-title { font-size: 12px; font-weight: 600; color: var(--tx-secondary); text-transform: uppercase; letter-spacing: .04em; }
+.compare-bar-row { display: grid; grid-template-columns: 160px 1fr 60px; gap: var(--space-2); align-items: center; }
+.compare-bar-label { font-size: 12px; color: var(--tx-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compare-bar-track { height: 8px; background: var(--bg-elevated); border-radius: 4px; overflow: hidden; }
+.compare-bar-fill { height: 100%; border-radius: 4px; transition: width .4s ease; }
+.compare-bar-fill.speed-fill { background: #a78bfa; }
+.compare-bar-fill.quality-fill { background: #34d399; }
+.compare-bar-val { font-size: 12px; font-weight: 600; color: var(--tx-primary); text-align: right; }
+
+/* ── Chart range buttons ─────────────────────────────────────────────────── */
+.chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2); }
+.chart-range-btns { display: flex; gap: 2px; }
+.chart-range-btn { padding: 2px 8px; font-size: 11px; border-radius: var(--r-sm); border: 1px solid var(--bd-default); background: var(--bg-elevated); color: var(--tx-secondary); cursor: pointer; font-family: inherit; }
+.chart-range-btn.active { background: var(--si-400); color: #fff; border-color: var(--si-400); }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }

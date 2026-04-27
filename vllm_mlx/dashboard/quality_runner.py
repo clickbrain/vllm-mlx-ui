@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import subprocess
 import tempfile
+import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -323,6 +324,7 @@ def run_quality_benchmark(
     server_url: str,
     num_questions: int = 20,
     output_callback: Callable[[str], None] | None = None,
+    stop_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """
     Run selected quality benchmark suites against the live server using streaming.
@@ -365,6 +367,9 @@ def run_quality_benchmark(
         total_tokens = 0
 
         for i, q in enumerate(questions, start=1):
+            if stop_event and stop_event.is_set():
+                _cb(f"\n[{suite_upper}] Stopped by user.\n")
+                break
             if suite == "mmlu":
                 choices_text = "\n".join(f"{k}. {v}" for k, v in q["choices"].items())
                 user_msg = f"{q['question']}\n\n{choices_text}"

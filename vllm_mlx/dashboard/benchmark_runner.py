@@ -307,6 +307,7 @@ def run_live_benchmark(
     prompts: int = 3,
     max_tokens: int = 256,
     output_callback: Callable[[str], None] | None = None,
+    label: str = "",
 ) -> dict[str, Any]:
     """Benchmark the RUNNING inference server by sending live requests.
 
@@ -423,6 +424,7 @@ def run_live_benchmark(
         "avg_ttft_ms": round(avg_ttft_ms, 1),
         "raw_output": "\n".join(raw_lines),
         "live": True,  # flag to distinguish from subprocess benchmark
+        "label": label,
     }
     if not success:
         result["error"] = "No successful runs completed"
