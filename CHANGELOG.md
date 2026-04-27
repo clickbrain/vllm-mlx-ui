@@ -1,4 +1,10 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.66 — 2026-04-27
+
+- Fix: **Benchmark run persists when navigating away** — moved run state (`benchRunning`, `qualityPhase`, `qualityLines`, `qualityRunId`, etc.) into a singleton Pinia store (`benchmarkRun`); polling timers moved to module-level variables outside `setup()` so they survive component remount regardless of KeepAlive behaviour; reconnect logic on `onMounted` re-attaches poll if a run is active; `onUnmounted` no longer stops polls while a run is in progress
+- Feature: **Pulsing dot on "Run Tests" tab** — visible from any sub-tab so the user always knows a benchmark is running
+- Fix: Auto-switch to "Run Tests" tab on `onActivated` when a benchmark is running
+
 ## v0.3.65 — 2026-04-27
 
 - Fix: **GSM8K/MMLU always returning `?`** — `max_tokens` was 512 for quality benchmarks; reasoning models (Qwen3, DeepSeek-R1) spend all 512 tokens on `<think>` blocks before the answer, so the server's reasoning parser stripped the thinking content and returned an empty string; raised to 4096 (GSM8K/MMLU) and 2048 (HumanEval); stream timeout raised from 90 s to 300 s

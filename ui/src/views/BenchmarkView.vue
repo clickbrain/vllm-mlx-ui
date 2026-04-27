@@ -9,8 +9,19 @@
     History   — all prior runs (most recent first), select to compare, favorite, delete
     Advisor   — describe a task → AI recommends best model + config
 -->
+
+<!-- Module-level timer state — lives outside setup() so it survives any component
+     remount (e.g. if KeepAlive evicts the instance). The timers write into the
+     Pinia benchmarkRun store so state is always visible on return. -->
+<script lang="ts">
+let _qualityPollTimer: ReturnType<typeof setInterval> | null = null
+let _speedPollTimer:   ReturnType<typeof setInterval> | null = null
+let _lineOffset = 0
+</script>
+
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick, defineOptions } from 'vue'
+import { storeToRefs } from 'pinia'
 import { Line } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -26,6 +37,7 @@ import type { ChartData, ChartOptions } from 'chart.js'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
 import type { QualitySuiteResult } from '@/stores/models'
+import { useBenchmarkRunStore } from '@/stores/benchmarkRun'
 import AppButton from '@/components/shared/AppButton.vue'
 import { api } from '@/api/client'
 
@@ -36,6 +48,12 @@ ChartJS.register(
 
 const serverStore = useServerStore()
 const modelsStore = useModelsStore()
+const benchmarkRunStore = useBenchmarkRunStore()
+const {
+  benchRunning, speedPhase, qualityPhase, qualityLines,
+  benchStopping, qualityRunId, lastRunQuality, lastRunSpeed,
+  lastRunModel, lastRunTime,
+} = storeToRefs(benchmarkRunStore)
 
 defineOptions({ name: 'BenchmarkView' })
 
@@ -82,12 +100,21 @@ onMounted(() => {
   modelsStore.fetchBenchmarkResults()
   modelsStore.fetchModels()
   loadPerfSettings()
+  // Reconnect poll if benchmark was running when this component was last unmounted
+  // (e.g. KeepAlive evicted the instance but the backend job is still going)
+  if (benchRunning.value && qualityRunId.value && !_qualityPollTimer) {
+    _reconnectQualityPoll(qualityRunId.value)
+  }
 })
 
 // Navigated back to this page: restart Live polling and refresh history
 onActivated(() => {
   _startLivePolling()
   modelsStore.fetchBenchmarkResults()
+  // Auto-switch to Run Tests tab so the user sees a running benchmark
+  if (benchRunning.value) {
+    activeTab.value = 'Run Tests'
+  }
 })
 
 // Navigated away: stop Live polling but leave benchmark polls running
@@ -95,10 +122,14 @@ onDeactivated(() => {
   _stopLivePolling()
 })
 
-// KeepAlive eviction or full unmount: stop everything
+// KeepAlive eviction or full unmount: stop live polling.
+// Only stop benchmark polls if no run is active — if a benchmark IS running,
+// the module-level timers keep firing and the store retains the state.
 onUnmounted(() => {
   _stopLivePolling()
-  stopBenchmarkPolls()
+  if (!benchRunning.value) {
+    stopBenchmarkPolls()
+  }
 })
 
 watch(() => serverStore.isRunning, (running) => {
@@ -296,27 +327,38 @@ function clearBenchModels() {
   benchSelectedModels.value = []
 }
 
-// Run state
-const benchRunning     = ref(false)
-const speedPhase       = ref<'idle' | 'running' | 'done' | 'error'>('idle')
-const qualityPhase     = ref<'idle' | 'running' | 'done' | 'error'>('idle')
-const qualityLines     = ref<string[]>([])
+// qualityLogRef is a DOM ref — remains local to the component
 const qualityLogRef    = ref<HTMLPreElement | null>(null)
-let   qualityPollTimer: ReturnType<typeof setInterval> | null = null
-let   speedPollTimer:   ReturnType<typeof setInterval> | null = null
-
-// Last-run results
-const lastRunSpeed   = ref<typeof modelsStore.benchmarkResults extends (infer T)[] ? T : any | null>(null)
-const lastRunQuality = ref<Record<string, any> | null>(null)
-const lastRunModel   = ref('')
-const lastRunTime    = ref('')
+// benchRunName is local config, not persistent run state
 const benchRunName    = ref('')
-const qualityRunId    = ref<string | null>(null)
-const benchStopping   = ref(false)
 
 function stopBenchmarkPolls() {
-  if (qualityPollTimer) { clearInterval(qualityPollTimer); qualityPollTimer = null }
-  if (speedPollTimer)   { clearInterval(speedPollTimer);   speedPollTimer   = null }
+  if (_qualityPollTimer) { clearInterval(_qualityPollTimer); _qualityPollTimer = null }
+  if (_speedPollTimer)   { clearInterval(_speedPollTimer);   _speedPollTimer   = null }
+}
+
+/** Re-attaches the quality poll after a component remount while a run is active. */
+function _reconnectQualityPoll(runId: string) {
+  _qualityPollTimer = setInterval(async () => {
+    try {
+      const out = await api.get<{
+        running: boolean; lines: string[]; results: any; error: string | null; total_lines: number
+      }>(`/quality-benchmark/output/${runId}?since=${_lineOffset}`)
+      qualityLines.value.push(...out.lines)
+      _lineOffset = out.total_lines
+      if (!out.running) {
+        clearInterval(_qualityPollTimer!); _qualityPollTimer = null
+        qualityPhase.value = out.error ? 'error' : 'done'
+        if (out.results) lastRunQuality.value = out.results
+        benchRunning.value = false
+        modelsStore.fetchBenchmarkResults()
+      }
+    } catch {
+      clearInterval(_qualityPollTimer!); _qualityPollTimer = null
+      qualityPhase.value = 'error'
+      benchRunning.value = false
+    }
+  }, 1000)
 }
 
 async function stopBenchmark() {
@@ -383,11 +425,11 @@ async function _doBenchmarkRun() {
       checkDone()
     }
     if (speedPhase.value === 'running') {
-      speedPollTimer = setInterval(async () => {
+      _speedPollTimer = setInterval(async () => {
         try {
           const status = await api.get<{ running: boolean }>('/benchmark/status')
           if (!status.running) {
-            clearInterval(speedPollTimer!); speedPollTimer = null
+            clearInterval(_speedPollTimer!); _speedPollTimer = null
             speedPhase.value = 'done'
             await modelsStore.fetchBenchmarkResults()
             const hist = modelsStore.benchmarkHistory
@@ -396,7 +438,7 @@ async function _doBenchmarkRun() {
             checkDone()
           }
         } catch {
-          clearInterval(speedPollTimer!); speedPollTimer = null
+          clearInterval(_speedPollTimer!); _speedPollTimer = null
           speedPhase.value = 'error'
           speedDone = true
           checkDone()
@@ -417,23 +459,23 @@ async function _doBenchmarkRun() {
       })
       const runId = runData.run_id
       qualityRunId.value = runId
-      let lineOffset = 0
-      qualityPollTimer = setInterval(async () => {
+      _lineOffset = 0
+      _qualityPollTimer = setInterval(async () => {
         try {
           const out = await api.get<{
             running: boolean; lines: string[]; results: any; error: string | null; total_lines: number
-          }>(`/quality-benchmark/output/${runId}?since=${lineOffset}`)
+          }>(`/quality-benchmark/output/${runId}?since=${_lineOffset}`)
           qualityLines.value.push(...out.lines)
-          lineOffset = out.total_lines
+          _lineOffset = out.total_lines
           if (!out.running) {
-            clearInterval(qualityPollTimer!); qualityPollTimer = null
+            clearInterval(_qualityPollTimer!); _qualityPollTimer = null
             qualityPhase.value = out.error ? 'error' : 'done'
             if (out.results) lastRunQuality.value = out.results
             qualityDone = true
             checkDone()
           }
         } catch {
-          clearInterval(qualityPollTimer!); qualityPollTimer = null
+          clearInterval(_qualityPollTimer!); _qualityPollTimer = null
           qualityPhase.value = 'error'
           qualityDone = true
           checkDone()
@@ -850,7 +892,10 @@ watch(activeTab, (tab) => {
           class="tab-btn"
           :class="{ active: activeTab === tab }"
           @click="activeTab = tab"
-        >{{ tab }}</button>
+        >
+          {{ tab }}
+          <span v-if="tab === 'Run Tests' && benchRunning" class="tab-run-dot" />
+        </button>
       </div>
     </div>
 
@@ -1757,6 +1802,22 @@ watch(activeTab, (tab) => {
   color: var(--tx-primary);
   border-bottom-color: var(--si-400);
   font-weight: 600;
+}
+
+/* Pulsing dot shown on "Run Tests" tab while a benchmark is running */
+.tab-run-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--si-400);
+  margin-left: 5px;
+  vertical-align: middle;
+  animation: tab-dot-pulse 1.2s ease-in-out infinite;
+}
+@keyframes tab-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.7); }
 }
 
 .tab-body {
