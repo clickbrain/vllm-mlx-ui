@@ -393,7 +393,7 @@ function bestModelForUseCase(_useCase: string): string | null {
 }
 
 .section-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -468,20 +468,20 @@ function bestModelForUseCase(_useCase: string): string | null {
 
 .check-name {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 14.5px;
   color: var(--tx-primary);
   flex: 1;
 }
 
 .check-quant {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
 }
 
 .check-size {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
   min-width: 48px;
   text-align: right;
@@ -497,7 +497,7 @@ function bestModelForUseCase(_useCase: string): string | null {
 
 .field-label {
   display: block;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -552,7 +552,7 @@ function bestModelForUseCase(_useCase: string): string | null {
 }
 
 .results-title {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -575,7 +575,7 @@ function bestModelForUseCase(_useCase: string): string | null {
 .results-table th {
   padding: var(--space-2) var(--space-4);
   text-align: left;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -597,7 +597,7 @@ function bestModelForUseCase(_useCase: string): string | null {
 
 .mono-cell {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 14.5px;
 }
 
 .num { text-align: right; }
@@ -631,7 +631,7 @@ function bestModelForUseCase(_useCase: string): string | null {
   border: 1px solid var(--bd-default);
   border-radius: var(--r-pill);
   color: var(--tx-secondary);
-  font-size: 12px;
+  font-size: 14px;
   font-family: inherit;
   cursor: pointer;
   transition:
@@ -660,7 +660,7 @@ function bestModelForUseCase(_useCase: string): string | null {
 }
 
 .uc-label {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -690,7 +690,7 @@ function bestModelForUseCase(_useCase: string): string | null {
 }
 
 .history-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -711,7 +711,7 @@ function bestModelForUseCase(_useCase: string): string | null {
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--bd-subtle);
-  font-size: 12px;
+  font-size: 14px;
   transition: background var(--transition-fast);
 }
 .history-row:last-child { border-bottom: none; }
@@ -719,14 +719,14 @@ function bestModelForUseCase(_useCase: string): string | null {
 
 .history-date {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
   min-width: 140px;
 }
 
 .history-models {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-secondary);
   flex: 1;
   overflow: hidden;
@@ -736,7 +736,7 @@ function bestModelForUseCase(_useCase: string): string | null {
 
 .history-tps {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 13.5px;
   color: var(--si-300);
   white-space: nowrap;
 }
@@ -746,7 +746,7 @@ function bestModelForUseCase(_useCase: string): string | null {
   border: none;
   color: var(--tx-muted);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 13px;
   padding: 2px 4px;
   border-radius: var(--r-sm);
   transition: color var(--transition-fast);
@@ -813,7 +813,7 @@ function bestModelForUseCase(_useCase: string): string | null {
 }
 
 .saved-name {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--tx-primary);
   white-space: nowrap;
@@ -824,7 +824,7 @@ function bestModelForUseCase(_useCase: string): string | null {
 
 .saved-meta {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
 }
 
@@ -838,7 +838,7 @@ function bestModelForUseCase(_useCase: string): string | null {
 
 .saved-stat {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 13.5px;
   color: var(--tx-secondary);
   background: var(--bg-elevated);
   border: 1px solid var(--bd-subtle);
@@ -854,7 +854,7 @@ function bestModelForUseCase(_useCase: string): string | null {
 }
 
 .saved-more {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
 }
 
@@ -863,7 +863,7 @@ function bestModelForUseCase(_useCase: string): string | null {
   border: none;
   color: var(--tx-muted);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 13px;
   padding: 2px 4px;
   border-radius: var(--r-sm);
   transition: color var(--transition-fast);

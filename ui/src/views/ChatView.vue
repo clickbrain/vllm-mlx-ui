@@ -975,7 +975,7 @@ onUnmounted(() => {
 
 .model-tag {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--si-300);
   background: var(--ac-bg);
   border: 1px solid var(--ac-border);
@@ -995,7 +995,7 @@ onUnmounted(() => {
   border-radius: var(--r-md);
   color: var(--tx-secondary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   padding: 3px 8px;
   cursor: pointer;
   max-width: 160px;
@@ -1046,7 +1046,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -1096,7 +1096,7 @@ onUnmounted(() => {
   background: rgba(239, 68, 68, .08);
   border: 1px solid rgba(239, 68, 68, .25);
   border-radius: var(--r-md);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--cr-300, #f87171);
   max-width: 380px;
 }
@@ -1128,7 +1128,7 @@ onUnmounted(() => {
   border: 1px solid var(--bd-default);
   border-radius: var(--r-md);
   color: var(--tx-secondary);
-  font-size: 12px;
+  font-size: 14px;
   font-family: inherit;
   padding: var(--space-2) var(--space-3);
   cursor: pointer;
@@ -1228,7 +1228,7 @@ onUnmounted(() => {
   background: var(--bg3);
   border: 1px solid var(--bd);
   color: var(--tx2);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1;
   display: flex;
   align-items: center;
@@ -1264,7 +1264,7 @@ onUnmounted(() => {
 .stopped-badge {
   display: inline-block;
   margin-left: 8px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: .05em;
   text-transform: uppercase;
@@ -1292,7 +1292,7 @@ onUnmounted(() => {
   border: 1px solid var(--bd-default);
   border-radius: var(--r-sm);
   color: var(--tx-muted);
-  font-size: 10px;
+  font-size: 12px;
   font-family: inherit;
   font-weight: 500;
   cursor: pointer;
@@ -1334,7 +1334,7 @@ onUnmounted(() => {
   background: rgba(239, 68, 68, .08);
   border: 1px solid rgba(239, 68, 68, .25);
   border-radius: var(--r-md);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--cr-300, #f87171);
   flex-shrink: 0;
 }
@@ -1343,7 +1343,7 @@ onUnmounted(() => {
   border: none;
   color: inherit;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 14px;
   opacity: 0.7;
   flex-shrink: 0;
   padding: 0 2px;
@@ -1371,7 +1371,7 @@ onUnmounted(() => {
   background: none;
   border: none;
   color: var(--tx-muted);
-  font-size: 12px;
+  font-size: 14px;
   font-family: inherit;
   cursor: pointer;
   padding: 2px 0;
@@ -1394,7 +1394,7 @@ onUnmounted(() => {
 }
 .stream-check { accent-color: var(--si-500); width: 13px; height: 13px; cursor: pointer; }
 .stream-label {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: .04em;
   color: var(--tx-muted);
@@ -1412,7 +1412,7 @@ onUnmounted(() => {
 }
 .task-mode-btn {
   padding: 3px 7px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: .03em;
   font-family: inherit;
@@ -1438,7 +1438,7 @@ onUnmounted(() => {
   background: var(--bg-elevated);
   border: 1px solid var(--bd-default);
   border-radius: var(--r-sm);
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   font-weight: 500;
   color: var(--tx-secondary);
@@ -1453,7 +1453,7 @@ onUnmounted(() => {
 /* Token count indicator */
 .token-count {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 12.5px;
   color: var(--tx-muted);
   margin-left: auto;
   white-space: nowrap;
@@ -1481,7 +1481,7 @@ onUnmounted(() => {
 }
 
 .param-label {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .05em;
   text-transform: uppercase;
@@ -1498,7 +1498,7 @@ onUnmounted(() => {
 
 .param-val {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-secondary);
   width: 36px;
   text-align: right;
@@ -1511,12 +1511,12 @@ onUnmounted(() => {
   border-radius: var(--r-sm);
   color: var(--tx-primary);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   padding: 3px 8px;
 }
 
 .param-hint {
-  font-size: 10.5px;
+  font-size: 12.5px;
   color: var(--tx-muted);
   white-space: nowrap;
 }
@@ -1527,7 +1527,7 @@ onUnmounted(() => {
   gap: 4px;
   background: none;
   border: none;
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   color: var(--tx-muted);
   cursor: pointer;
@@ -1598,7 +1598,7 @@ onUnmounted(() => {
 }
 
 .input-hint {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--tx-muted);
   margin: 4px 0 0;
   text-align: right;
@@ -1627,7 +1627,7 @@ onUnmounted(() => {
 }
 
 .saved-title {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -1648,7 +1648,7 @@ onUnmounted(() => {
 
 .saved-count {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
 }
 
@@ -1662,7 +1662,7 @@ onUnmounted(() => {
   background: var(--bg-elevated);
   border: 1px solid var(--bd-default);
   border-radius: var(--r-sm);
-  font-size: 10px;
+  font-size: 12px;
   font-family: inherit;
   font-weight: 600;
   color: var(--tx-secondary);
@@ -1680,7 +1680,7 @@ onUnmounted(() => {
 
 .saved-empty {
   padding: var(--space-4);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-muted);
   line-height: 1.5;
   text-align: center;
@@ -1711,7 +1711,7 @@ onUnmounted(() => {
 .saved-load-btn:hover { background: var(--bg-elevated); }
 
 .saved-item-title {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -1720,7 +1720,7 @@ onUnmounted(() => {
 }
 
 .saved-item-meta {
-  font-size: 10.5px;
+  font-size: 12.5px;
   color: var(--tx-muted);
   font-family: var(--font-mono);
 }
@@ -1731,7 +1731,7 @@ onUnmounted(() => {
   color: var(--tx-muted);
   cursor: pointer;
   padding: 0 var(--space-2);
-  font-size: 11px;
+  font-size: 13px;
   transition: color var(--transition-fast);
   flex-shrink: 0;
 }

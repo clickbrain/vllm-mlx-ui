@@ -52,7 +52,7 @@ const modelsStore = useModelsStore()
 }
 
 .queue-title {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -62,7 +62,7 @@ const modelsStore = useModelsStore()
 
 .queue-count {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
   background: var(--bg-elevated);
   border: 1px solid var(--bd-default);
@@ -88,7 +88,7 @@ const modelsStore = useModelsStore()
 
 .item-id {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -98,7 +98,7 @@ const modelsStore = useModelsStore()
 
 .item-pct {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
   flex-shrink: 0;
 }

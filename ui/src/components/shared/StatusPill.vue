@@ -38,7 +38,7 @@ const label = computed<string>(() => ({
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: .06em;
   text-transform: uppercase;

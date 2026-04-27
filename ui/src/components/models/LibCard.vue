@@ -178,24 +178,24 @@ const bestBench = computed(() => modelsStore.bestBenchmarkPerModel.get(props.mod
 
 .meta-chip {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-secondary);
   font-weight: 500;
 }
 
 .meta-sep {
   color: var(--tx-muted);
-  font-size: 11px;
+  font-size: 13px;
   margin: 0 1px;
 }
 
 .fit-chip {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
 }
 
 .bench-badge {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   font-family: var(--font-mono);
   color: var(--si-300);
@@ -245,7 +245,7 @@ const bestBench = computed(() => modelsStore.bestBenchmarkPerModel.get(props.mod
 
 .progress-pct {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-secondary);
   min-width: 32px;
   text-align: right;

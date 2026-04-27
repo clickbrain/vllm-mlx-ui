@@ -506,7 +506,7 @@ watch(activeTab, (tab) => {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-muted);
   background: none;
   border: none;
@@ -544,7 +544,7 @@ watch(activeTab, (tab) => {
   border: 1px solid var(--bd-default);
   border-radius: var(--r-pill);
   color: var(--tx-tertiary);
-  font-size: 12px;
+  font-size: 14px;
   font-family: inherit;
   cursor: pointer;
   transition:
@@ -571,7 +571,7 @@ watch(activeTab, (tab) => {
   border: 1px solid transparent;
   border-radius: var(--r-sm);
   color: var(--tx-muted);
-  font-size: 12px;
+  font-size: 14px;
   font-family: var(--font-mono);
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast);
@@ -671,7 +671,7 @@ watch(activeTab, (tab) => {
   background: transparent;
   border: none;
   color: var(--tx-tertiary);
-  font-size: 12px;
+  font-size: 14px;
   font-family: inherit;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
@@ -709,7 +709,7 @@ watch(activeTab, (tab) => {
 
 .col-model {
   flex: 1;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -717,7 +717,7 @@ watch(activeTab, (tab) => {
 }
 
 .col-fit {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -729,7 +729,7 @@ watch(activeTab, (tab) => {
 .col-downloads,
 .col-likes,
 .col-trending {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -757,7 +757,7 @@ watch(activeTab, (tab) => {
 .col-sortable.col-active { color: var(--si-300); }
 
 .sort-arrow {
-  font-size: 10px;
+  font-size: 12px;
   opacity: 0.7;
 }
 .col-sortable.col-active .sort-arrow { opacity: 1; }
@@ -776,7 +776,7 @@ watch(activeTab, (tab) => {
 
 .lib-hdr-model {
   flex: 1;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -784,7 +784,7 @@ watch(activeTab, (tab) => {
 }
 
 .lib-hdr-fit {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .05em;
   text-transform: uppercase;
@@ -794,7 +794,7 @@ watch(activeTab, (tab) => {
 }
 
 .lib-hdr-note {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
@@ -803,7 +803,7 @@ watch(activeTab, (tab) => {
 }
 
 .lib-hdr-actions {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -852,7 +852,7 @@ watch(activeTab, (tab) => {
   background: transparent;
   border: none;
   color: var(--tx-muted);
-  font-size: 12px;
+  font-size: 14px;
   font-family: var(--font-mono);
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
@@ -882,7 +882,7 @@ watch(activeTab, (tab) => {
   border: none;
   color: var(--cr-300);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 16px;
   padding: 0 2px;
   opacity: 0.7;
 }
@@ -927,7 +927,7 @@ watch(activeTab, (tab) => {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-secondary);
   cursor: pointer;
   user-select: none;
@@ -943,7 +943,7 @@ watch(activeTab, (tab) => {
 }
 
 .company-row-label {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
   text-transform: uppercase;
   letter-spacing: .06em;
@@ -958,7 +958,7 @@ watch(activeTab, (tab) => {
   border: 1px solid var(--bd-default);
   border-radius: var(--r-pill);
   color: var(--tx-secondary);
-  font-size: 12px;
+  font-size: 14px;
   font-family: inherit;
   cursor: pointer;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
@@ -993,7 +993,7 @@ watch(activeTab, (tab) => {
 }
 
 .filter-label {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
   font-weight: 600;
   text-transform: uppercase;
@@ -1008,7 +1008,7 @@ watch(activeTab, (tab) => {
   border: 1px solid var(--bd-subtle);
   border-radius: var(--r-sm);
   color: var(--tx-muted);
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);

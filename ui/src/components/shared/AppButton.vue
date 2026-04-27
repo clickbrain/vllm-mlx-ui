@@ -72,7 +72,7 @@ const classes = computed(() => [
 /* Sizes */
 .btn-sm {
   padding: 5px 10px;
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: .01em;
 }
 .btn-md {

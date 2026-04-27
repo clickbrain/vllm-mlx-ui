@@ -61,7 +61,7 @@ onMounted(() => { open.value = props.defaultOpen ?? false })
 .collapsible-header:hover { background: var(--bg-elevated); }
 
 .collapsible-title {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;

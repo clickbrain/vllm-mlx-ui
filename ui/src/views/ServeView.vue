@@ -467,7 +467,7 @@ async function doClearCache(type: string) {
 }
 
 .section-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -488,7 +488,7 @@ async function doClearCache(type: string) {
 
 /* Shown when /metrics fetch fails while server is running */
 .metrics-stale-badge {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
@@ -501,7 +501,7 @@ async function doClearCache(type: string) {
 
 .view-full-link {
   margin-left: auto;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
@@ -560,11 +560,11 @@ async function doClearCache(type: string) {
 }
 .config-value.mono {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 14.5px;
 }
 
 .config-note {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-muted);
   font-style: italic;
   padding-top: var(--space-2);
@@ -578,7 +578,7 @@ async function doClearCache(type: string) {
 }
 
 .model-picker-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -597,7 +597,7 @@ async function doClearCache(type: string) {
   border-radius: var(--r-md);
   color: var(--tx-primary);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   padding: 5px 28px 5px 10px;
   appearance: none;
   -webkit-appearance: none;
@@ -642,7 +642,7 @@ async function doClearCache(type: string) {
   border-radius: var(--r-md);
   color: var(--tx-primary);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 14.5px;
   padding: 4px 8px;
   width: 120px;
   transition: border-color var(--transition-fast);
@@ -662,7 +662,7 @@ async function doClearCache(type: string) {
 }
 
 .cache-msg {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--si-300);
 }
 
@@ -684,12 +684,12 @@ async function doClearCache(type: string) {
   background: rgba(245,158,11,.08);
   border: 1px solid rgba(245,158,11,.25);
   border-radius: var(--r-md);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--cu-400);
 }
 
 .conn-note {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-muted);
 }
 
@@ -707,7 +707,7 @@ async function doClearCache(type: string) {
 }
 
 .conn-iface-label {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -733,7 +733,7 @@ async function doClearCache(type: string) {
 .conn-endpoint-row:last-child { border-bottom: none; }
 
 .ep-tag {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: .04em;
   color: var(--tx-muted);
@@ -742,7 +742,7 @@ async function doClearCache(type: string) {
 
 .ep-url {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -754,7 +754,7 @@ async function doClearCache(type: string) {
   background: var(--bg-elevated);
   border: 1px solid var(--bd-default);
   border-radius: var(--r-sm);
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   color: var(--tx-secondary);
   cursor: pointer;
@@ -765,7 +765,7 @@ async function doClearCache(type: string) {
 .copy-btn:hover { border-color: var(--bd-emphasis); color: var(--tx-primary); }
 .copy-btn.copied { color: var(--ph-400); border-color: rgba(74,222,128,.3); }
 
-.conn-empty { font-size: 12px; color: var(--tx-muted); font-style: italic; }
+.conn-empty { font-size: 14px; color: var(--tx-muted); font-style: italic; }
 
 /* Proxy section */
 .conn-proxy-section {
@@ -784,7 +784,7 @@ async function doClearCache(type: string) {
 }
 
 .conn-proxy-title {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -792,7 +792,7 @@ async function doClearCache(type: string) {
 }
 
 .conn-proxy-badge {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .05em;
   padding: 2px 8px;
@@ -802,7 +802,7 @@ async function doClearCache(type: string) {
 .proxy-off { color: var(--tx-muted); background: var(--bg-elevated); border: 1px solid var(--bd-subtle); }
 
 .conn-proxy-note {
-  font-size: 11.5px;
+  font-size: 13.5px;
   color: var(--tx-muted);
   line-height: 1.5;
 }
@@ -826,7 +826,7 @@ async function doClearCache(type: string) {
   border: none;
   color: var(--cr-300);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 16px;
   padding: 0 2px;
   opacity: 0.7;
 }
@@ -852,7 +852,7 @@ async function doClearCache(type: string) {
   margin: 0;
   padding: var(--space-2) var(--space-4) var(--space-3);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-secondary);
   white-space: pre-wrap;
   word-break: break-word;
@@ -864,13 +864,13 @@ async function doClearCache(type: string) {
 /* Logs */
 .logs-body { min-height: 80px; }
 .logs-empty {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-muted);
   font-style: italic;
 }
 .logs-pre {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 13.5px;
   color: var(--tx-secondary);
   white-space: pre-wrap;
   word-break: break-all;

@@ -48,7 +48,7 @@ body {
   background: var(--bg-canvas);
   color: var(--tx-primary);
   font-family: var(--font-sans);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   -webkit-font-smoothing: antialiased;
 }
 
