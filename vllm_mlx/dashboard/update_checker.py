@@ -157,7 +157,27 @@ def _version_gt(latest: str, installed: str) -> bool:
         return latest.lstrip("v") != installed.lstrip("v")
 
 
-def _detect_install_method() -> str:
+def _homebrew_formula_version() -> str | None:
+    """Return the Homebrew-installed formula version from the cellar path.
+
+    When pip upgrades the vllm-mlx Python package inside the brew venv, the
+    Python __version__ advances but the UI JavaScript (built during 'brew install')
+    stays from the formula tarball.  Reading the version from the cellar path
+    gives us the version of the *UI build* that's actually running, not the
+    pip package version.
+
+    Returns the version string (e.g. "0.3.41") or None if not resolvable.
+    """
+    import sys
+    import re
+    prefix = sys.prefix  # e.g. /opt/homebrew/Cellar/vllm-mlx-ui/0.3.41/libexec/venv
+    m = re.search(r"[Cc]ellar/vllm-mlx-ui/([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)", prefix)
+    if m:
+        return m.group(1)
+    return None
+
+
+
     """Return 'homebrew', 'pip', or 'unknown'."""
     import sys
     # Check sys.prefix first — most reliable when running inside a Homebrew cellar
@@ -208,10 +228,16 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
             installed_display = f"v{_ui_ver} ({ui_installed_commit})"
             latest_display = f"commit {ui_latest_commit}"
         else:
-            # Stable semver install: compare version numbers
-            ui_update = _version_gt(ui_latest, _ui_ver)
-            installed_display = f"v{_ui_ver}"
-            latest_display = f"v{ui_latest}" if ui_latest != "unknown" else _ui_ver
+            # Stable semver install: prefer the cellar version (actual UI build)
+            # over __version__ (pip package, which may have been upgraded separately
+            # leaving the JS assets from an older formula tarball).
+            cellar_ver = _homebrew_formula_version()
+            installed_ver = cellar_ver or _ui_ver
+            ui_update = _version_gt(ui_latest, installed_ver)
+            installed_display = f"v{installed_ver}"
+            if cellar_ver and cellar_ver != _ui_ver:
+                installed_display += f" (pip: v{_ui_ver})"
+            latest_display = f"v{ui_latest}" if ui_latest != "unknown" else installed_ver
         return PackageInfo(
             name="vllm-mlx-ui (dashboard)",
             installed=installed_display,
