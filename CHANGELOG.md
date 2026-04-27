@@ -1,5 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
-## v0.3.59 — 2026-04-27
+## v0.3.60 — 2026-04-27
+
+- Feature: **Benchmark Performance Settings** — collapsible "Performance Settings" section in the Run Tests config; toggle Continuous Batching, Paged KV Cache, KV Cache Quantization, GPU Memory %, and Prefill Step Size per benchmark run; if settings differ from current server config the server auto-restarts before the test runs
+- Feature: **AI Advisor tab** — select a task type (Code, Math, Knowledge, Fast, General, Summarisation), choose models to evaluate, click Analyse; runs targeted quality + speed benchmarks and ranks models with a weighted score recommendation
+- Feature: **Fleet Auto-Detect** — "Scan Network" button in Settings › Fleet scans the local /24 subnet for machines running vllm-mlx-ui; discovered machines can be added with one click (`GET /fleet/discover` backend endpoint)
+
+
 
 - Fix: font size increase was not visible — 228 hard-coded pixel `font-size` values across all Vue components were bypassing the CSS token system; bumped each +2px programmatically; body base font also raised from `--text-sm` (15px) to `--text-base` (17px)
 

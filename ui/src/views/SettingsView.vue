@@ -30,6 +30,35 @@ const form = reactive({ name: '', host: '', port: 8502, type: 'remote' as 'remot
 const formError = ref('')
 const confirmRemove = ref<Machine | null>(null)
 
+// Fleet discovery
+interface DiscoveredMachine { ip: string; hostname: string; port: number; version: string; model_id: string }
+const discoverLoading = ref(false)
+const discoverResults = ref<DiscoveredMachine[] | null>(null)
+const discoverError = ref('')
+
+async function scanFleet() {
+  discoverLoading.value = true
+  discoverResults.value = null
+  discoverError.value = ''
+  try {
+    const results = await api.get<DiscoveredMachine[]>('/fleet/discover')
+    discoverResults.value = results ?? []
+  } catch (e: any) {
+    discoverError.value = e?.message ?? 'Scan failed'
+  } finally {
+    discoverLoading.value = false
+  }
+}
+
+function addDiscovered(d: DiscoveredMachine) {
+  const label = d.hostname && d.hostname !== d.ip ? d.hostname.split('.')[0] : d.ip
+  machinesStore.addMachine({ name: label, host: d.ip, port: d.port, type: 'remote', memoryGb: 0 })
+  // Remove from discovered list so button turns into confirmation
+  if (discoverResults.value) {
+    discoverResults.value = discoverResults.value.filter(r => r.ip !== d.ip)
+  }
+}
+
 const diskUsedGb = ref<number | null>(null)
 const editCachePath = ref(false)
 const cachePathInput = ref('~/.cache/huggingface/hub')
@@ -312,7 +341,35 @@ async function doRestart() {
           <div class="section-title">Fleet</div>
           <div class="section-desc">Manage local and remote machines running vllm-mlx.</div>
         </div>
-        <AppButton variant="secondary" size="sm" @click="showAddForm = !showAddForm">+ Add Machine</AppButton>
+        <div class="fleet-header-actions">
+          <AppButton variant="ghost" size="sm" :disabled="discoverLoading" @click="scanFleet">
+            <span v-if="discoverLoading" class="phase-spinner">⟳</span>
+            {{ discoverLoading ? 'Scanning…' : 'Scan Network' }}
+          </AppButton>
+          <AppButton variant="secondary" size="sm" @click="showAddForm = !showAddForm">+ Add Machine</AppButton>
+        </div>
+      </div>
+
+      <!-- Fleet discovery results -->
+      <div v-if="discoverError" class="discover-error">{{ discoverError }}</div>
+      <div v-if="discoverResults !== null" class="discover-results">
+        <div v-if="discoverResults.length === 0" class="discover-empty">
+          No vllm-mlx-ui servers found on local network.
+        </div>
+        <div v-else class="discover-list">
+          <div class="discover-header">
+            <span>IP</span><span>Hostname</span><span>Model</span><span>Version</span><span></span>
+          </div>
+          <div v-for="d in discoverResults" :key="d.ip" class="discover-row">
+            <span class="cell-mono">{{ d.ip }}</span>
+            <span class="cell-mono">{{ d.hostname !== d.ip ? d.hostname : '—' }}</span>
+            <span class="discover-model">{{ d.model_id || '—' }}</span>
+            <span class="cell-mono">{{ d.version || '—' }}</span>
+            <span class="cell-actions">
+              <AppButton variant="primary" size="sm" @click="addDiscovered(d)">Add</AppButton>
+            </span>
+          </div>
+        </div>
       </div>
 
       <div v-if="showAddForm" class="add-form">
@@ -901,6 +958,15 @@ async function doRestart() {
 .form-error { font-size: 14px; color: var(--cr-500); }
 .form-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
 .machine-table { display: flex; flex-direction: column; }
+.fleet-header-actions { display: flex; gap: var(--space-2); align-items: center; }
+.discover-error { padding: var(--space-3) var(--space-5); font-size: 14px; color: var(--cr-400); }
+.discover-empty { padding: var(--space-3) var(--space-5); font-size: var(--text-sm); color: var(--tx-muted); }
+.discover-results { border: 1px solid var(--bd-default); border-radius: var(--r-md); margin-bottom: var(--space-4); overflow: hidden; }
+.discover-list { display: flex; flex-direction: column; }
+.discover-header { display: grid; grid-template-columns: 130px 1.5fr 2fr 90px 70px; padding: var(--space-2) var(--space-5); background: var(--bg-elevated); font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--tx-muted); border-bottom: 1px solid var(--bd-default); }
+.discover-row { display: grid; grid-template-columns: 130px 1.5fr 2fr 90px 70px; padding: var(--space-3) var(--space-5); align-items: center; border-bottom: 1px solid var(--bd-subtle); font-size: var(--text-sm); color: var(--tx-secondary); }
+.discover-row:last-child { border-bottom: none; }
+.discover-model { font-size: 13px; color: var(--tx-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .table-header { display: grid; grid-template-columns: 1.5fr 1.5fr 80px 80px 100px 80px; padding: var(--space-2) var(--space-5); background: var(--bg-elevated); font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--tx-muted); border-bottom: 1px solid var(--bd-default); }
 .table-row { display: grid; grid-template-columns: 1.5fr 1.5fr 80px 80px 100px 80px; padding: var(--space-3) var(--space-5); align-items: center; border-bottom: 1px solid var(--bd-subtle); font-size: var(--text-sm); color: var(--tx-secondary); transition: background var(--transition-fast); }
 .table-row:last-child { border-bottom: none; }

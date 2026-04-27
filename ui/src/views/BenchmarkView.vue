@@ -68,6 +68,7 @@ onMounted(() => {
   cacheInterval = setInterval(refreshCache, 15_000)
   modelsStore.fetchBenchmarkResults()
   modelsStore.fetchModels()
+  loadPerfSettings()
 })
 
 onUnmounted(() => {
@@ -293,6 +294,10 @@ async function runBenchmark() {
   lastRunModel.value   = benchSelectedModels.value.join(', ')
   lastRunTime.value    = new Date().toLocaleTimeString()
 
+  await applyPerfAndRun(_doBenchmarkRun)
+}
+
+async function _doBenchmarkRun() {
   const runSpeed   = benchMode.value === 'speed'
   const runQuality = benchMode.value !== 'speed'
 
@@ -396,7 +401,285 @@ const anyResultsReady = computed(() =>
   benchMode.value === 'speed' && lastRunSpeed.value !== null
 )
 
-// ── HISTORY TAB ────────────────────────────────────────────────────────────
+// ── PERFORMANCE SETTINGS OVERRIDE ──────────────────────────────────────────
+// These let the user run benchmarks with specific server settings, overriding
+// the current server config for the duration of the test.
+interface PerfSettings {
+  continuous_batching: boolean
+  paged_kv_cache: boolean
+  kv_cache_quantization: boolean
+  gpu_memory_utilization: number
+  prefill_step_size: number
+}
+
+const showPerfSettings = ref(false)
+const perfSettingsLoaded = ref(false)
+// Original settings before any override (for restore after benchmark)
+const perfOriginal = ref<PerfSettings | null>(null)
+// User-editable override values
+const perfOverride = ref<PerfSettings>({
+  continuous_batching: false,
+  paged_kv_cache: false,
+  kv_cache_quantization: false,
+  gpu_memory_utilization: 90,
+  prefill_step_size: 0,
+})
+const perfApplying = ref(false)
+const perfApplyError = ref('')
+
+async function loadPerfSettings() {
+  if (perfSettingsLoaded.value) return
+  try {
+    const cfg = await api.get<Record<string, any>>('/config')
+    const s: PerfSettings = {
+      continuous_batching: !!cfg.continuous_batching,
+      paged_kv_cache: !!cfg.paged_kv_cache,
+      kv_cache_quantization: !!cfg.kv_cache_quantization,
+      gpu_memory_utilization: Math.round((cfg.gpu_memory_utilization ?? 0.9) * 100),
+      prefill_step_size: cfg.prefill_step_size ?? 0,
+    }
+    perfOverride.value = { ...s }
+    perfOriginal.value = { ...s }
+    perfSettingsLoaded.value = true
+  } catch { /* ignore */ }
+}
+
+const perfChanged = computed(() => {
+  if (!perfOriginal.value) return false
+  const o = perfOriginal.value
+  const n = perfOverride.value
+  return o.continuous_batching !== n.continuous_batching
+    || o.paged_kv_cache !== n.paged_kv_cache
+    || o.kv_cache_quantization !== n.kv_cache_quantization
+    || o.gpu_memory_utilization !== n.gpu_memory_utilization
+    || o.prefill_step_size !== n.prefill_step_size
+})
+
+// Apply perf settings and restart server, wait for it to come back, then call callback
+async function applyPerfAndRun(callback: () => Promise<void>) {
+  if (!perfChanged.value) { await callback(); return }
+  perfApplying.value = true
+  perfApplyError.value = ''
+  try {
+    // Save new settings
+    await api.post('/config', {
+      continuous_batching: perfOverride.value.continuous_batching,
+      paged_kv_cache: perfOverride.value.paged_kv_cache,
+      kv_cache_quantization: perfOverride.value.kv_cache_quantization,
+      gpu_memory_utilization: perfOverride.value.gpu_memory_utilization / 100,
+      prefill_step_size: perfOverride.value.prefill_step_size,
+    })
+    await api.post('/restart', {})
+    // Wait for server to come back (up to 30s)
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 500))
+      try {
+        const st = await api.get<{ running: boolean }>('/status')
+        if (st.running) break
+      } catch { /* still restarting */ }
+    }
+    perfOriginal.value = { ...perfOverride.value }
+    await callback()
+  } catch (e: any) {
+    perfApplyError.value = e?.message ?? 'Failed to apply settings'
+    benchRunning.value = false
+    speedPhase.value = 'idle'
+    qualityPhase.value = 'idle'
+  } finally {
+    perfApplying.value = false
+  }
+}
+
+// ── ADVISOR TAB ────────────────────────────────────────────────────────────
+const ADVISOR_TASKS = [
+  { id: 'code',       label: '💻 Code Generation',   suites: ['humaneval'], speedWeight: 0.3, qualityWeight: 0.7 },
+  { id: 'math',       label: '🧮 Math & Reasoning',   suites: ['gsm8k'],     speedWeight: 0.2, qualityWeight: 0.8 },
+  { id: 'knowledge',  label: '📚 Knowledge / Q&A',    suites: ['mmlu'],      speedWeight: 0.3, qualityWeight: 0.7 },
+  { id: 'fast',       label: '⚡ Fast Responses',      suites: [],            speedWeight: 0.9, qualityWeight: 0.1 },
+  { id: 'general',    label: '🌐 General Purpose',     suites: ['gsm8k','mmlu','humaneval'], speedWeight: 0.4, qualityWeight: 0.6 },
+  { id: 'summarise',  label: '📝 Summarisation',       suites: ['mmlu'],      speedWeight: 0.4, qualityWeight: 0.6 },
+] as const
+
+type AdvisorTaskId = typeof ADVISOR_TASKS[number]['id']
+
+const advisorTask       = ref<AdvisorTaskId>('general')
+const advisorModels     = ref<string[]>([])
+const advisorRunning    = ref(false)
+const advisorDone       = ref(false)
+const advisorLines      = ref<string[]>([])
+const advisorRunId      = ref<string | null>(null)
+const advisorResults    = ref<Record<string, any> | null>(null)
+const advisorSpeedResults = ref<any[]>([])
+let advisorPollTimer: ReturnType<typeof setInterval> | null = null
+
+const advisorTaskDef = computed(() => ADVISOR_TASKS.find(t => t.id === advisorTask.value)!)
+
+// Seed advisor models with all cached models
+watch(cachedModels, (models) => {
+  if (advisorModels.value.length === 0 && models.length > 0) {
+    advisorModels.value = models.map((m: { id: string }) => m.id)
+  }
+}, { immediate: true })
+
+function toggleAdvisorModel(id: string) {
+  const idx = advisorModels.value.indexOf(id)
+  if (idx === -1) advisorModels.value.push(id)
+  else advisorModels.value.splice(idx, 1)
+}
+
+// Score a model based on quality + speed results
+function scoreModel(modelId: string): { score: number; quality: number; speed: number } {
+  const taskDef = advisorTaskDef.value
+  let qualityScore = 0
+  let speedScore = 0
+
+  // Quality from last advisor run results
+  if (advisorResults.value?.suites) {
+    const suites = advisorResults.value.suites as Record<string, any>
+    const relevant = taskDef.suites.filter(s => suites[s])
+    if (relevant.length > 0) {
+      qualityScore = relevant.reduce((acc, s) => acc + (suites[s]?.accuracy ?? 0), 0) / relevant.length
+    }
+  }
+
+  // Speed from speed benchmark results
+  const speedResult = advisorSpeedResults.value.find((r: any) => r.model_id === modelId || r.model === modelId)
+  if (speedResult?.avg_tps) {
+    // Normalise: 50 tok/s = 1.0, scale linearly
+    speedScore = Math.min(1, speedResult.avg_tps / 50)
+  }
+
+  const score = qualityScore * taskDef.qualityWeight + speedScore * taskDef.speedWeight
+  return { score, quality: qualityScore, speed: speedScore }
+}
+
+interface AdvisorModelResult {
+  id: string
+  label: string
+  score: number
+  quality: number
+  speed: number
+  speedRaw: number
+  recommendation: string
+}
+
+const advisorRankings = computed((): AdvisorModelResult[] => {
+  if (!advisorDone.value) return []
+  return advisorModels.value.map(id => {
+    const s = scoreModel(id)
+    const speedResult = advisorSpeedResults.value.find((r: any) => r.model_id === id || r.model === id)
+    return {
+      id,
+      label: id.split('/').pop() ?? id,
+      score: s.score,
+      quality: s.quality,
+      speed: s.speed,
+      speedRaw: speedResult?.avg_tps ?? 0,
+      recommendation: getAdvisorRec(id, s),
+    }
+  }).sort((a, b) => b.score - a.score)
+})
+
+function getAdvisorRec(modelId: string, scores: { score: number; quality: number; speed: number }): string {
+  const name = modelId.toLowerCase()
+  const isSmall = /0\.[0-9]b|1[bB]|2[bB]/.test(name)
+  const isMed = /7[bB]|8[bB]/.test(name)
+  const recs: string[] = []
+  if (scores.quality > 0.7) recs.push('high accuracy')
+  else if (scores.quality < 0.4) recs.push('limited accuracy')
+  if (scores.speedRaw > 40) recs.push('fast generation')
+  else if (scores.speedRaw > 0 && scores.speedRaw < 20) recs.push('slower generation')
+  if (isSmall) recs.push('low memory')
+  if (isMed) recs.push('balanced')
+  return recs.length ? recs.join(' · ') : 'good all-rounder'
+}
+
+async function runAdvisorAnalysis() {
+  if (advisorRunning.value || advisorModels.value.length === 0) return
+  advisorRunning.value = true
+  advisorDone.value = false
+  advisorLines.value = []
+  advisorResults.value = null
+  advisorSpeedResults.value = []
+  advisorRunId.value = null
+
+  const taskDef = advisorTaskDef.value
+
+  try {
+    // 1. Run quality benchmark if task has suites
+    if (taskDef.suites.length > 0) {
+      advisorLines.value.push(`→ Running ${taskDef.suites.join(', ').toUpperCase()} benchmarks…\n`)
+      const runData = await api.post<{ ok: boolean; run_id: string }>('/quality-benchmark/run', {
+        suites: [...taskDef.suites],
+        num_questions: 10,
+        label: `advisor:${taskDef.id}`,
+      })
+      advisorRunId.value = runData.run_id
+      let offset = 0
+      await new Promise<void>((resolve) => {
+        advisorPollTimer = setInterval(async () => {
+          try {
+            const out = await api.get<{ running: boolean; lines: string[]; results: any; total_lines: number }>(
+              `/quality-benchmark/output/${runData.run_id}?since=${offset}`
+            )
+            advisorLines.value.push(...out.lines)
+            offset = out.total_lines
+            if (!out.running) {
+              clearInterval(advisorPollTimer!); advisorPollTimer = null
+              if (out.results) advisorResults.value = out.results
+              resolve()
+            }
+          } catch { clearInterval(advisorPollTimer!); advisorPollTimer = null; resolve() }
+        }, 1000)
+      })
+    }
+
+    // 2. Run speed benchmark for all selected models (if task cares about speed)
+    if (taskDef.speedWeight > 0.2) {
+      advisorLines.value.push(`\n→ Running speed benchmarks for ${advisorModels.value.length} model(s)…\n`)
+      await api.post('/benchmark/run', {
+        model_ids: advisorModels.value,
+        label: `advisor:${taskDef.id}:speed`,
+        config: { runs: 2, max_tokens: 256 },
+      })
+      await new Promise<void>((resolve) => {
+        const t = setInterval(async () => {
+          try {
+            const status = await api.get<{ running: boolean }>('/benchmark/status')
+            if (!status.running) {
+              clearInterval(t)
+              await modelsStore.fetchBenchmarkResults()
+              const hist = modelsStore.benchmarkHistory ?? []
+              // Get the most recent speed results for our models
+              advisorModels.value.forEach(id => {
+                const r = [...hist].reverse().find((h: any) => h.model_id === id || h.model === id)
+                if (r) advisorSpeedResults.value.push(r)
+              })
+              resolve()
+            }
+          } catch { clearInterval(t); resolve() }
+        }, 1500)
+      })
+    }
+
+    advisorDone.value = true
+    advisorLines.value.push('\n✓ Analysis complete\n')
+  } catch (e: any) {
+    advisorLines.value.push(`\n✗ Error: ${e?.message ?? 'Unknown error'}\n`)
+  } finally {
+    advisorRunning.value = false
+  }
+}
+
+function stopAdvisor() {
+  if (advisorPollTimer) { clearInterval(advisorPollTimer); advisorPollTimer = null }
+  if (advisorRunId.value) {
+    api.post(`/quality-benchmark/stop/${advisorRunId.value}`, {}).catch(() => {})
+  }
+  api.post('/benchmark/stop', {}).catch(() => {})
+  advisorRunning.value = false
+}
+
 // Most-recent first; loaded by onMounted
 const sortedHistory = computed(() => {
   let list = [...(modelsStore.benchmarkHistory ?? [])].sort((a, b) =>
@@ -815,14 +1098,59 @@ watch(activeTab, (tab) => {
                 :disabled="benchRunning"
               />
 
+              <!-- Performance settings override -->
+              <div class="perf-toggle-row" @click="showPerfSettings = !showPerfSettings; loadPerfSettings()">
+                <svg class="perf-chevron" :class="{ open: showPerfSettings }" viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path d="M4 6l4 4 4-4"/></svg>
+                <span class="bench-section-label" style="cursor:pointer;margin:0">Performance Settings</span>
+                <span v-if="perfChanged" class="perf-override-badge">overridden</span>
+              </div>
+              <div v-if="showPerfSettings" class="perf-settings-panel">
+                <div class="perf-row">
+                  <label class="perf-toggle">
+                    <input type="checkbox" v-model="perfOverride.continuous_batching" :disabled="benchRunning" />
+                    <span class="perf-label">Continuous Batching</span>
+                    <span class="perf-hint">Multi-user concurrent requests</span>
+                  </label>
+                </div>
+                <div class="perf-row">
+                  <label class="perf-toggle">
+                    <input type="checkbox" v-model="perfOverride.paged_kv_cache" :disabled="benchRunning" />
+                    <span class="perf-label">Paged KV Cache</span>
+                    <span class="perf-hint">vLLM-style memory paging</span>
+                  </label>
+                </div>
+                <div class="perf-row">
+                  <label class="perf-toggle">
+                    <input type="checkbox" v-model="perfOverride.kv_cache_quantization" :disabled="benchRunning" />
+                    <span class="perf-label">KV Cache Quantization</span>
+                    <span class="perf-hint">Compress KV cache to 8-bit</span>
+                  </label>
+                </div>
+                <div class="perf-row perf-row-inline">
+                  <span class="perf-label">GPU Memory Utilization</span>
+                  <input type="number" v-model.number="perfOverride.gpu_memory_utilization" min="10" max="100" step="5" class="perf-num-input" :disabled="benchRunning" />
+                  <span class="perf-unit">%</span>
+                </div>
+                <div class="perf-row perf-row-inline">
+                  <span class="perf-label">Prefill Step Size</span>
+                  <input type="number" v-model.number="perfOverride.prefill_step_size" min="0" max="4096" step="64" class="perf-num-input" :disabled="benchRunning" />
+                  <span class="perf-unit">tokens <span class="perf-hint">(0 = auto)</span></span>
+                </div>
+                <p v-if="perfChanged" class="perf-warn">
+                  ⚠ These settings differ from the current server config. The server will restart before the benchmark runs (~5–10s).
+                </p>
+                <p v-if="perfApplyError" class="perf-error">{{ perfApplyError }}</p>
+                <button v-if="perfChanged" class="perf-reset-btn" @click="perfOverride = { ...perfOriginal! }" :disabled="benchRunning">Reset to current</button>
+              </div>
+
               <!-- Run button -->
               <div class="bench-run-row">
                 <AppButton
-                  :disabled="benchRunning || !serverStore.isRunning || benchSelectedModels.length === 0 || (benchMode !== 'speed' && benchSuites.length === 0)"
+                  :disabled="perfApplying || benchRunning || !serverStore.isRunning || benchSelectedModels.length === 0 || (benchMode !== 'speed' && benchSuites.length === 0)"
                   @click="runBenchmark"
                 >
-                  <span v-if="benchRunning" class="spin" style="margin-right:6px" />
-                  {{ benchRunning ? 'Running…' : 'Run Benchmarks' }}
+                  <span v-if="perfApplying || benchRunning" class="spin" style="margin-right:6px" />
+                  {{ perfApplying ? 'Applying settings…' : benchRunning ? 'Running…' : 'Run Benchmarks' }}
                 </AppButton>
                 <AppButton
                   v-if="benchRunning"
@@ -1104,28 +1432,131 @@ watch(activeTab, (tab) => {
     </div>
 
     <!-- ── ADVISOR TAB ───────────────────────────────────────────────────── -->
-    <div v-else-if="activeTab === 'Advisor'" class="tab-body">
-      <div class="coming-soon-card">
-        <div class="cs-icon">
-          <svg viewBox="0 0 20 20" fill="currentColor" width="28" height="28" aria-hidden="true">
-            <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
-          </svg>
+    <div v-else-if="activeTab === 'Advisor'" class="tab-body advisor-tab">
+
+      <div class="advisor-layout">
+        <!-- Left: task selector + model selection -->
+        <div class="advisor-left">
+          <div class="panel-header">
+            <div class="panel-title">What are you building?</div>
+          </div>
+
+          <div class="advisor-tasks">
+            <button
+              v-for="task in ADVISOR_TASKS"
+              :key="task.id"
+              class="advisor-task-btn"
+              :class="{ active: advisorTask === task.id }"
+              :disabled="advisorRunning"
+              @click="advisorTask = task.id"
+            >{{ task.label }}</button>
+          </div>
+
+          <div class="bench-section-label" style="margin-top:var(--space-4)">Models to evaluate</div>
+          <div class="bench-model-list">
+            <div v-if="cachedModels.length === 0" class="bench-no-models">
+              No downloaded models — download one on the Models page.
+            </div>
+            <label
+              v-else
+              v-for="m in cachedModels"
+              :key="m.id"
+              class="bench-check"
+              :class="{ checked: advisorModels.includes(m.id) }"
+            >
+              <input type="checkbox" :disabled="advisorRunning" :checked="advisorModels.includes(m.id)" @change="toggleAdvisorModel(m.id)" />
+              <div class="bench-check-info">
+                <span class="bench-check-label mono">{{ m.id.split('/').pop() }}</span>
+                <span class="bench-check-desc">{{ m.id.split('/')[0] }} · {{ m.size_gb?.toFixed(1) ?? '?' }} GB</span>
+              </div>
+            </label>
+          </div>
+
+          <div class="bench-run-row" style="margin-top:var(--space-4)">
+            <AppButton
+              :disabled="advisorRunning || !serverStore.isRunning || advisorModels.length === 0"
+              @click="runAdvisorAnalysis"
+            >
+              <span v-if="advisorRunning" class="spin" style="margin-right:6px" />
+              {{ advisorRunning ? 'Analysing…' : 'Analyse Models' }}
+            </AppButton>
+            <AppButton v-if="advisorRunning" variant="secondary" @click="stopAdvisor">Stop</AppButton>
+          </div>
         </div>
-        <h3>AI Advisor</h3>
-        <p>
-          Describe what you're building — code generation, document summarisation,
-          multilingual chat, fast Q&amp;A — and the Advisor will run targeted benchmarks
-          across your downloaded models, then recommend the best model and inference
-          configuration for that exact task.
-        </p>
-        <div class="cs-tags">
-          <span class="cs-tag">Task matching</span>
-          <span class="cs-tag">Auto benchmark</span>
-          <span class="cs-tag">Config recommendation</span>
-          <span class="cs-tag">Collective data</span>
+
+        <!-- Right: results -->
+        <div class="advisor-right">
+          <!-- Idle state -->
+          <div v-if="!advisorRunning && !advisorDone && advisorLines.length === 0" class="advisor-idle">
+            <div class="cs-icon">
+              <svg viewBox="0 0 20 20" fill="currentColor" width="28" height="28" aria-hidden="true">
+                <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
+              </svg>
+            </div>
+            <p>Select a task type and models, then click <strong>Analyse Models</strong> to run targeted benchmarks and get a recommendation.</p>
+            <div class="cs-tags">
+              <span class="cs-tag">Quality scores</span>
+              <span class="cs-tag">Speed measurement</span>
+              <span class="cs-tag">Model ranking</span>
+            </div>
+          </div>
+
+          <!-- Live log -->
+          <div v-if="advisorLines.length > 0" class="inline-log-wrap">
+            <pre class="quality-log">{{ advisorLines.join('') }}</pre>
+          </div>
+
+          <!-- Rankings -->
+          <div v-if="advisorDone && advisorRankings.length > 0" class="advisor-rankings">
+            <div class="advisor-rankings-title">
+              Recommendation for <strong>{{ advisorTaskDef.label }}</strong>
+            </div>
+            <div
+              v-for="(result, idx) in advisorRankings"
+              :key="result.id"
+              class="advisor-rank-row"
+              :class="{ 'rank-winner': idx === 0 }"
+            >
+              <div class="rank-medal">{{ idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉' }}</div>
+              <div class="rank-info">
+                <div class="rank-name mono">{{ result.label }}</div>
+                <div class="rank-rec">{{ result.recommendation }}</div>
+              </div>
+              <div class="rank-scores">
+                <div v-if="result.quality > 0" class="rank-score-item">
+                  <span class="rank-score-val" :class="result.quality >= 0.7 ? 'good' : result.quality >= 0.4 ? 'mid' : 'bad'">
+                    {{ Math.round(result.quality * 100) }}%
+                  </span>
+                  <span class="rank-score-lbl">quality</span>
+                </div>
+                <div v-if="result.speedRaw > 0" class="rank-score-item">
+                  <span class="rank-score-val">{{ result.speedRaw.toFixed(1) }}</span>
+                  <span class="rank-score-lbl">tok/s</span>
+                </div>
+                <div class="rank-score-item">
+                  <span class="rank-score-val overall">{{ Math.round(result.score * 100) }}%</span>
+                  <span class="rank-score-lbl">score</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="advisorRankings[0]" class="advisor-winner-note">
+              <strong>{{ advisorRankings[0].label }}</strong> is the best fit for {{ advisorTaskDef.label.replace(/^.+ /, '') }}.
+              <template v-if="advisorRankings[0].speedRaw > 0">
+                It generates at {{ advisorRankings[0].speedRaw.toFixed(1) }} tok/s
+                <template v-if="advisorRankings[0].quality > 0">
+                  with {{ Math.round(advisorRankings[0].quality * 100) }}% accuracy.
+                </template>
+              </template>
+            </div>
+          </div>
+
+          <div v-else-if="advisorDone && advisorRankings.length === 0" class="advisor-idle">
+            <p>No benchmark results to rank. Try running with more models or a different task type.</p>
+          </div>
         </div>
-        <p class="cs-note">Coming next release.</p>
       </div>
+
     </div>
 
   </div>
@@ -1818,5 +2249,100 @@ watch(activeTab, (tab) => {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: .45; }
+}
+
+/* ── Performance Settings Override ──────────────────────────────────────── */
+.perf-toggle-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  cursor: pointer; margin: var(--space-3) 0 0; user-select: none;
+}
+.perf-chevron { color: var(--tx-muted); transition: transform .15s; flex-shrink: 0; }
+.perf-chevron.open { transform: rotate(180deg); }
+.perf-override-badge {
+  font-size: 13px; padding: 1px 7px; border-radius: 999px;
+  background: rgba(var(--si-rgb), .15); color: var(--si-400); font-weight: 600;
+}
+.perf-settings-panel {
+  background: var(--bg-elevated); border: 1px solid var(--bd-default);
+  border-radius: var(--r-md); padding: var(--space-3); margin-top: var(--space-2);
+  display: flex; flex-direction: column; gap: var(--space-2);
+}
+.perf-row { display: flex; align-items: center; }
+.perf-row-inline { gap: var(--space-2); }
+.perf-toggle { display: flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+.perf-label { font-size: var(--text-sm); color: var(--tx-primary); font-weight: 500; }
+.perf-hint { font-size: 13px; color: var(--tx-muted); margin-left: var(--space-1); }
+.perf-num-input {
+  width: 68px; padding: 3px 8px; font-size: var(--text-sm);
+  background: var(--bg-base); border: 1px solid var(--bd-default); border-radius: var(--r-sm);
+  color: var(--tx-primary); font-family: var(--font-mono);
+}
+.perf-unit { font-size: 13px; color: var(--tx-muted); }
+.perf-warn { font-size: 13px; color: var(--cl-warning, #f59e0b); margin-top: var(--space-1); }
+.perf-error { font-size: 13px; color: var(--cl-error, #ef4444); }
+.perf-reset-btn {
+  align-self: flex-start; font-size: 13px; padding: 3px 10px;
+  border: 1px solid var(--bd-default); border-radius: var(--r-sm);
+  background: var(--bg-base); color: var(--tx-secondary); cursor: pointer;
+}
+.perf-reset-btn:hover { color: var(--tx-primary); }
+
+/* ── Advisor Tab ─────────────────────────────────────────────────────────── */
+.advisor-tab { display: flex; flex-direction: column; }
+.advisor-layout { display: grid; grid-template-columns: 280px 1fr; gap: var(--space-5); align-items: start; }
+@media (max-width: 720px) { .advisor-layout { grid-template-columns: 1fr; } }
+
+.advisor-left {
+  background: var(--bg-elevated); border: 1px solid var(--bd-default);
+  border-radius: var(--r-lg); padding: var(--space-4);
+}
+.advisor-right {
+  background: var(--bg-elevated); border: 1px solid var(--bd-default);
+  border-radius: var(--r-lg); padding: var(--space-4); min-height: 300px;
+}
+
+.advisor-tasks { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-3); }
+.advisor-task-btn {
+  display: block; width: 100%; text-align: left;
+  padding: var(--space-2) var(--space-3); border-radius: var(--r-md);
+  border: 1px solid transparent; background: transparent;
+  color: var(--tx-secondary); font-size: var(--text-sm); cursor: pointer;
+  font-family: inherit; transition: background .1s;
+}
+.advisor-task-btn:hover { background: var(--bg-hover); color: var(--tx-primary); }
+.advisor-task-btn.active {
+  background: rgba(var(--si-rgb), .12); border-color: rgba(var(--si-rgb), .3);
+  color: var(--si-400); font-weight: 600;
+}
+.advisor-idle {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: var(--space-3); padding: var(--space-5);
+  color: var(--tx-secondary); font-size: var(--text-sm);
+}
+
+.advisor-rankings { display: flex; flex-direction: column; gap: var(--space-2); }
+.advisor-rankings-title { font-size: var(--text-sm); color: var(--tx-muted); margin-bottom: var(--space-2); }
+.advisor-rank-row {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3); border-radius: var(--r-md);
+  border: 1px solid var(--bd-default); background: var(--bg-base);
+}
+.rank-winner { border-color: rgba(var(--si-rgb), .4); background: rgba(var(--si-rgb), .05); }
+.rank-medal { font-size: 24px; flex-shrink: 0; }
+.rank-info { flex: 1; min-width: 0; }
+.rank-name { font-size: var(--text-sm); font-weight: 600; color: var(--tx-primary); }
+.rank-rec { font-size: 13px; color: var(--tx-muted); margin-top: 2px; }
+.rank-scores { display: flex; gap: var(--space-3); flex-shrink: 0; }
+.rank-score-item { display: flex; flex-direction: column; align-items: center; }
+.rank-score-val { font-size: var(--text-sm); font-weight: 700; font-family: var(--font-mono); color: var(--tx-primary); }
+.rank-score-val.good { color: #22c55e; }
+.rank-score-val.mid  { color: #f59e0b; }
+.rank-score-val.bad  { color: #ef4444; }
+.rank-score-val.overall { color: var(--si-400); }
+.rank-score-lbl { font-size: 11px; color: var(--tx-muted); }
+.advisor-winner-note {
+  margin-top: var(--space-3); padding: var(--space-3); border-radius: var(--r-md);
+  background: rgba(var(--si-rgb), .08); font-size: var(--text-sm); color: var(--tx-secondary);
+  border: 1px solid rgba(var(--si-rgb), .2);
 }
 </style>

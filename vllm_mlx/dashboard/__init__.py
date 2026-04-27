@@ -2,4 +2,4 @@
 """vllm-mlx Dashboard — browser-based UI for managing the inference server."""
 
 # Dashboard UI version — keep in sync with pyproject.toml.
-__version__ = "0.3.59"
+__version__ = "0.3.60"
