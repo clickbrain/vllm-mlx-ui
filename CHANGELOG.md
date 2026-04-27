@@ -1,4 +1,8 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.58 — 2026-04-27
+
+- Fix: after `brew upgrade`, the `/restart` and `/updates/install` endpoints now correctly resolve the **new** Python executable via the stable `/opt/homebrew/opt/vllm-mlx-ui` symlink instead of the deleted old Cellar path — fixes "button says restarting but nothing happens" after an upgrade
+
 ## v0.3.57 — 2026-04-27
 
 - Chat: navigating to another tab no longer aborts an in-progress generation — conversation continues in the background (`KeepAlive` + `defineOptions({ name: 'ChatView' })`)

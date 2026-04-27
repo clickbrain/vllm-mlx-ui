@@ -1122,6 +1122,23 @@ def stop_quality_benchmark(run_id: str, _: None = Depends(_check_auth)) -> dict:
 
 import os as _os_mod
 import signal as _signal_mod
+import re as _re_mod
+
+
+def _resolve_restart_python(current_exe: str) -> str:
+    """Return the Python executable to use when restarting after a brew upgrade.
+
+    After `brew upgrade`, the old Cellar path is deleted.  The stable
+    /opt/homebrew/opt/vllm-mlx-ui symlink always points to the currently
+    installed version, so we rewrite Cellar-specific paths through it.
+
+    /opt/homebrew/Cellar/vllm-mlx-ui/0.3.50/libexec/…/python3.11
+        → /opt/homebrew/opt/vllm-mlx-ui/libexec/…/python3.11
+    """
+    new_exe = _re_mod.sub(r"/Cellar/vllm-mlx-ui/[^/]+/", "/opt/vllm-mlx-ui/", current_exe)
+    if new_exe != current_exe and _os_mod.path.exists(new_exe):
+        return new_exe
+    return current_exe
 
 
 @app.post("/shutdown")
@@ -1155,7 +1172,7 @@ def restart_app(_: None = Depends(_check_auth)) -> dict:
         try:
             log_path = _os_mod.environ.get("VMUI_LOG", str(sm.STATE_DIR / "mgmt.log"))
             # Must use -m flag to avoid relative import errors when re-spawning
-            restart_cmd = [_sys.executable, "-m", "vllm_mlx.dashboard.mgmt_server"] + _sys.argv[1:]
+            restart_cmd = [_resolve_restart_python(_sys.executable), "-m", "vllm_mlx.dashboard.mgmt_server"] + _sys.argv[1:]
             with open(_os_mod.devnull, "r") as devnull_in, open(log_path, "a") as log_out:
                 _sp.Popen(
                     restart_cmd,
@@ -1217,7 +1234,7 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
         _t.sleep(2)
         try:
             log_path = _os_mod.environ.get("VMUI_LOG", str(sm.STATE_DIR / "mgmt.log"))
-            restart_cmd = [_sys.executable, "-m", "vllm_mlx.dashboard.mgmt_server"] + _sys.argv[1:]
+            restart_cmd = [_resolve_restart_python(_sys.executable), "-m", "vllm_mlx.dashboard.mgmt_server"] + _sys.argv[1:]
             with open(_os_mod.devnull, "r") as devnull_in, open(log_path, "a") as log_out:
                 _sp.Popen(
                     restart_cmd,
