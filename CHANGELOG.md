@@ -1,4 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.74 — 2026-04-27
+
+- Fix: **Custom benchmark "list index out of range" crash** — when `stream_options: {include_usage: true}` is set, the server sends a final SSE chunk with `choices: []` (empty list); indexing into it caused `IndexError`; fixed in both `run_custom_benchmark` and `run_live_benchmark`
+- Fix: **Run Benchmarks button greyed out when server not running** — custom/quality/combined modes manage the server lifecycle themselves (stop → load model → start); only speed mode actually requires a pre-running server; updated button disabled condition, banner message, and guard logic accordingly
+
+## v0.3.73 — 2026-04-27
+
+- Fix: **Custom benchmark "list index out of range"** — initial fix attempt (partial; replaced by v0.3.74)
+
 ## v0.3.72 — 2026-04-27
 
 - Release: Re-release of v0.3.71 with formula update and fix for missing `_TEST_PROMPTS` definition that would cause a `NameError` when running the speed benchmark
