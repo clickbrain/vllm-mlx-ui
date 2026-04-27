@@ -177,7 +177,7 @@ def _homebrew_formula_version() -> str | None:
     return None
 
 
-
+def _detect_install_method() -> str:
     """Return 'homebrew', 'pip', or 'unknown'."""
     import sys
     # Check sys.prefix first — most reliable when running inside a Homebrew cellar

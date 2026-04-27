@@ -587,111 +587,136 @@ watch(activeTab, (tab) => {
           </span>
         </div>
         <div class="bench-config">
+          <div class="bench-cols">
 
-          <!-- Model selector -->
-          <div class="bench-section-label">Models to test</div>
-          <div v-if="cachedModels.length === 0" class="bench-no-models">
-            No downloaded models found — download a model on the Models page first.
-          </div>
-          <div v-else class="bench-model-list">
-            <label
-              v-for="m in cachedModels"
-              :key="m.id"
-              class="bench-check"
-              :class="{ checked: benchSelectedModels.includes(m.id) }"
-            >
-              <input
-                type="checkbox"
-                :disabled="benchRunning"
-                :checked="benchSelectedModels.includes(m.id)"
-                @change="toggleBenchModel(m.id)"
-              />
-              <div class="bench-check-info">
-                <span class="bench-check-label mono">{{ m.id.split('/').pop() }}</span>
-                <span class="bench-check-desc">{{ m.id.split('/')[0] }} &middot; {{ m.size_gb?.toFixed(1) ?? '?' }} GB</span>
+            <!-- Left column: model selection -->
+            <div class="bench-col bench-col-left">
+              <div class="bench-step">
+                <span class="bench-step-num">1</span>
+                <span class="bench-step-title">Select models</span>
               </div>
-              <span v-if="m.id === serverStore.modelId" class="bench-model-badge">running</span>
-            </label>
-          </div>
-
-          <!-- Mode selector -->
-          <div class="bench-section-label">Mode</div>
-          <div class="bench-mode-row">
-            <label
-              v-for="mode in BENCH_MODES"
-              :key="mode.id"
-              class="bench-mode-option"
-              :class="{ active: benchMode === mode.id }"
-            >
-              <input type="radio" v-model="benchMode" :value="mode.id" :disabled="benchRunning" />
-              <div class="bench-check-info">
-                <span class="bench-check-label">{{ mode.label }}</span>
-                <span class="bench-check-desc">{{ mode.description }}</span>
+              <div v-if="cachedModels.length === 0" class="bench-no-models">
+                No downloaded models found — download a model on the Models page first.
               </div>
-            </label>
-          </div>
-
-          <!-- Quality suite checkboxes (hidden for speed-only mode) -->
-          <template v-if="benchMode !== 'speed'">
-            <div class="bench-section-label">Quality suites</div>
-            <div class="bench-checks">
-              <label
-                v-for="suite in QUALITY_SUITES"
-                :key="suite.id"
-                class="bench-check"
-                :class="{ checked: benchSuites.includes(suite.id) }"
-              >
-                <input
-                  type="checkbox"
-                  :value="suite.id"
-                  v-model="benchSuites"
-                  :disabled="benchRunning"
-                />
-                <div class="bench-check-info">
-                  <span class="bench-check-label">{{ suite.label }}</span>
-                  <span class="bench-check-desc">{{ suite.description }}</span>
-                </div>
-              </label>
+              <div v-else class="bench-model-list">
+                <label
+                  v-for="m in cachedModels"
+                  :key="m.id"
+                  class="bench-check"
+                  :class="{ checked: benchSelectedModels.includes(m.id) }"
+                >
+                  <input
+                    type="checkbox"
+                    :disabled="benchRunning"
+                    :checked="benchSelectedModels.includes(m.id)"
+                    @change="toggleBenchModel(m.id)"
+                  />
+                  <div class="bench-check-info">
+                    <span class="bench-check-label mono">{{ m.id.split('/').pop() }}</span>
+                    <span class="bench-check-desc">{{ m.id.split('/')[0] }} &middot; {{ m.size_gb?.toFixed(1) ?? '?' }} GB</span>
+                  </div>
+                  <span v-if="m.id === serverStore.modelId" class="bench-model-badge">running</span>
+                </label>
+              </div>
             </div>
-          </template>
 
-          <!-- Options row -->
-          <div class="bench-opts-row">
-            <label v-if="benchMode === 'speed'" class="opt-label">
-              Runs
-              <select v-model="benchRuns" :disabled="benchRunning" class="opt-select">
-                <option :value="1">1</option>
-                <option :value="3">3</option>
-                <option :value="5">5</option>
-              </select>
-            </label>
-            <label v-if="benchMode === 'speed'" class="opt-label">
-              Max tokens
-              <select v-model="benchMaxTokens" :disabled="benchRunning" class="opt-select">
-                <option :value="128">128</option>
-                <option :value="256">256</option>
-                <option :value="512">512</option>
-              </select>
-            </label>
-            <label v-if="benchMode !== 'speed'" class="opt-label">
-              Questions / suite
-              <select v-model="benchNumQuestions" :disabled="benchRunning" class="opt-select">
-                <option :value="5">5 (quick)</option>
-                <option :value="10">10</option>
-                <option :value="20">20</option>
-                <option :value="25">25 (full)</option>
-              </select>
-            </label>
-          </div>
+            <!-- Divider -->
+            <div class="bench-col-divider" />
 
-          <!-- Run button -->
-          <div class="bench-run-row">
-            <AppButton
-              :disabled="benchRunning || !serverStore.isRunning || (benchMode === 'speed' && benchSelectedModels.length === 0) || (benchMode !== 'speed' && benchSuites.length === 0)"
-              @click="runBenchmark"
+            <!-- Right column: test configuration -->
+            <div
+              class="bench-col bench-col-right"
+              :class="{ 'bench-col-locked': benchSelectedModels.length === 0 && cachedModels.length > 0 }"
             >
-              {{ benchRunning ? 'Running…' : 'Run Benchmark' }}
-            </AppButton>
+              <div class="bench-step">
+                <span class="bench-step-num">2</span>
+                <span class="bench-step-title">Configure &amp; run</span>
+                <span v-if="benchSelectedModels.length === 0 && cachedModels.length > 0" class="bench-needs-model">
+                  ← select a model first
+                </span>
+              </div>
+
+              <!-- Mode selector -->
+              <div class="bench-section-label">Mode</div>
+              <div class="bench-mode-row">
+                <label
+                  v-for="mode in BENCH_MODES"
+                  :key="mode.id"
+                  class="bench-mode-option"
+                  :class="{ active: benchMode === mode.id }"
+                >
+                  <input type="radio" v-model="benchMode" :value="mode.id" :disabled="benchRunning" />
+                  <div class="bench-check-info">
+                    <span class="bench-check-label">{{ mode.label }}</span>
+                    <span class="bench-check-desc">{{ mode.description }}</span>
+                  </div>
+                </label>
+              </div>
+
+              <!-- Quality suite checkboxes (hidden for speed-only mode) -->
+              <template v-if="benchMode !== 'speed'">
+                <div class="bench-section-label">Quality suites</div>
+                <div class="bench-checks">
+                  <label
+                    v-for="suite in QUALITY_SUITES"
+                    :key="suite.id"
+                    class="bench-check"
+                    :class="{ checked: benchSuites.includes(suite.id) }"
+                  >
+                    <input
+                      type="checkbox"
+                      :value="suite.id"
+                      v-model="benchSuites"
+                      :disabled="benchRunning"
+                    />
+                    <div class="bench-check-info">
+                      <span class="bench-check-label">{{ suite.label }}</span>
+                      <span class="bench-check-desc">{{ suite.description }}</span>
+                    </div>
+                  </label>
+                </div>
+              </template>
+
+              <!-- Options row -->
+              <div class="bench-opts-row">
+                <label v-if="benchMode === 'speed'" class="opt-label">
+                  Runs
+                  <select v-model="benchRuns" :disabled="benchRunning" class="opt-select">
+                    <option :value="1">1</option>
+                    <option :value="3">3</option>
+                    <option :value="5">5</option>
+                  </select>
+                </label>
+                <label v-if="benchMode === 'speed'" class="opt-label">
+                  Max tokens
+                  <select v-model="benchMaxTokens" :disabled="benchRunning" class="opt-select">
+                    <option :value="128">128</option>
+                    <option :value="256">256</option>
+                    <option :value="512">512</option>
+                  </select>
+                </label>
+                <label v-if="benchMode !== 'speed'" class="opt-label">
+                  Questions / suite
+                  <select v-model="benchNumQuestions" :disabled="benchRunning" class="opt-select">
+                    <option :value="5">5 (quick)</option>
+                    <option :value="10">10</option>
+                    <option :value="20">20</option>
+                    <option :value="25">25 (full)</option>
+                  </select>
+                </label>
+              </div>
+
+              <!-- Run button -->
+              <div class="bench-run-row">
+                <AppButton
+                  :disabled="benchRunning || !serverStore.isRunning || benchSelectedModels.length === 0 || (benchMode !== 'speed' && benchSuites.length === 0)"
+                  @click="runBenchmark"
+                >
+                  {{ benchRunning ? 'Running…' : 'Run Benchmark' }}
+                </AppButton>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -1253,7 +1278,35 @@ watch(activeTab, (tab) => {
 }
 
 /* ── Benchmark tab ───────────────────────────────────────────────────────── */
-.bench-config { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.bench-config { padding: 0; }
+.bench-cols {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  align-items: start;
+}
+.bench-col { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.bench-col-divider { background: var(--bd-default); align-self: stretch; }
+.bench-col-locked { opacity: 0.4; pointer-events: none; }
+
+.bench-step {
+  display: flex; align-items: center; gap: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--bd-subtle);
+}
+.bench-step-num {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 1px solid var(--bd-default);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; color: var(--tx-secondary);
+  flex-shrink: 0;
+}
+.bench-step-title {
+  font-size: 10px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--tx-muted);
+}
+.bench-needs-model {
+  font-size: 10px; color: var(--cu-500); font-style: italic; margin-left: auto;
+}
 .bench-section-label {
   font-size: 10px; font-weight: 700; letter-spacing: .07em;
   text-transform: uppercase; color: var(--tx-muted);

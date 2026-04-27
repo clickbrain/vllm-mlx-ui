@@ -1,4 +1,9 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.50 — 2026-04-26
+
+- Fix: `AttributeError: module has no attribute '_detect_install_method'` crash in Software Updates endpoint (missing `def` line in `update_checker.py`)
+- UI: Benchmark panel now two-column — models on left (step 1), tests on right (step 2); right side dims with prompt when no model selected; Run always disabled until a model is chosen
+
 
 All notable changes to the dashboard UI are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
