@@ -1,5 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
-## v0.3.60 — 2026-04-27
+## v0.3.61 — 2026-04-27
+
+- Fix: **Benchmark runs survive navigation** — BenchmarkView added to KeepAlive; polling timers keep running when navigating to other pages; Live tab polling pauses/resumes cleanly on deactivate/activate
+- Fix: **Multi-model quality benchmarks** — `/quality-benchmark/run` now accepts `model_ids`; backend iterates over each selected model, switching the server between them and restoring the original model when done; all results saved to history
+- Fix: **`/benchmark/status` endpoint restored** — missing `@app.get` decorator was causing the endpoint to never register (500 errors on status polls)
+
+
 
 - Feature: **Benchmark Performance Settings** — collapsible "Performance Settings" section in the Run Tests config; toggle Continuous Batching, Paged KV Cache, KV Cache Quantization, GPU Memory %, and Prefill Step Size per benchmark run; if settings differ from current server config the server auto-restarts before the test runs
 - Feature: **AI Advisor tab** — select a task type (Code, Math, Knowledge, Fast, General, Summarisation), choose models to evaluate, click Analyse; runs targeted quality + speed benchmarks and ranks models with a weighted score recommendation

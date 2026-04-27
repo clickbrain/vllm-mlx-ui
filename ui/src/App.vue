@@ -32,7 +32,7 @@ onMounted(() => { serverStore.startPolling() })
       </div>
       <main class="app-content">
         <RouterView v-slot="{ Component }">
-          <KeepAlive include="ChatView">
+          <KeepAlive include="ChatView,BenchmarkView">
             <component :is="Component" />
           </KeepAlive>
         </RouterView>
