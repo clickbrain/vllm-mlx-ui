@@ -11,7 +11,7 @@
   next server restart depending on the setting type.
 -->
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useMachinesStore } from '@/stores/machines'
 import type { Machine } from '@/stores/machines'
 import { useServerStore } from '@/stores/server'
@@ -48,6 +48,11 @@ const autoModelSwitch = ref(false)
 // Advanced Inference Settings
 const trustRemoteCode = ref(false)
 const gpuMemoryUtil = ref(0.90)
+// Display GPU utilization as an integer percentage (10–100); store as decimal (0.1–1.0)
+const gpuMemoryUtilPct = computed({
+  get: () => Math.round(gpuMemoryUtil.value * 100),
+  set: (v: number) => { gpuMemoryUtil.value = Math.max(10, Math.min(100, Math.round(v))) / 100 },
+})
 const kvCacheQuantization = ref(false)
 const kvCacheQuantizationBits = ref(8)
 const usePaged = ref(false)
@@ -58,6 +63,16 @@ const enableMtp = ref(false)
 const mtpDraftTokens = ref(1)
 const prefillStepSize = ref(0)
 const enableMetrics = ref(false)
+
+const ssdBrowsing = ref(false)
+async function browseSsdDir() {
+  ssdBrowsing.value = true
+  try {
+    const result = await api.get<{ path: string }>('/browse-directory')
+    if (result?.path) ssdCacheDir.value = result.path
+  } catch { /* user cancelled or unsupported */ }
+  finally { ssdBrowsing.value = false }
+}
 const rateLimit = ref(0)
 const rerankModel = ref('')
 const warmPrompts = ref('')
@@ -469,9 +484,11 @@ async function doRestart() {
           <div class="pref-info">
             <span class="pref-label">Trust Remote Code</span>
             <span class="pref-desc">
-              Required for some HuggingFace models (certain Qwen, Phi, and custom architectures).
-              <strong class="warn-inline">⚠ Only enable for models you trust.</strong>
-              Disabled by default as of vllm-mlx v0.2.9.
+              Some HuggingFace models (certain Qwen, Phi, and custom architectures) ship custom Python
+              tokenizer or model code that must execute locally. Enabling this allows that code to run.
+              <strong class="warn-inline">⚠ Only enable for models you explicitly trust</strong> — malicious
+              model code can access your file system and network. Applies to all loaded models; there is no
+              per-model toggle.
             </span>
           </div>
           <label class="toggle">
@@ -485,18 +502,29 @@ async function doRestart() {
         <div class="pref-row">
           <div class="pref-info">
             <span class="pref-label">GPU Memory Utilization</span>
-            <span class="pref-desc">Fraction of GPU memory reserved for KV cache. Lower if you see OOM errors. Default: 0.90</span>
+            <span class="pref-desc">
+              Percentage of unified memory the inference server may use for the KV cache.
+              90% is a safe default on most Macs. Lower this (e.g. to 75%) if you see out-of-memory errors,
+              or if you want to reserve memory for other apps. Does not affect the model weights themselves.
+            </span>
           </div>
-          <input
-            v-model.number="gpuMemoryUtil"
-            class="field-input field-inline field-narrow"
-            type="number" min="0.1" max="1.0" step="0.05"
-          />
+          <div class="field-with-unit">
+            <input
+              v-model.number="gpuMemoryUtilPct"
+              class="field-input field-inline field-narrow"
+              type="number" min="10" max="100" step="5"
+            />
+            <span class="field-unit">%</span>
+          </div>
         </div>
         <div class="pref-row">
           <div class="pref-info">
             <span class="pref-label">KV Cache Quantization</span>
-            <span class="pref-desc">Compress key/value cache to 4 or 8 bits. Reduces memory at a slight quality cost.</span>
+            <span class="pref-desc">
+              Compress the key/value attention cache to 4 or 8 bits instead of 16-bit floats.
+              Typically saves 30–50% KV cache memory with a small quality cost at very long contexts.
+              Active only in Paged KV Cache mode.
+            </span>
           </div>
           <div class="toggle-with-select">
             <label class="toggle">
@@ -512,7 +540,12 @@ async function doRestart() {
         <div class="pref-row">
           <div class="pref-info">
             <span class="pref-label">Paged KV Cache</span>
-            <span class="pref-desc">Use vLLM-style paged memory blocks. Reduces fragmentation for concurrent requests.</span>
+            <span class="pref-desc">
+              Allocates the KV cache in fixed-size pages instead of one large contiguous block.
+              Eliminates memory fragmentation when running multiple concurrent requests, and enables
+              prefix sharing across conversations. Required for KV Cache Quantization and SSD spill.
+              Enabled automatically in Continuous Batching mode.
+            </span>
           </div>
           <label class="toggle">
             <input type="checkbox" v-model="usePaged" />
@@ -523,21 +556,27 @@ async function doRestart() {
           <div class="pref-info">
             <span class="pref-label">SSD KV Cache Directory</span>
             <span class="pref-desc">
-              Spill KV cache blocks to disk when GPU memory is full. Enables long-context workloads beyond RAM limits.
-              Leave blank to disable. <em>(Added in v0.2.9)</em>
+              Spill KV cache pages to disk when GPU memory is full. Lets you run very long contexts
+              (e.g. 128k+ tokens) that would otherwise run out of RAM. Uses NVMe SSD for fast access.
+              Leave blank to disable disk spill. Requires Paged KV Cache to be enabled.
             </span>
           </div>
-          <input
-            v-model="ssdCacheDir"
-            class="field-input field-inline"
-            type="text"
-            placeholder="/tmp/vllm-ssd-cache"
-          />
+          <div class="field-with-browse">
+            <input
+              v-model="ssdCacheDir"
+              class="field-input field-inline"
+              type="text"
+              placeholder="/tmp/vllm-ssd-cache"
+            />
+            <AppButton variant="ghost" size="sm" :loading="ssdBrowsing" @click="browseSsdDir">
+              Browse…
+            </AppButton>
+          </div>
         </div>
         <div v-if="ssdCacheDir" class="pref-row pref-row-sub">
           <div class="pref-info">
             <span class="pref-label">SSD Cache Max Size (GB)</span>
-            <span class="pref-desc">Maximum disk space to use for KV cache. 0 = unlimited.</span>
+            <span class="pref-desc">Maximum disk space to use for KV cache spill. 0 = unlimited.</span>
           </div>
           <input
             v-model.number="ssdCacheMaxGb"
@@ -551,7 +590,12 @@ async function doRestart() {
         <div class="pref-row">
           <div class="pref-info">
             <span class="pref-label">Continuous Batching</span>
-            <span class="pref-desc">Enable the batched engine for multi-user serving. Higher throughput, slightly higher latency per request.</span>
+            <span class="pref-desc">
+              Enables the batched inference engine, which can serve <strong>multiple apps or users simultaneously</strong>.
+              Requests are grouped into dynamic batches for higher overall throughput. Individual
+              request latency may be slightly higher. Recommended when sharing the server across multiple
+              applications or team members.
+            </span>
           </div>
           <label class="toggle">
             <input type="checkbox" v-model="continuousBatching" />
@@ -624,7 +668,13 @@ async function doRestart() {
         <div class="pref-row">
           <div class="pref-info">
             <span class="pref-label">Prometheus Metrics</span>
-            <span class="pref-desc">Expose <code class="step-code">/metrics</code> endpoint in Prometheus format. Requires server restart.</span>
+            <span class="pref-desc">
+              Exposes a <code class="step-code">/metrics</code> endpoint in
+              <a class="settings-link" href="https://prometheus.io/docs/concepts/data_model/" target="_blank">Prometheus format</a>
+              — a standard way for monitoring tools to scrape performance data (request rates, latencies,
+              token counts, memory use). Use with Prometheus + Grafana to build custom dashboards or alerts.
+              Requires server restart.
+            </span>
           </div>
           <label class="toggle">
             <input type="checkbox" v-model="enableMetrics" />
@@ -634,7 +684,12 @@ async function doRestart() {
         <div class="pref-row">
           <div class="pref-info">
             <span class="pref-label">Rerank Model</span>
-            <span class="pref-desc">HuggingFace model ID to serve on the <code class="step-code">/v1/rerank</code> endpoint (MLX BERT classifier). Leave blank to disable.</span>
+            <span class="pref-desc">
+              <a class="settings-link" href="https://www.sbert.net/examples/applications/retrieve_rerank/README.html" target="_blank">Reranking</a>
+              scores a list of documents by relevance to a query — a second-pass step used in RAG pipelines
+              to improve retrieval quality. Set to a HuggingFace model ID (e.g. an MLX BERT classifier)
+              to serve on the <code class="step-code">/v1/rerank</code> endpoint. Leave blank to disable.
+            </span>
           </div>
           <input
             v-model="rerankModel"
@@ -995,6 +1050,33 @@ async function doRestart() {
 .field-narrow { width: 100px; }
 .toggle-with-select { display: flex; align-items: center; gap: var(--space-3); }
 .warn-inline { color: var(--cr-400, #f87171); font-weight: 600; font-size: 11.5px; }
+
+/* GPU % input + SSD browse button layouts */
+.field-with-unit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.field-unit {
+  font-size: var(--text-sm);
+  color: var(--tx-secondary);
+  font-weight: 500;
+}
+.field-with-browse {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.field-with-browse .field-inline { flex: 1; width: auto; min-width: 160px; }
+
+/* Inline links in setting descriptions */
+.settings-link {
+  color: var(--si-400);
+  text-decoration: underline;
+  text-decoration-color: rgba(91,106,208,.4);
+  text-underline-offset: 2px;
+}
+.settings-link:hover { text-decoration-color: var(--si-400); }
 .pref-row-actions {
   justify-content: flex-end;
   gap: var(--space-3);

@@ -1,4 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.55 — 2026-04-27
+
+- UI: Settings — GPU Memory Utilization now displays as a percentage (e.g. 90%) instead of a decimal
+- UI: Settings — SSD KV Cache Directory has a Browse… button that opens a native macOS folder picker
+- UI: Settings — Improved descriptions for Trust Remote Code (explains what it does and the risks), GPU Memory Utilization, KV Cache Quantization, Paged KV Cache, SSD KV Cache, Continuous Batching, Prometheus Metrics (with link), and Rerank Model (with link)
+- Backend: `GET /browse-directory` endpoint opens native macOS folder dialog via AppleScript
+
 ## v0.3.54 — 2026-04-27
 
 - UI: Models Find — company quick-search chips (Meta, Qwen, Google, Microsoft, Mistral, Apple, DeepSeek, MLX Community)
