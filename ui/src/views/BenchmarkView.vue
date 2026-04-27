@@ -427,7 +427,8 @@ async function stopBenchmark() {
 }
 
 async function runBenchmark() {
-  if (!serverStore.isRunning || benchRunning.value) return
+  if (benchRunning.value) return
+  if (benchMode.value === 'speed' && !serverStore.isRunning) return
   if (benchMode.value === 'speed' && benchSelectedModels.value.length === 0) return
   if (benchMode.value !== 'speed' && benchMode.value !== 'custom' && benchSuites.value.length === 0) return
   if (benchMode.value === 'custom') {
@@ -451,7 +452,7 @@ async function runBenchmark() {
 
 async function runCustomBenchmark() {
   const validPrompts = customPrompts.value.map(p => p.trim()).filter(Boolean)
-  if (!validPrompts.length || !serverStore.isRunning) return
+  if (!validPrompts.length) return
 
   benchRunning.value   = true
   customPhase.value    = 'running'
@@ -1160,10 +1161,14 @@ watch(activeTab, (tab) => {
     <!-- ── BENCHMARK TAB ──────────────────────────────────────────────────── -->
     <div v-else-if="activeTab === 'Run Tests'" class="tab-body">
 
-      <!-- Server warning -->
-      <div v-if="!serverStore.isRunning" class="status-banner banner-red">
+      <!-- Server warning: speed mode needs it running; other modes start it automatically -->
+      <div v-if="!serverStore.isRunning && benchMode === 'speed'" class="status-banner banner-red">
         <span class="banner-dot" />
-        <span><strong>Server not running</strong> — start it on the Serve page first.</span>
+        <span><strong>Server not running</strong> — speed benchmark requires a running server. Start it on the Serve page first.</span>
+      </div>
+      <div v-else-if="!serverStore.isRunning && benchMode !== 'speed'" class="status-banner banner-yellow">
+        <span class="banner-dot" />
+        <span>Server not running — it will be started automatically when the benchmark begins.</span>
       </div>
 
       <!-- Config panel -->
@@ -1422,7 +1427,7 @@ watch(activeTab, (tab) => {
               <!-- Run button -->
               <div class="bench-run-row">
                 <AppButton
-                  :disabled="perfApplying || benchRunning || !serverStore.isRunning || benchSelectedModels.length === 0 || (benchMode !== 'speed' && benchMode !== 'custom' && benchSuites.length === 0) || (benchMode === 'custom' && customPrompts.filter(p => p.trim()).length === 0)"
+                  :disabled="perfApplying || benchRunning || (benchMode === 'speed' && !serverStore.isRunning) || benchSelectedModels.length === 0 || (benchMode !== 'speed' && benchMode !== 'custom' && benchSuites.length === 0) || (benchMode === 'custom' && customPrompts.filter(p => p.trim()).length === 0)"
                   @click="runBenchmark"
                 >
                   <span v-if="perfApplying || benchRunning" class="spin" style="margin-right:6px" />
