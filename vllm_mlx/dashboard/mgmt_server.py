@@ -1333,20 +1333,23 @@ import signal as _signal_mod
 import re as _re_mod
 
 
-def _resolve_restart_python(current_exe: str) -> str:
-    """Return the Python executable to use when restarting after a brew upgrade.
+def _find_restart_cmd() -> list[str]:
+    """Return the command to relaunch vllm-mlx-ui after a restart or upgrade.
 
-    After `brew upgrade`, the old Cellar path is deleted.  The stable
-    /opt/homebrew/opt/vllm-mlx-ui symlink always points to the currently
-    installed version, so we rewrite Cellar-specific paths through it.
-
-    /opt/homebrew/Cellar/vllm-mlx-ui/0.3.50/libexec/…/python3.11
-        → /opt/homebrew/opt/vllm-mlx-ui/libexec/…/python3.11
+    Prefers the stable /opt/homebrew/bin/vllm-mlx-ui symlink (updated by brew
+    immediately after upgrade) so we always launch the newest version.
+    Falls back to PATH lookup, then the python -m approach via the opt symlink.
     """
-    new_exe = _re_mod.sub(r"/Cellar/vllm-mlx-ui/[^/]+/", "/opt/vllm-mlx-ui/", current_exe)
-    if new_exe != current_exe and _os_mod.path.exists(new_exe):
-        return new_exe
-    return current_exe
+    import shutil as _shutil
+    for candidate in ["/opt/homebrew/bin/vllm-mlx-ui", "/usr/local/bin/vllm-mlx-ui"]:
+        if _os_mod.path.exists(candidate) and _os_mod.access(candidate, _os_mod.X_OK):
+            return [candidate]
+    found = _shutil.which("vllm-mlx-ui")
+    if found:
+        return [found]
+    import sys as _sys2
+    new_exe = _resolve_restart_python(_sys2.executable)
+    return [new_exe, "-m", "vllm_mlx.dashboard.mgmt_server"]
 
 
 @app.post("/shutdown")
@@ -1376,14 +1379,16 @@ def restart_app(_: None = Depends(_check_auth)) -> dict:
 
     def _do_restart():
         import time as _t
-        _t.sleep(0.5)
+        _t.sleep(0.3)
         try:
             log_path = _os_mod.environ.get("VMUI_LOG", str(sm.STATE_DIR / "mgmt.log"))
-            # Must use -m flag to avoid relative import errors when re-spawning
-            restart_cmd = [_resolve_restart_python(_sys.executable), "-m", "vllm_mlx.dashboard.mgmt_server"] + _sys.argv[1:]
+            binary = _find_restart_cmd()
+            # Delay so this process fully exits and releases port 8502 before
+            # the new process tries to bind.
+            cmd_str = " ".join(f'"{c}"' if " " in c else c for c in binary)
             with open(_os_mod.devnull, "r") as devnull_in, open(log_path, "a") as log_out:
                 _sp.Popen(
-                    restart_cmd,
+                    ["sh", "-c", f"sleep 4 && {cmd_str}"],
                     stdin=devnull_in,
                     stdout=log_out,
                     stderr=_sp.STDOUT,
@@ -1442,10 +1447,11 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
         _t.sleep(2)
         try:
             log_path = _os_mod.environ.get("VMUI_LOG", str(sm.STATE_DIR / "mgmt.log"))
-            restart_cmd = [_resolve_restart_python(_sys.executable), "-m", "vllm_mlx.dashboard.mgmt_server"] + _sys.argv[1:]
+            binary = _find_restart_cmd()
+            cmd_str = " ".join(f'"{c}"' if " " in c else c for c in binary)
             with open(_os_mod.devnull, "r") as devnull_in, open(log_path, "a") as log_out:
                 _sp.Popen(
-                    restart_cmd,
+                    ["sh", "-c", f"sleep 4 && {cmd_str}"],
                     stdin=devnull_in,
                     stdout=log_out,
                     stderr=_sp.STDOUT,

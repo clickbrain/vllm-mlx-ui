@@ -1,4 +1,9 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.75 — 2026-04-27
+
+- Fix: **Install Updates & Restart no longer fails to come back** — the new process was spawning and immediately trying to bind port 8502 while the old process still owned it, causing the new process to crash silently; fixed by spawning `vllm-mlx-ui` (full entry point) with a 4-second delay so the old process exits and releases the port first
+- Fix: **Release script no longer drops formula updates** — removed the formula push from `release.sh` entirely; the GitHub Actions bot is now the sole owner of formula updates, with `git pull --rebase` added so it never fails on concurrent pushes
+
 ## v0.3.74 — 2026-04-27
 
 - Fix: **Custom benchmark "list index out of range" crash** — when `stream_options: {include_usage: true}` is set, the server sends a final SSE chunk with `choices: []` (empty list); indexing into it caused `IndexError`; fixed in both `run_custom_benchmark` and `run_live_benchmark`
