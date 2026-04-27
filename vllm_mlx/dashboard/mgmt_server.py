@@ -571,7 +571,8 @@ def stop_benchmark_endpoint(_: None = Depends(_check_auth)) -> dict:
     return {"ok": True}
 
 
-
+@app.get("/benchmark/status")
+def benchmark_status(_: None = Depends(_check_auth)) -> dict:
     """Return whether a benchmark run is currently in progress."""
     return {"running": _benchmark_running}
 
@@ -1047,45 +1048,103 @@ _quality_lock = threading.Lock()
 
 @app.post("/quality-benchmark/run")
 def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
-    """Start a quality benchmark run. Returns run_id to poll for output/results."""
+    """Start a quality benchmark run. Returns run_id to poll for output/results.
+
+    Accepts optional ``model_ids`` list. When multiple models are requested the
+    server switches models sequentially, restoring the original model when done.
+    """
     import uuid
     suites = req.get("suites", ["gsm8k"])
     num_questions = int(req.get("num_questions", 20))
     label = req.get("label", "")
+    model_ids: list[str] = req.get("model_ids", [])
     server_url = sm.get_server_url()
 
     run_id = str(uuid.uuid4())[:8]
     stop_event = threading.Event()
-    _quality_runs[run_id] = {"running": True, "lines": [], "results": None, "error": None, "stop_event": stop_event, "label": label}
+    _quality_runs[run_id] = {
+        "running": True, "lines": [], "results": None,
+        "all_results": [], "error": None, "stop_event": stop_event, "label": label,
+    }
 
     def _run() -> None:
+        import time as _t
+
         def _cb(line: str) -> None:
             _quality_runs[run_id]["lines"].append(line)
 
+        original_model = sm.load_config().get("model", "")
+        targets = model_ids if model_ids else ([original_model] if original_model else [])
+        all_results: list[dict] = []
+        switched = False
+
         try:
-            results = qr.run_quality_benchmark(
-                suites=suites,
-                server_url=server_url,
-                num_questions=num_questions,
-                output_callback=_cb,
-                stop_event=stop_event,
-            )
-            _quality_runs[run_id]["results"] = results
-            # Persist to shared benchmark history so it appears in /benchmarks
-            br.save_result({
-                "model": results.get("model", ""),
-                "model_id": results.get("model", ""),
-                "timestamp": results.get("timestamp", ""),
-                "benchmark_type": "quality",
-                "suites": results.get("suites", {}),
-                "overall_score": results.get("overall_score", 0.0),
-                "success": True,
-                "label": label,
-            })
+            for target_model in targets:
+                if stop_event.is_set():
+                    break
+
+                current_model = sm.load_config().get("model", "")
+                if target_model and target_model != current_model:
+                    _cb(f"\n── Switching to {target_model} ──\n")
+                    cfg = sm.load_config()
+                    cfg["model"] = target_model
+                    sm.save_config(cfg)
+                    sm.stop_server()
+                    ok, msg = sm.start_server(cfg)
+                    if not ok:
+                        _cb(f"[✗ Could not start {target_model}: {msg}]\n")
+                        continue
+                    switched = True
+                    # Wait up to 60 s for server to become ready
+                    ready = False
+                    for _ in range(120):
+                        if stop_event.is_set():
+                            break
+                        _t.sleep(0.5)
+                        if sm.get_server_status().get("running"):
+                            ready = True
+                            break
+                    if not ready:
+                        _cb(f"[✗ Timeout waiting for {target_model} to start]\n")
+                        continue
+                    _cb(f"[✓ {target_model} ready]\n")
+
+                if len(targets) > 1:
+                    _cb(f"\n{'─' * 40}\nModel: {target_model or 'current model'}\n{'─' * 40}\n")
+
+                results = qr.run_quality_benchmark(
+                    suites=suites,
+                    server_url=server_url,
+                    num_questions=num_questions,
+                    output_callback=_cb,
+                    stop_event=stop_event,
+                )
+                all_results.append(results)
+                br.save_result({
+                    "model": results.get("model", target_model),
+                    "model_id": results.get("model", target_model),
+                    "timestamp": results.get("timestamp", ""),
+                    "benchmark_type": "quality",
+                    "suites": results.get("suites", {}),
+                    "overall_score": results.get("overall_score", 0.0),
+                    "success": True,
+                    "label": label,
+                })
+
         except Exception as exc:
             _quality_runs[run_id]["error"] = str(exc)
             _cb(f"Error: {exc}\n")
         finally:
+            # Always restore original model if we switched away
+            if switched and original_model and sm.load_config().get("model", "") != original_model:
+                _cb(f"\n── Restoring {original_model} ──\n")
+                cfg = sm.load_config()
+                cfg["model"] = original_model
+                sm.save_config(cfg)
+                sm.stop_server()
+                sm.start_server(cfg)
+            _quality_runs[run_id]["results"] = all_results[-1] if all_results else None
+            _quality_runs[run_id]["all_results"] = all_results
             _quality_runs[run_id]["running"] = False
 
     threading.Thread(target=_run, daemon=True).start()

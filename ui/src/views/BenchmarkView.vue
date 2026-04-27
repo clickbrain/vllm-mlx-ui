@@ -10,7 +10,7 @@
     Advisor   — describe a task → AI recommends best model + config
 -->
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick, defineOptions } from 'vue'
 import { Line } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -37,6 +37,8 @@ ChartJS.register(
 const serverStore = useServerStore()
 const modelsStore = useModelsStore()
 
+defineOptions({ name: 'BenchmarkView' })
+
 // ── Tab state ─────────────────────────────────────────────────────────────
 const tabs = ['Live', 'Run Tests', 'History', 'Advisor'] as const
 type Tab = typeof tabs[number]
@@ -62,18 +64,40 @@ async function refreshCache() {
   }
 }
 
-onMounted(() => {
-  stopPoll = serverStore.startPolling(3000)
+function _startLivePolling() {
+  if (!stopPoll) stopPoll = serverStore.startPolling(3000)
   refreshCache()
-  cacheInterval = setInterval(refreshCache, 15_000)
+  if (!cacheInterval) cacheInterval = setInterval(refreshCache, 15_000)
+}
+
+function _stopLivePolling() {
+  stopPoll?.()
+  stopPoll = null
+  if (cacheInterval) { clearInterval(cacheInterval); cacheInterval = null }
+}
+
+// First mount: load everything
+onMounted(() => {
+  _startLivePolling()
   modelsStore.fetchBenchmarkResults()
   modelsStore.fetchModels()
   loadPerfSettings()
 })
 
+// Navigated back to this page: restart Live polling and refresh history
+onActivated(() => {
+  _startLivePolling()
+  modelsStore.fetchBenchmarkResults()
+})
+
+// Navigated away: stop Live polling but leave benchmark polls running
+onDeactivated(() => {
+  _stopLivePolling()
+})
+
+// KeepAlive eviction or full unmount: stop everything
 onUnmounted(() => {
-  stopPoll?.()
-  if (cacheInterval) clearInterval(cacheInterval)
+  _stopLivePolling()
   stopBenchmarkPolls()
 })
 
@@ -357,6 +381,7 @@ async function _doBenchmarkRun() {
         suites: benchSuites.value,
         num_questions: benchNumQuestions.value,
         label: benchRunName.value,
+        model_ids: benchSelectedModels.value,
       })
       const runId = runData.run_id
       qualityRunId.value = runId
