@@ -54,7 +54,7 @@ const filteredModels = computed(() => {
 
 // Find tab
 const searchInput = ref('')
-const hideDownloaded = ref(false)
+const hideDownloaded = ref(true)
 
 // Column sort state: column key + direction
 // server-sort: downloads, likes, trending — re-fetches from HF
@@ -63,6 +63,31 @@ type SortCol = 'model' | 'size' | 'downloads' | 'likes' | 'trending'
 type SortDir = 'asc' | 'desc'
 const sortCol = ref<SortCol>('trending')
 const sortDir = ref<SortDir>('desc')
+
+// Client-side filters
+const filterFit = ref<'all' | 'perfect' | 'good' | 'marginal' | 'too_tight'>('all')
+const filterMaxSizeGb = ref<number>(0) // 0 = no limit
+const filterMinDownloads = ref<number>(0)
+const filterMinLikes = ref<number>(0)
+
+// Quick-search by company/org
+const COMPANY_FILTERS = [
+  { label: 'Meta', query: 'meta-llama' },
+  { label: 'Qwen', query: 'Qwen' },
+  { label: 'Google', query: 'google' },
+  { label: 'Microsoft', query: 'microsoft' },
+  { label: 'Mistral', query: 'mistralai' },
+  { label: 'Apple', query: 'apple' },
+  { label: 'DeepSeek', query: 'deepseek-ai' },
+  { label: 'MLX Community', query: 'mlx-community' },
+] as const
+
+function searchCompany(query: string) {
+  searchInput.value = query
+  sortCol.value = 'downloads'
+  sortDir.value = 'desc'
+  modelsStore.searchHF(query, modelsStore.mlxOnly, 0, 'downloads')
+}
 
 const isRestarting = computed(() => modelsStore.serverRestartingFor)
 
@@ -92,6 +117,22 @@ const displayedSearchResults = computed(() => {
   if (hideDownloaded.value) {
     const cachedIds = new Set(modelsStore.models.map(m => m.id))
     list = list.filter(r => !cachedIds.has(r.id))
+  }
+  // Fit filter
+  if (filterFit.value !== 'all') {
+    list = list.filter(r => r.fit_level === filterFit.value)
+  }
+  // Max size filter
+  if (filterMaxSizeGb.value > 0) {
+    list = list.filter(r => !r.size_gb || r.size_gb <= filterMaxSizeGb.value)
+  }
+  // Min downloads filter
+  if (filterMinDownloads.value > 0) {
+    list = list.filter(r => r.downloads >= filterMinDownloads.value)
+  }
+  // Min likes filter
+  if (filterMinLikes.value > 0) {
+    list = list.filter(r => r.likes >= filterMinLikes.value)
   }
   // Client-side sort (model name or size)
   if (sortCol.value === 'model') {
@@ -301,6 +342,18 @@ watch(activeTab, (tab) => {
 
     <!-- Find tab -->
     <div v-else-if="activeTab === 'Find'" class="tab-content">
+      <!-- Company quick-search chips -->
+      <div class="company-filter-row">
+        <span class="company-row-label">Browse by:</span>
+        <button
+          v-for="c in COMPANY_FILTERS"
+          :key="c.query"
+          class="company-chip"
+          :class="{ active: searchInput === c.query }"
+          @click="searchCompany(c.query)"
+        >{{ c.label }}</button>
+      </div>
+
       <div class="find-search-row">
         <input
           v-model="searchInput"
@@ -326,8 +379,37 @@ watch(activeTab, (tab) => {
         </AppButton>
       </div>
 
-      <!-- Options row: hide-downloaded toggle -->
+      <!-- Options row: hide-downloaded + result filters -->
       <div class="find-options-row">
+        <div class="filter-group">
+          <span class="filter-label">Fit:</span>
+          <button class="filter-btn" :class="{ active: filterFit === 'all' }" @click="filterFit = 'all'">All</button>
+          <button class="filter-btn fit-perfect" :class="{ active: filterFit === 'perfect' }" @click="filterFit = 'perfect'">Fits great</button>
+          <button class="filter-btn fit-good" :class="{ active: filterFit === 'good' }" @click="filterFit = 'good'">Fits well</button>
+          <button class="filter-btn fit-marginal" :class="{ active: filterFit === 'marginal' }" @click="filterFit = 'marginal'">Tight</button>
+          <button class="filter-btn fit-too-tight" :class="{ active: filterFit === 'too_tight' }" @click="filterFit = 'too_tight'">Too large</button>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Size:</span>
+          <button class="filter-btn" :class="{ active: filterMaxSizeGb === 0 }" @click="filterMaxSizeGb = 0">All</button>
+          <button class="filter-btn" :class="{ active: filterMaxSizeGb === 3 }" @click="filterMaxSizeGb = 3">&lt;3 GB</button>
+          <button class="filter-btn" :class="{ active: filterMaxSizeGb === 8 }" @click="filterMaxSizeGb = 8">&lt;8 GB</button>
+          <button class="filter-btn" :class="{ active: filterMaxSizeGb === 20 }" @click="filterMaxSizeGb = 20">&lt;20 GB</button>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Min downloads:</span>
+          <button class="filter-btn" :class="{ active: filterMinDownloads === 0 }" @click="filterMinDownloads = 0">All</button>
+          <button class="filter-btn" :class="{ active: filterMinDownloads === 1000 }" @click="filterMinDownloads = 1000">1k+</button>
+          <button class="filter-btn" :class="{ active: filterMinDownloads === 10000 }" @click="filterMinDownloads = 10000">10k+</button>
+          <button class="filter-btn" :class="{ active: filterMinDownloads === 100000 }" @click="filterMinDownloads = 100000">100k+</button>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Min likes:</span>
+          <button class="filter-btn" :class="{ active: filterMinLikes === 0 }" @click="filterMinLikes = 0">All</button>
+          <button class="filter-btn" :class="{ active: filterMinLikes === 10 }" @click="filterMinLikes = 10">10+</button>
+          <button class="filter-btn" :class="{ active: filterMinLikes === 100 }" @click="filterMinLikes = 100">100+</button>
+          <button class="filter-btn" :class="{ active: filterMinLikes === 1000 }" @click="filterMinLikes = 1000">1k+</button>
+        </div>
         <div class="toolbar-spacer" />
         <label class="hide-downloaded-toggle">
           <input type="checkbox" v-model="hideDownloaded" />
@@ -374,6 +456,7 @@ watch(activeTab, (tab) => {
           :tags="r.tags"
           :size_gb="r.size_gb"
           :fit_level="r.fit_level"
+          :trending_score="r.trending_score"
           @download="handleDownload(r.id)"
         />
         <div v-if="modelsStore.searchHasMore" class="load-more-row">
@@ -553,12 +636,6 @@ watch(activeTab, (tab) => {
   display: flex;
   gap: var(--space-2);
   align-items: center;
-}
-
-.find-options-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
 }
 
 .search-input {
@@ -856,6 +933,113 @@ watch(activeTab, (tab) => {
   user-select: none;
 }
 .hide-downloaded-toggle input { accent-color: var(--si-500); cursor: pointer; }
+
+/* Company quick-search chip row */
+.company-filter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.company-row-label {
+  font-size: 11px;
+  color: var(--tx-muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-right: var(--space-1);
+}
+
+.company-chip {
+  padding: 3px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-pill);
+  color: var(--tx-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  white-space: nowrap;
+}
+
+.company-chip:hover:not(.active) {
+  background: var(--bg-2);
+  border-color: var(--bd-emphasis);
+  color: var(--tx-primary);
+}
+
+.company-chip.active {
+  background: var(--ac-bg);
+  border-color: var(--ac-border);
+  color: var(--si-300);
+  font-weight: 600;
+}
+
+/* Filter row */
+.find-options-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.filter-label {
+  font-size: 11px;
+  color: var(--tx-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+
+.filter-btn {
+  padding: 2px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-subtle);
+  border-radius: var(--r-sm);
+  color: var(--tx-muted);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  white-space: nowrap;
+}
+
+.filter-btn:hover:not(.active) {
+  background: var(--bg-2);
+  color: var(--tx-secondary);
+  border-color: var(--bd-default);
+}
+
+.filter-btn.active {
+  background: var(--ac-bg);
+  border-color: var(--ac-border);
+  color: var(--si-300);
+  font-weight: 600;
+}
+
+.filter-btn.fit-perfect.active  { background: rgba(74,222,128,.1); border-color: rgba(74,222,128,.3); color: var(--ph-400); }
+.filter-btn.fit-good.active     { background: rgba(250,204,21,.1); border-color: rgba(250,204,21,.3); color: #facc15; }
+.filter-btn.fit-marginal.active { background: rgba(249,115,22,.1); border-color: rgba(249,115,22,.3); color: #f97316; }
+.filter-btn.fit-too-tight.active{ background: rgba(239,68,68,.1);  border-color: rgba(239,68,68,.3);  color: var(--cr-400); }
+
+/* Fix col header button padding so widths match data cells */
+.col-downloads.col-sortable,
+.col-likes.col-sortable,
+.col-trending.col-sortable {
+  padding: 0 2px;
+  justify-content: flex-end;
+}
 
 /* Load more row */
 .load-more-row {

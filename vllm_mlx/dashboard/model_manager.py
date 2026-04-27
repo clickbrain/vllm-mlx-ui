@@ -870,6 +870,7 @@ def search_hf_models(
                     "is_mlx": "mlx" in [t.lower() for t in model_tags],
                     "size_gb": size_gb,
                     "fit_level": fit_level,
+                    "trending_score": round(float(m.get("trendingScore") or 0.0), 2),
                 }
             )
         return results[offset:offset + limit]

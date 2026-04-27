@@ -31,6 +31,7 @@ export interface HFModel {
   last_modified?: string
   size_gb?: number
   fit_level?: string  // perfect | good | marginal | too_tight
+  trending_score?: number
 }
 
 export interface DownloadQueueItem {

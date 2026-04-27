@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <!--
   HFSearchResult — one result card from a HuggingFace model search.
 
@@ -9,6 +10,7 @@
   - tags: array of HF topic tags
   - size_gb: pre-download weight file size in GB (optional)
   - fit_level: 'perfect' | 'good' | 'marginal' | 'too_tight' from check_model_fit
+  - trending_score: HF trendingScore (float, higher = more trending)
 
   Emits: download — user clicked the Download button
 -->
@@ -25,6 +27,7 @@ const props = defineProps<{
   tags: string[]
   size_gb?: number
   fit_level?: string
+  trending_score?: number
 }>()
 
 const emit = defineEmits<{
@@ -39,6 +42,9 @@ function abbreviate(n: number): string {
 
 const downloadsFormatted = computed(() => abbreviate(props.downloads))
 const likesFormatted = computed(() => abbreviate(props.likes))
+const trendingFormatted = computed(() =>
+  props.trending_score ? props.trending_score.toFixed(1) : null
+)
 
 const sizeLabel = computed(() => {
   if (!props.size_gb) return null
@@ -70,11 +76,10 @@ const fitInfo = computed(() => {
       </span>
       <span v-else-if="sizeLabel" class="fit-unknown">—</span>
     </div>
-  <div class="result-stats">
-      <span class="stat stat-downloads">↓ {{ downloadsFormatted }}</span>
-      <span class="stat stat-likes">♥ {{ likesFormatted }}</span>
-      <span class="stat stat-trending" />
-    </div>
+    <!-- Individual stat columns — each is a direct flex child to align with header -->
+    <span class="stat stat-downloads">↓ {{ downloadsFormatted }}</span>
+    <span class="stat stat-likes">♥ {{ likesFormatted }}</span>
+    <span class="stat stat-trending">{{ trendingFormatted ?? '—' }}</span>
     <AppButton variant="secondary" size="sm" @click="emit('download')">Download</AppButton>
   </div>
 </template>
@@ -136,31 +141,13 @@ const fitInfo = computed(() => {
   color: var(--tx-muted);
 }
 
-.result-stats {
-  display: flex;
-  gap: 0;
-  flex-shrink: 0;
-}
-
 .stat {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--tx-muted);
   flex-shrink: 0;
-}
-
-.stat-downloads {
-  min-width: 72px;
-  text-align: right;
-}
-
-.stat-likes {
-  min-width: 72px;
-  text-align: right;
-}
-
-.stat-trending {
   min-width: 72px;
   text-align: right;
 }
 </style>
+
