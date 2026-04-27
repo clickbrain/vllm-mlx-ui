@@ -1,4 +1,8 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.68 — 2026-04-28
+
+- Fix: **GSM8K, MMLU, HumanEval now use real official benchmark data** — replaced placeholder/hand-written questions with authentic test sets: 25 questions from the OpenAI grade-school-math test split (official GSM8K), 25 questions from the Hendrycks MMLU test set spanning multiple subjects (abstract_algebra, mathematics, physics, biology, computer_science, history, sociology, philosophy), and 20 problems from the OpenAI HumanEval benchmark; scores are now comparable to published model leaderboards
+
 ## v0.3.67 — 2026-04-28
 
 - Fix: **3-model benchmark (2/3 ran bug)** — `stop_server()` sent SIGKILL but didn't wait for the process to die before returning; `start_server()` now also retries the port-in-use check for up to 5s before failing; added stop_server warning to quality benchmark log so failures are visible
