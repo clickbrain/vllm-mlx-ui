@@ -1095,15 +1095,27 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
                         _cb(f"[✗ Could not start {target_model}: {msg}]\n")
                         continue
                     switched = True
-                    # Wait up to 60 s for server to become ready
+                    # Wait up to 120 s for the inference port to accept requests.
+                    # sm.get_server_status() only checks if the process is alive —
+                    # the model may still be loading. Poll /v1/models instead.
                     ready = False
-                    for _ in range(120):
+                    port = int(sm.load_config().get("port", 8000))
+                    host_addr = sm.load_config().get("host", "127.0.0.1")
+                    if host_addr == "0.0.0.0":
+                        host_addr = "127.0.0.1"
+                    health_url = f"http://{host_addr}:{port}/v1/models"
+                    import requests as _req_mod
+                    for _ in range(240):
                         if stop_event.is_set():
                             break
                         _t.sleep(0.5)
-                        if sm.get_server_status().get("running"):
-                            ready = True
-                            break
+                        try:
+                            r = _req_mod.get(health_url, timeout=2)
+                            if r.status_code == 200:
+                                ready = True
+                                break
+                        except Exception:
+                            pass
                     if not ready:
                         _cb(f"[✗ Timeout waiting for {target_model} to start]\n")
                         continue
