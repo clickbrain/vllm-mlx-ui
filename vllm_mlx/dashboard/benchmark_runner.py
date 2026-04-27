@@ -383,7 +383,8 @@ def run_custom_benchmark(
                 usage = data.get("usage") or {}
                 if usage.get("completion_tokens"):
                     completion_tokens = int(usage["completion_tokens"])
-                delta = data.get("choices", [{}])[0].get("delta", {})
+                choices = data.get("choices") or []
+                delta = choices[0].get("delta", {}) if choices else {}
                 content = delta.get("content", "")
                 if content:
                     now = time.monotonic()
@@ -555,7 +556,8 @@ def run_live_benchmark(
                 usage = data.get("usage") or {}
                 if usage.get("completion_tokens"):
                     completion_tokens = int(usage["completion_tokens"])
-                delta = data.get("choices", [{}])[0].get("delta", {})
+                choices = data.get("choices") or []
+                delta = choices[0].get("delta", {}) if choices else {}
                 content = delta.get("content", "")
                 if content:
                     now = time.monotonic()
