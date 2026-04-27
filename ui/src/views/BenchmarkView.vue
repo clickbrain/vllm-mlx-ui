@@ -51,12 +51,13 @@ const cacheError = ref(false)
 async function refreshCache() {
   if (!serverStore.isRunning) { cacheStats.value = null; return }
   const result = await serverStore.fetchCacheStats()
-  // Accept the result if it has engine_cache data, even if a soft error is present
-  // (e.g. "mlx_vlm not loaded" is non-fatal for text-only models)
-  if (result && (result.engine_cache || Object.keys(result).some(k => k !== 'error'))) {
+  // Only accept if engine_cache is present; soft errors (e.g. mlx_vlm not loaded)
+  // are surfaced as a footnote via cacheSoftError
+  if (result && result.engine_cache) {
     cacheStats.value = result
     cacheError.value = false
   } else {
+    cacheStats.value = null
     cacheError.value = true
   }
 }
@@ -176,10 +177,11 @@ const cacheEntries = computed(() => {
     rows.push({ key: 'Prefix Hits',     value: fmt(pc.hits) })
     rows.push({ key: 'Prefix Misses',   value: fmt(pc.misses) })
   }
-  // Fallback: if no engine_cache/prefix_cache, display raw keys except 'error'
+  // Fallback: if neither engine_cache nor prefix_cache is present, display other raw keys
+  // (should not happen given refreshCache gating, but keeps the computed robust)
   if (rows.length === 0) {
     for (const [k, v] of Object.entries(cacheStats.value)) {
-      if (k === 'error') continue
+      if (k === 'error' || k === 'engine_cache' || k === 'prefix_cache') continue
       rows.push({ key: k, value: fmt(v) })
     }
   }
