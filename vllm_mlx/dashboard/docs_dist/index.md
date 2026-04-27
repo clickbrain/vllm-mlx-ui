@@ -1,0 +1,70 @@
+# vLLM-MLX Documentation
+
+**vllm-MLX: High-Performance Local AI Inference** - GPU-accelerated Text, Image, Video & Audio inference on Apple Silicon and beyond
+
+## What is vLLM-MLX?
+
+vllm-mlx provides high-performance local AI inference with a unified API. Primary acceleration is via the MLX framework on Apple Silicon, with support for additional inference backends (llama.cpp, Ollama, remote engines) on other platforms:
+
+- **[MLX](https://github.com/ml-explore/mlx)**: Apple's ML framework with unified memory and Metal kernels (Apple Silicon)
+- **[mlx-lm](https://github.com/ml-explore/mlx-lm)**: Optimized LLM inference with KV cache and quantization
+- **[mlx-vlm](https://github.com/Blaizzy/mlx-vlm)**: Vision-language models for multimodal inference
+- **[mlx-audio](https://github.com/Blaizzy/mlx-audio)**: Text-to-Speech and Speech-to-Text with native voices
+- **[mlx-embeddings](https://github.com/Blaizzy/mlx-embeddings)**: Text embeddings for semantic search and RAG
+
+## Key Features
+
+- **Multimodal** - Text, Image, Video & Audio in one platform
+- **Native GPU acceleration** on Apple Silicon (M1–M4); additional inference backends for other platforms
+- **Native TTS voices** - Spanish, French, Chinese, Japanese + 5 more languages
+- **OpenAI API compatible** - drop-in replacement for OpenAI client
+- **Embeddings** - OpenAI-compatible `/v1/embeddings` endpoint
+- **MCP Tool Calling** - integrate external tools via Model Context Protocol
+- **Paged KV Cache** - memory-efficient caching with prefix sharing
+- **Continuous Batching** - high throughput for multiple concurrent users
+
+## Quick Links
+
+### Dashboard UI (No-Code Interface)
+- [**Dashboard User Guide**](dashboard/user-guide.md) — Complete guide to the web dashboard: installation, all 6 pages, remote access, security, troubleshooting
+
+### Getting Started
+- [Installation](getting-started/installation.md)
+- [Quick Start](getting-started/quickstart.md)
+
+### User Guides
+- [OpenAI-Compatible Server](guides/server.md)
+- [Python API](guides/python-api.md)
+- [Multimodal (Images & Video)](guides/multimodal.md)
+- [Audio (STT/TTS)](guides/audio.md)
+- [Embeddings](guides/embeddings.md)
+- [Reasoning Models](guides/reasoning.md)
+- [Tool Calling](guides/tool-calling.md)
+- [MCP & Tool Calling](guides/mcp-tools.md)
+- [Continuous Batching](guides/continuous-batching.md)
+
+### Reference
+- [CLI Commands](reference/cli.md)
+- [Supported Models](reference/models.md)
+- [Configuration](reference/configuration.md)
+
+### Benchmarks
+- [LLM Benchmarks](benchmarks/llm.md)
+- [Image Benchmarks](benchmarks/image.md)
+- [Video Benchmarks](benchmarks/video.md)
+- [Audio Benchmarks](benchmarks/audio.md)
+
+### Development
+- [Architecture](development/architecture.md)
+- [Contributing](development/contributing.md)
+
+## Requirements
+
+- **Apple Silicon (M1/M2/M3/M4)** — full MLX acceleration (recommended)
+- **Linux / Windows** — supported via alternative inference backends
+- Python 3.10+
+- 8GB+ RAM recommended
+
+## License
+
+Apache 2.0 - See [LICENSE](../LICENSE) for details.
