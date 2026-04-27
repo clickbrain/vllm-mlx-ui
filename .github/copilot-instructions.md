@@ -12,7 +12,26 @@ We ALWAYS install them from their upstream repositories. We NEVER modify their s
 
 ---
 
-## ⛔ THE ABSOLUTE HARD RULE
+## ⛔ RELEASE RULE — NEVER SKIP ANY STEP
+
+**Every release MUST use `scripts/release.sh <version>` — never do steps manually.**
+
+The script does all of these atomically. If you do them manually, you WILL miss one:
+1. Bump `__version__` in `vllm_mlx/dashboard/__init__.py` and `version` in `pyproject.toml`
+2. Update `CHANGELOG.md`
+3. `npm run build --prefix ui`
+4. `cp -r ui/dist/* vllm_mlx/dashboard/ui_dist/`
+5. `git add -A && git commit`
+6. `git tag vX.Y.Z && git push origin main vX.Y.Z`
+7. `curl -sL <tarball-url> | shasum -a 256` — get SHA256
+8. Update formula: url, sha256, version in `/opt/homebrew/Library/Taps/clickbrain/homebrew-vllm-mlx-ui/Formula/vllm-mlx-ui.rb`
+9. `git commit && git push` the formula repo
+
+**NEVER make additional code commits after bumping the version.** If more changes are needed, bump to the next version and run the script again. Multiple commits under one version tag = brew upgrade delivers stale code.
+
+---
+
+
 
 **NEVER modify any file in `vllm_mlx/` except `vllm_mlx/dashboard/`.**
 
