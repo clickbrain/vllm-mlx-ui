@@ -99,7 +99,7 @@ function toggleTheme() {
   background: rgba(245,158,11,.08);
   border: 1px solid rgba(245,158,11,.25);
   border-radius: var(--r-pill);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--cu-400);
   cursor: pointer;

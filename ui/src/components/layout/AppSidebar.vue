@@ -199,8 +199,8 @@ async function doShutdown() {
       <svg viewBox="0 0 120 72" xmlns="http://www.w3.org/2000/svg" class="arc-svg" aria-label="Memory usage gauge">
         <path d="M 10 65 A 50 50 0 0 1 110 65" fill="none" stroke="var(--arc-track)" stroke-width="9" stroke-linecap="round" />
         <path d="M 10 65 A 50 50 0 0 1 110 65" fill="none" :stroke="arcFillColor" stroke-width="9" stroke-linecap="round" stroke-dasharray="157" :stroke-dashoffset="arcDashOffset" class="arc-fill" />
-        <text x="60" y="50" text-anchor="middle" font-family="var(--font-mono)" font-size="17" font-weight="700" fill="var(--tx-primary)">{{ memUsedGb }}</text>
-        <text x="60" y="62" text-anchor="middle" font-size="9.5" fill="var(--tx-muted)">of {{ memTotalGb }} GB</text>
+        <text x="60" y="50" text-anchor="middle" font-family="var(--font-mono)" font-size="19" font-weight="700" fill="var(--tx-primary)">{{ memUsedGb }}</text>
+        <text x="60" y="62" text-anchor="middle" font-size="11.5" fill="var(--tx-muted)">of {{ memTotalGb }} GB</text>
       </svg>
       <div v-if="loadedModel" class="gauge-model-name">{{ loadedModel }}</div>
       <button class="release-mem-btn" title="Clears MLX model cache and runs OS-level memory compaction. Server stays up — model weights remain loaded. Use to reclaim inactive/cached RAM without restarting." @click="releaseMemory">
@@ -304,7 +304,7 @@ async function doShutdown() {
 .sidebar-logo {
   padding: var(--space-4) var(--space-4) var(--space-3);
   font-family: var(--font-display);
-  font-size: 17px;
+  font-size: 19px;
   font-weight: 700;
   letter-spacing: -.4px;
   line-height: 1;
@@ -321,7 +321,7 @@ async function doShutdown() {
 }
 
 .section-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -367,7 +367,7 @@ async function doShutdown() {
 .machine-dot.offline { background: var(--g-600); }
 
 .machine-name { flex: 1; font-weight: 500; }
-.machine-host { font-size: 11px; color: var(--tx-muted); font-family: var(--font-mono); }
+.machine-host { font-size: 13px; color: var(--tx-muted); font-family: var(--font-mono); }
 
 .fleet-section {
   flex-shrink: 0;
@@ -423,7 +423,7 @@ async function doShutdown() {
 }
 
 .discovered-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -438,7 +438,7 @@ async function doShutdown() {
   gap: var(--space-2);
   padding: 4px var(--space-2);
   border-radius: var(--r-sm);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .discovered-name {
@@ -455,7 +455,7 @@ async function doShutdown() {
   border: 1px solid var(--si-600);
   border-radius: var(--r-sm);
   color: var(--si-400);
-  font-size: 10px;
+  font-size: 12px;
   font-family: inherit;
   padding: 2px 7px;
   cursor: pointer;
@@ -468,7 +468,7 @@ async function doShutdown() {
 }
 
 .fleet-hint {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
   padding: var(--space-1) var(--space-2);
   font-style: italic;
@@ -495,7 +495,7 @@ async function doShutdown() {
 
 .gauge-model-name {
   margin-top: var(--space-2);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-tertiary);
   max-width: 180px;
   overflow: hidden;
@@ -563,7 +563,7 @@ async function doShutdown() {
 }
 
 .footer-version {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
   font-family: var(--font-mono);
 }
@@ -581,7 +581,7 @@ async function doShutdown() {
   border: 1px solid var(--bd-default);
   border-radius: var(--r-md);
   color: var(--tx-muted);
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast);
@@ -593,7 +593,7 @@ async function doShutdown() {
 
 .release-mem-msg {
   margin-top: var(--space-1);
-  font-size: 10.5px;
+  font-size: 12.5px;
   color: var(--si-400);
   text-align: center;
   min-height: 14px;
@@ -678,7 +678,7 @@ async function doShutdown() {
   border-radius: var(--r-md);
   color: var(--tx-primary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   padding: 4px 8px;
   cursor: pointer;
   transition: border-color var(--transition-fast);
@@ -706,7 +706,7 @@ async function doShutdown() {
 }
 
 .switch-text {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--cu-400);
   font-family: var(--font-mono);
 }
@@ -714,7 +714,7 @@ async function doShutdown() {
 .manage-models-link {
   display: block;
   margin-top: var(--space-1);
-  font-size: 10.5px;
+  font-size: 12.5px;
   color: var(--tx-muted);
   text-decoration: none;
   padding: 2px 2px;

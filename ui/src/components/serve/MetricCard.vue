@@ -52,7 +52,7 @@ defineProps<{
 }
 
 .metric-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .07em;
   text-transform: uppercase;

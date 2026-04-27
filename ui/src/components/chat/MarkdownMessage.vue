@@ -318,7 +318,7 @@ watchEffect(async () => {
 
 .markdown-body :deep(.code-lang) {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   color: var(--tx-muted);
   text-transform: lowercase;
   letter-spacing: .04em;
@@ -329,7 +329,7 @@ watchEffect(async () => {
   border: 1px solid var(--bd-default);
   border-radius: var(--r-sm);
   color: var(--tx-muted);
-  font-size: 10px;
+  font-size: 12px;
   font-family: var(--font-sans, inherit);
   padding: 2px 8px;
   cursor: pointer;

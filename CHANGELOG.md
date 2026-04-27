@@ -1,5 +1,9 @@
 # Changelog — vllm-mlx Dashboard UI
-## v0.3.58 — 2026-04-27
+## v0.3.59 — 2026-04-27
+
+- Fix: font size increase was not visible — 228 hard-coded pixel `font-size` values across all Vue components were bypassing the CSS token system; bumped each +2px programmatically; body base font also raised from `--text-sm` (15px) to `--text-base` (17px)
+
+
 
 - Fix: after `brew upgrade`, the `/restart` and `/updates/install` endpoints now correctly resolve the **new** Python executable via the stable `/opt/homebrew/opt/vllm-mlx-ui` symlink instead of the deleted old Cellar path — fixes "button says restarting but nothing happens" after an upgrade
 

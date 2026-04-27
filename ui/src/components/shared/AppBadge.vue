@@ -44,11 +44,11 @@ const classes = computed(() => ['badge', `badge-${props.variant}`, `badge-${prop
 
 .badge-sm {
   padding: 2px 7px;
-  font-size: 10px;
+  font-size: 12px;
 }
 .badge-md {
   padding: 3px 9px;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 /* success — phosphor */

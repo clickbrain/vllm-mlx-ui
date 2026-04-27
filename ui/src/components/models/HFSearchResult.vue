@@ -107,7 +107,7 @@ const fitInfo = computed(() => {
 
 .model-id {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 14.5px;
   color: var(--tx-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -126,24 +126,24 @@ const fitInfo = computed(() => {
 
 .size-label {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-secondary);
 }
 
 .fit-pill {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
 }
 
 .fit-unknown {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--tx-muted);
 }
 
 .stat {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--tx-muted);
   flex-shrink: 0;
   min-width: 72px;
