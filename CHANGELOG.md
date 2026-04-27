@@ -1,4 +1,14 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.54 — 2026-04-27
+
+- UI: Models Find — company quick-search chips (Meta, Qwen, Google, Microsoft, Mistral, Apple, DeepSeek, MLX Community)
+- UI: Models Find — filter bar: Fit level, Max size, Min downloads, Min likes
+- UI: Models Find — "Hide Downloaded" now defaults to ON
+- UI: Models Find — Trending column now shows real trendingScore data from HuggingFace
+- UI: Models Find — column headers now align correctly with data rows
+- UI: App-wide — base font size increased by 2pt across the whole type scale (xs: 13, sm: 15, base: 17, lg: 19, xl: 24)
+- Backend: `search_hf_models` now returns `trending_score` from HuggingFace `trendingScore` field
+
 ## v0.3.53 — 2026-04-27
 
 - UI: Benchmark tab renamed "Run Tests"; run button renamed "Run Benchmarks"
