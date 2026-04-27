@@ -1,4 +1,10 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.65 — 2026-04-27
+
+- Fix: **GSM8K/MMLU always returning `?`** — `max_tokens` was 512 for quality benchmarks; reasoning models (Qwen3, DeepSeek-R1) spend all 512 tokens on `<think>` blocks before the answer, so the server's reasoning parser stripped the thinking content and returned an empty string; raised to 4096 (GSM8K/MMLU) and 2048 (HumanEval); stream timeout raised from 90 s to 300 s
+- Fix: **Defensive `<think>` stripping in graders** — added `_strip_thinking()` helper that removes `<think>…</think>` blocks before number/letter extraction; guards against servers with reasoning parsing disabled
+- Fix: **Update Available pill wrapping** — changed last grid column from fixed `140px` to `auto` and added `white-space: nowrap` + reduced font-size to 11px so the chip never wraps
+
 ## v0.3.64 — 2026-04-27
 
 - Feature: **Model search & filter in Benchmarks** — Run Tests and Advisor model selectors now include a live search box (filter by name), size range dropdown (All / < 4 GB / 4–8 GB / 8–16 GB / > 16 GB), quantization dropdown (dynamically populated from installed models), a result count, and All / None quick-select buttons; filters are shared between both tabs; quant level now shown in the model description row

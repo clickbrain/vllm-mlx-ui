@@ -172,9 +172,24 @@ HUMANEVAL_QUESTIONS: list[dict[str, str]] = [
 
 # ── Grading functions ─────────────────────────────────────────────────────────
 
+def _strip_thinking(text: str) -> str:
+    """Remove <think>…</think> blocks from a response.
+
+    Reasoning models (Qwen3, DeepSeek-R1) emit a thinking block before the
+    actual answer.  The server's reasoning parser normally strips these from
+    the content stream, but if it is disabled or the block is incomplete we
+    strip defensively here so graders only see the post-think text.
+    If stripping leaves nothing useful, fall back to the raw text so we don't
+    silently discard the whole response.
+    """
+    stripped = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    return stripped if stripped else text
+
+
 def grade_gsm8k(response: str, expected: str) -> bool:
-    """Extract last number from response, compare to expected."""
-    nums = re.findall(r"-?\d+\.?\d*", response)
+    """Extract last number from response (after stripping any thinking block)."""
+    text = _strip_thinking(response)
+    nums = re.findall(r"-?\d+\.?\d*", text)
     if not nums:
         return False
     got = nums[-1].rstrip(".")
@@ -187,7 +202,8 @@ def grade_gsm8k(response: str, expected: str) -> bool:
 
 def grade_mmlu(response: str, expected: str) -> bool:
     """Find first standalone A/B/C/D in response, compare to expected."""
-    m = re.search(r"\b([ABCD])\b", response.strip()[:200])
+    text = _strip_thinking(response)
+    m = re.search(r"\b([ABCD])\b", text.strip()[:200])
     if not m:
         return False
     return m.group(1).upper() == expected.upper()
@@ -260,7 +276,7 @@ def _stream_completion(
     max_tokens: int,
     model: str = "default",
     temperature: float = 0.0,
-    timeout: int = 90,
+    timeout: int = 300,
 ) -> tuple[str, float | None, float, int, float]:
     """
     Stream a single chat completion and return timing metrics.
@@ -348,15 +364,15 @@ def run_quality_benchmark(
         if suite == "gsm8k":
             questions = GSM8K_QUESTIONS[:num_questions]
             system_prompt = "Solve this math problem step by step. At the end, state your final answer as a single number."
-            max_tokens = 512
+            max_tokens = 4096
         elif suite == "mmlu":
             questions = MMLU_QUESTIONS[:num_questions]
             system_prompt = "Answer this multiple choice question. Reply with just the letter (A, B, C, or D) followed by a brief explanation."
-            max_tokens = 512
+            max_tokens = 4096
         elif suite == "humaneval":
             questions = HUMANEVAL_QUESTIONS[:num_questions]
             system_prompt = "Write a complete Python function. Respond with only the code in a Python code block."
-            max_tokens = 1024
+            max_tokens = 2048
         else:
             _cb(f"[{suite_upper}] Unknown suite, skipping.\n")
             continue
@@ -404,7 +420,8 @@ def run_quality_benchmark(
             passed = False
             if suite == "gsm8k":
                 passed = grade_gsm8k(response_text, q["answer"])
-                nums = re.findall(r"-?\d+\.?\d*", response_text)
+                graded_text = _strip_thinking(response_text)
+                nums = re.findall(r"-?\d+\.?\d*", graded_text)
                 got_str = nums[-1] if nums else "?"
                 suffix = f"TTFT {ttft_ms:.0f}ms" if ttft_ms is not None else ""
                 if passed:
@@ -415,7 +432,8 @@ def run_quality_benchmark(
 
             elif suite == "mmlu":
                 passed = grade_mmlu(response_text, q["answer"])
-                m = re.search(r"\b([ABCD])\b", response_text.strip()[:200])
+                graded_text = _strip_thinking(response_text)
+                m = re.search(r"\b([ABCD])\b", graded_text.strip()[:200])
                 got_str = m.group(1) if m else "?"
                 suffix = f"TTFT {ttft_ms:.0f}ms" if ttft_ms is not None else ""
                 if passed:
