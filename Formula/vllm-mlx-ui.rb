@@ -15,9 +15,9 @@ class VllmMlxUi < Formula
   homepage "https://github.com/clickbrain/vllm-mlx-ui"
 
   # Stable release — brew upgrade works normally with this URL.
-  url "https://github.com/clickbrain/vllm-mlx-ui/archive/refs/tags/v0.3.58.tar.gz"
-  sha256 "83a105149ccc21440825b0ebfa03327cb362eda942e74950ed81ccfbb856a419"
-  version "0.3.58"
+  url "https://github.com/clickbrain/vllm-mlx-ui/archive/refs/tags/v0.3.59.tar.gz"
+  sha256 "ae087863c045c7e67fc2f33eba398d10a6491b0ff6dfad915a063c783d89cfd3"
+  version "0.3.59"
 
   # HEAD install: always gets the latest code from main branch.
   # Install with:  brew install --HEAD clickbrain/vllm-mlx-ui/vllm-mlx-ui
