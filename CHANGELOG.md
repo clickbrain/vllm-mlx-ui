@@ -1,4 +1,8 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.64 — 2026-04-27
+
+- Feature: **Model search & filter in Benchmarks** — Run Tests and Advisor model selectors now include a live search box (filter by name), size range dropdown (All / < 4 GB / 4–8 GB / 8–16 GB / > 16 GB), quantization dropdown (dynamically populated from installed models), a result count, and All / None quick-select buttons; filters are shared between both tabs; quant level now shown in the model description row
+
 ## v0.3.63 — 2026-04-27
 
 - Fix: **Commit ui_dist built assets** — the compiled Vue bundle was not committed after v0.3.60–v0.3.62 UI changes; dev/local installs (`pip install -e .`) serve directly from `vllm_mlx/dashboard/ui_dist/` and were showing the pre-Advisor stale build; ui_dist now contains the correct build (Advisor tab, Performance Settings, Run Tests, fleet auto-detect, font size increases)
