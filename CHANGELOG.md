@@ -4,6 +4,13 @@ All notable changes to the dashboard UI are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Dashboard UI version is tracked separately from the core vllm-mlx version.
 
+## [0.3.47] — 2026-04-27
+
+### Fixed
+- Quality benchmark silently failing: API client returns data directly (not `{ data: T }`);
+  fixed `{ data }` destructuring in all three benchmark poll calls so quality runs
+  actually start and results display correctly
+
 ## [0.3.46] — 2026-04-27
 
 ### Added

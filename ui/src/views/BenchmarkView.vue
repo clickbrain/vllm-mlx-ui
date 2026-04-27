@@ -226,8 +226,8 @@ async function runBenchmark() {
     if (speedPhase.value === 'running') {
       speedPollTimer = setInterval(async () => {
         try {
-          const { data } = await api.get<{ running: boolean }>('/benchmark/status')
-          if (!data.running) {
+          const status = await api.get<{ running: boolean }>('/benchmark/status')
+          if (!status.running) {
             clearInterval(speedPollTimer!); speedPollTimer = null
             speedPhase.value = 'done'
             // pick up latest result
@@ -251,15 +251,15 @@ async function runBenchmark() {
   if (benchSuites.value.length) {
     qualityPhase.value = 'running'
     try {
-      const { data } = await api.post<{ ok: boolean; run_id: string }>('/quality-benchmark/run', {
+      const runData = await api.post<{ ok: boolean; run_id: string }>('/quality-benchmark/run', {
         suites: benchSuites.value,
         num_questions: benchNumQuestions.value,
       })
-      const runId = data.run_id
+      const runId = runData.run_id
       let lineOffset = 0
       qualityPollTimer = setInterval(async () => {
         try {
-          const { data: out } = await api.get<{
+          const out = await api.get<{
             running: boolean; lines: string[]; results: any; error: string | null; total_lines: number
           }>(`/quality-benchmark/output/${runId}?since=${lineOffset}`)
           qualityLines.value.push(...out.lines)
