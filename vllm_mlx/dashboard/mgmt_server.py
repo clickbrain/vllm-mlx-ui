@@ -1392,6 +1392,103 @@ def network_scan(_: None = Depends(_check_auth)) -> list:
     return found
 
 
+@app.get("/fleet/discover")
+def fleet_discover(_: None = Depends(_check_auth)) -> list:
+    """Scan the local subnet for other vllm-mlx-ui management servers.
+
+    Probes port 8502 (the mgmt server default) across the local /24 subnet(s),
+    then confirms each responsive host by fetching ``/status`` to retrieve
+    version and active model information.
+
+    Returns a list of ``{ip, hostname, port, version, model_id}`` dicts for
+    hosts that are confirmed vllm-mlx-ui instances.
+    """
+    import json as _json
+    import socket
+    import subprocess as _sp
+    import urllib.request
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    MGMT_PORT = 8502
+    CONNECT_TIMEOUT = 0.3
+    HTTP_TIMEOUT = 1.0
+
+    # Collect /24 subnets from active non-loopback interfaces
+    subnets: set[str] = set()
+    try:
+        out = _sp.check_output(["ifconfig"], text=True, stderr=_sp.DEVNULL)
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("inet ") and "127." not in line:
+                parts = line.split()
+                if len(parts) >= 2:
+                    ip = parts[1]
+                    base = ".".join(ip.split(".")[:3])
+                    subnets.add(base)
+    except Exception:
+        pass
+
+    if not subnets:
+        return []
+
+    # Collect own IPs to skip
+    own_ips: set[str] = set()
+    try:
+        own_ips = {r[4][0] for r in socket.getaddrinfo(socket.gethostname(), None)}
+    except Exception:
+        pass
+
+    candidates: list[str] = [
+        f"{base}.{i}"
+        for base in subnets
+        for i in range(1, 255)
+        if f"{base}.{i}" not in own_ips
+    ]
+
+    def _probe(ip: str) -> dict | None:
+        # Phase 1: quick TCP connect
+        try:
+            with socket.create_connection((ip, MGMT_PORT), timeout=CONNECT_TIMEOUT):
+                pass
+        except Exception:
+            return None
+
+        # Phase 2: confirm vllm-mlx-ui by fetching /status
+        try:
+            url = f"http://{ip}:{MGMT_PORT}/status"
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+                body = _json.loads(resp.read().decode())
+        except Exception:
+            # Port was open but /status failed — skip
+            return None
+
+        hostname = ip
+        try:
+            hostname = socket.gethostbyaddr(ip)[0]
+        except Exception:
+            pass
+
+        return {
+            "ip": ip,
+            "hostname": hostname,
+            "port": MGMT_PORT,
+            "version": body.get("version", ""),
+            "model_id": body.get("model", body.get("model_id", "")),
+        }
+
+    found: list[dict] = []
+    with ThreadPoolExecutor(max_workers=64) as pool:
+        futures = {pool.submit(_probe, ip): ip for ip in candidates}
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result:
+                found.append(result)
+
+    found.sort(key=lambda x: tuple(int(p) for p in x["ip"].split(".")))
+    return found
+
+
 # ── Vue UI static serving ─────────────────────────────────────────────────────
 # Serve the built Vue UI from ui/dist/ at the root path.
 # API routes (/status, /memory, etc.) take priority because they are registered
