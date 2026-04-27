@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vllm-mlx-ui"
-version = "0.3.50"
+version = "0.3.51"
 description = "vLLM-like inference for Apple Silicon - GPU-accelerated Text, Image, Video & Audio on Mac"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -129,7 +129,7 @@ include = ["vllm_mlx*"]
 
 [tool.setuptools.package-data]
 "vllm_mlx.bench_serve_prompts" = ["*.json"]
-"vllm_mlx.dashboard" = ["ui_dist/**/*", "ui_dist/index.html"]
+"vllm_mlx.dashboard" = ["ui_dist/**/*", "ui_dist/index.html", "docs_dist/**/*"]
 
 [tool.black]
 line-length = 88
