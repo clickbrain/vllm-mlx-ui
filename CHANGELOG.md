@@ -1,5 +1,12 @@
 # Changelog — vllm-mlx Dashboard UI
-## v0.3.55 — 2026-04-27
+## v0.3.56 — 2026-04-27
+
+- Docs: bundled full documentation into `vllm_mlx/dashboard/docs_dist/` so docs work in the Homebrew-installed version (fixes "404" error in Docs tab)
+- Docs: Dashboard User Guide completely rewritten to reflect the current UI — covers all 6 sections (Chat, Models, Serve, Benchmarks, Settings, Docs), all new features including company chips, filter bar, trending scores, Run Tests tab, History compare, Settings improvements
+- Docs: In-page section TOC panel — when viewing a doc with 2+ headings, a right-side panel shows all h2/h3 headings with scroll-spy highlighting of the current section
+- Docs: Heading anchors — every h2/h3 heading has a `¶` link icon on hover; clicking copies the deep-link URL hash
+- Docs: URL hash navigation — deep-linking to `#section-name` scrolls to that section after page load
+
 
 - UI: Settings — GPU Memory Utilization now displays as a percentage (e.g. 90%) instead of a decimal
 - UI: Settings — SSD KV Cache Directory has a Browse… button that opens a native macOS folder picker
