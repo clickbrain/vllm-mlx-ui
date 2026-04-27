@@ -1,4 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.51 — 2026-04-27
+
+- Fix: Benchmark quality runner was sending requests without `model` field → 422 errors on all quality/combined runs
+- Fix: Cache Statistics now shows engine_cache data (hit rate, hits, misses, etc.) even when mlx_vlm soft-error is present; soft error shown as a footnote
+- Fix: "Compare N runs" button in History now scrolls to the comparison panel
+- Fix: In-app Docs now bundled with the installed package — no more 404 after `brew upgrade`
+  - Formula now copies `docs/` → `vllm_mlx/dashboard/docs_dist/` during build
+  - `pyproject.toml` package-data includes `docs_dist/**/*`
+
 ## v0.3.50 — 2026-04-26
 
 - Fix: `AttributeError: module has no attribute '_detect_install_method'` crash in Software Updates endpoint (missing `def` line in `update_checker.py`)

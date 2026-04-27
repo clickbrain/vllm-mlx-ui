@@ -51,8 +51,14 @@ const cacheError = ref(false)
 async function refreshCache() {
   if (!serverStore.isRunning) { cacheStats.value = null; return }
   const result = await serverStore.fetchCacheStats()
-  if (result && !result.error) { cacheStats.value = result; cacheError.value = false }
-  else cacheError.value = true
+  // Accept the result if it has engine_cache data, even if a soft error is present
+  // (e.g. "mlx_vlm not loaded" is non-fatal for text-only models)
+  if (result && (result.engine_cache || Object.keys(result).some(k => k !== 'error'))) {
+    cacheStats.value = result
+    cacheError.value = false
+  } else {
+    cacheError.value = true
+  }
 }
 
 onMounted(() => {
@@ -147,9 +153,37 @@ const uptime = computed(() => {
 })
 
 // ── Cache stats display ─────────────────────────────────────────────────────
+const cacheSoftError = computed(() => (cacheStats.value as any)?.error ?? null)
+
 const cacheEntries = computed(() => {
   if (!cacheStats.value) return []
-  return Object.entries(cacheStats.value).map(([k, v]) => ({ key: k, value: v }))
+  const ec = (cacheStats.value as any).engine_cache
+  const pc = (cacheStats.value as any).prefix_cache
+  const rows: { key: string; value: string }[] = []
+  const fmt = (v: unknown) => v == null ? '—' : String(v)
+  const pct = (v: unknown) => v == null ? '—' : `${(Number(v) * 100).toFixed(1)}%`
+  if (ec) {
+    rows.push({ key: 'Hit Rate',    value: pct(ec.hit_rate) })
+    rows.push({ key: 'Hits',        value: fmt(ec.hits) })
+    rows.push({ key: 'Misses',      value: fmt(ec.misses) })
+    if (ec.entries_used != null) rows.push({ key: 'Entries Used', value: fmt(ec.entries_used) })
+    if (ec.memory_used  != null) rows.push({ key: 'Memory Used',  value: fmt(ec.memory_used) })
+    if (ec.tokens_saved != null) rows.push({ key: 'Tokens Saved', value: fmt(ec.tokens_saved) })
+    if (ec.evictions    != null) rows.push({ key: 'Evictions',    value: fmt(ec.evictions) })
+  }
+  if (pc) {
+    rows.push({ key: 'Prefix Hit Rate', value: pct(pc.hit_rate) })
+    rows.push({ key: 'Prefix Hits',     value: fmt(pc.hits) })
+    rows.push({ key: 'Prefix Misses',   value: fmt(pc.misses) })
+  }
+  // Fallback: if no engine_cache/prefix_cache, display raw keys except 'error'
+  if (rows.length === 0) {
+    for (const [k, v] of Object.entries(cacheStats.value)) {
+      if (k === 'error') continue
+      rows.push({ key: k, value: fmt(v) })
+    }
+  }
+  return rows
 })
 
 // ── BENCHMARK TAB — unified Speed + Quality ────────────────────────────────
@@ -336,11 +370,16 @@ const sortedHistory = computed(() =>
 )
 
 const historySelected = ref<Set<number>>(new Set())
+const comparePanelRef = ref<HTMLElement | null>(null)
 
 function toggleHistorySelect(id: number) {
   const s = new Set(historySelected.value)
   if (s.has(id)) s.delete(id); else s.add(id)
   historySelected.value = s
+}
+
+function scrollToCompare() {
+  nextTick(() => comparePanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 }
 
 const compareRuns = computed(() =>
@@ -557,10 +596,9 @@ watch(activeTab, (tab) => {
         <div v-if="cacheStats && cacheEntries.length" class="cache-grid">
           <div v-for="entry in cacheEntries" :key="entry.key" class="cache-item">
             <div class="cache-key">{{ entry.key }}</div>
-            <div class="cache-val mono">
-              {{ typeof entry.value === 'object' ? JSON.stringify(entry.value) : String(entry.value) }}
-            </div>
+            <div class="cache-val mono">{{ entry.value }}</div>
           </div>
+          <div v-if="cacheSoftError" class="cache-note">{{ cacheSoftError }}</div>
         </div>
         <div v-else-if="cacheError" class="panel-empty warn">Cache stats unavailable.</div>
         <div v-else class="panel-empty">
@@ -855,6 +893,7 @@ watch(activeTab, (tab) => {
             v-if="historySelected.size >= 2"
             variant="secondary"
             size="sm"
+            @click="scrollToCompare"
           >
             Compare {{ historySelected.size }} runs
           </AppButton>
@@ -869,7 +908,7 @@ watch(activeTab, (tab) => {
       </div>
 
       <!-- Comparison table -->
-      <div v-if="compareRuns.length >= 2" class="panel compare-panel">
+      <div ref="comparePanelRef" v-if="compareRuns.length >= 2" class="panel compare-panel">
         <div class="panel-header">
           <div class="panel-title">Comparison</div>
           <button class="icon-btn" @click="historySelected = new Set()">✕ Clear</button>
@@ -1275,6 +1314,15 @@ watch(activeTab, (tab) => {
   font-size: 12px;
   color: var(--tx-secondary);
   word-break: break-all;
+}
+
+.cache-note {
+  grid-column: 1 / -1;
+  padding: var(--space-2) var(--space-4);
+  font-size: 10px;
+  color: var(--tx-muted);
+  background: var(--bg-surface);
+  border-top: 1px solid var(--bd-subtle);
 }
 
 /* ── Benchmark tab ───────────────────────────────────────────────────────── */

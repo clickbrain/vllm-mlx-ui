@@ -47,6 +47,10 @@ class VllmMlxUi < Formula
     FileUtils.rm_rf "vllm_mlx/dashboard/ui_dist"
     FileUtils.cp_r "ui/dist", "vllm_mlx/dashboard/ui_dist"
 
+    # Bundle docs so the in-app docs viewer works in the installed version
+    FileUtils.rm_rf "vllm_mlx/dashboard/docs_dist"
+    FileUtils.cp_r "docs", "vllm_mlx/dashboard/docs_dist"
+
     # Create an isolated virtual environment
     system python, "-m", "venv", venv
 

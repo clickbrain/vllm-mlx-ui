@@ -257,6 +257,7 @@ def _stream_completion(
     server_url: str,
     messages: list[dict],
     max_tokens: int,
+    model: str = "default",
     temperature: float = 0.0,
     timeout: int = 90,
 ) -> tuple[str, float | None, float, int, float]:
@@ -274,6 +275,7 @@ def _stream_completion(
     with requests.post(
         f"{server_url}/v1/chat/completions",
         json={
+            "model": model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -380,7 +382,7 @@ def run_quality_benchmark(
             ttft_ms: float | None = None
             try:
                 response_text, ttft_ms, _total_ms, comp_tokens, tps = _stream_completion(
-                    server_url, messages, max_tokens
+                    server_url, messages, max_tokens, model=model_name
                 )
                 total_tokens += comp_tokens
                 tps_list.append(tps)
