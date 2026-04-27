@@ -4,6 +4,14 @@ All notable changes to the dashboard UI are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Dashboard UI version is tracked separately from the core vllm-mlx version.
 
+## [0.3.48] — 2026-04-27
+
+### Fixed
+- Benchmark tab: restored model selector; was lost in v0.3.46 rewrite
+  - Shows all cached models as checkboxes; defaults to currently-running model
+  - Speed benchmark runs against all selected models (multi-model comparison)
+  - "running" badge highlights the currently-active model
+
 ## [0.3.47] — 2026-04-27
 
 ### Fixed

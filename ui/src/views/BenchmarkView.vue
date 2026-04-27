@@ -60,6 +60,7 @@ onMounted(() => {
   refreshCache()
   cacheInterval = setInterval(refreshCache, 15_000)
   modelsStore.fetchBenchmarkResults()
+  modelsStore.fetchModels()
 })
 
 onUnmounted(() => {
@@ -165,6 +166,25 @@ const benchMaxTokens     = ref(256)
 const benchRuns          = ref(3)
 const benchNumQuestions  = ref(20)
 
+// Model selection
+const cachedModels = computed(() => modelsStore.models.filter((m: { cached: boolean }) => m.cached))
+const benchSelectedModels = ref<string[]>([])
+
+// Seed selection with the currently running model
+watch(
+  () => serverStore.modelId,
+  (id) => {
+    if (id && !benchSelectedModels.value.includes(id)) benchSelectedModels.value = [id]
+  },
+  { immediate: true },
+)
+
+function toggleBenchModel(id: string) {
+  const idx = benchSelectedModels.value.indexOf(id)
+  if (idx === -1) benchSelectedModels.value.push(id)
+  else benchSelectedModels.value.splice(idx, 1)
+}
+
 // Run state
 const benchRunning     = ref(false)
 const speedPhase       = ref<'idle' | 'running' | 'done' | 'error'>('idle')
@@ -187,7 +207,8 @@ function stopBenchmarkPolls() {
 
 async function runBenchmark() {
   if (!serverStore.isRunning || benchRunning.value) return
-  if (!benchIncludeSpeed && !benchSuites.value.length) return
+  if (!benchIncludeSpeed.value && !benchSuites.value.length) return
+  if (benchIncludeSpeed.value && benchSelectedModels.value.length === 0) return
 
   benchRunning.value = true
   speedPhase.value   = 'idle'
@@ -195,7 +216,7 @@ async function runBenchmark() {
   qualityLines.value = []
   lastRunSpeed.value   = null
   lastRunQuality.value = null
-  lastRunModel.value   = serverStore.modelId ?? ''
+  lastRunModel.value   = benchSelectedModels.value.join(', ')
   lastRunTime.value    = new Date().toLocaleTimeString()
 
   // Track when each phase completes so we know when overall is done
@@ -212,10 +233,10 @@ async function runBenchmark() {
   // Speed benchmark
   if (benchIncludeSpeed.value) {
     speedPhase.value = 'running'
-    const model = serverStore.modelId ?? ''
+    const models = benchSelectedModels.value.length > 0 ? benchSelectedModels.value : [serverStore.modelId ?? '']
     try {
       await api.post('/benchmark/run', {
-        model_ids: [model],
+        model_ids: models,
         config: { runs: benchRuns.value, max_tokens: benchMaxTokens.value, prompt: 'Explain the concept of machine learning in simple terms.' },
       })
     } catch {
@@ -557,6 +578,32 @@ watch(activeTab, (tab) => {
         </div>
         <div class="bench-config">
 
+          <!-- Model selector -->
+          <div class="bench-section-label">Models to test</div>
+          <div v-if="cachedModels.length === 0" class="bench-no-models">
+            No downloaded models found — download a model on the Models page first.
+          </div>
+          <div v-else class="bench-model-list">
+            <label
+              v-for="m in cachedModels"
+              :key="m.id"
+              class="bench-check"
+              :class="{ checked: benchSelectedModels.includes(m.id) }"
+            >
+              <input
+                type="checkbox"
+                :disabled="benchRunning"
+                :checked="benchSelectedModels.includes(m.id)"
+                @change="toggleBenchModel(m.id)"
+              />
+              <div class="bench-check-info">
+                <span class="bench-check-label mono">{{ m.id.split('/').pop() }}</span>
+                <span class="bench-check-desc">{{ m.id.split('/')[0] }} &middot; {{ m.size_gb?.toFixed(1) ?? '?' }} GB</span>
+              </div>
+              <span v-if="m.id === serverStore.modelId" class="bench-model-badge">running</span>
+            </label>
+          </div>
+
           <!-- Tests to run -->
           <div class="bench-section-label">Tests to run</div>
           <div class="bench-checks">
@@ -622,7 +669,7 @@ watch(activeTab, (tab) => {
           <!-- Run button -->
           <div class="bench-run-row">
             <AppButton
-              :disabled="benchRunning || !serverStore.isRunning || (!benchIncludeSpeed && !benchSuites.length)"
+              :disabled="benchRunning || !serverStore.isRunning || (!benchIncludeSpeed.value && !benchSuites.length) || (benchIncludeSpeed.value && benchSelectedModels.length === 0)"
               @click="runBenchmark"
             >
               {{ benchRunning ? 'Running…' : 'Run Benchmark' }}
@@ -1189,9 +1236,17 @@ watch(activeTab, (tab) => {
 .bench-check:hover { background: var(--bg-elevated); }
 .bench-check.checked { border-color: var(--si-400); background: color-mix(in srgb, var(--si-400) 6%, transparent); }
 .bench-check input { margin-top: 2px; accent-color: var(--si-400); flex-shrink: 0; }
-.bench-check-info { display: flex; flex-direction: column; gap: 2px; }
+.bench-check-info { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .bench-check-label { font-weight: 600; font-size: 13px; color: var(--tx-primary); }
 .bench-check-desc { font-size: 11px; color: var(--tx-muted); }
+
+.bench-model-list { display: flex; flex-direction: column; gap: 6px; }
+.bench-no-models { font-size: 12px; color: var(--tx-muted); padding: 8px 0; }
+.bench-model-badge {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 4px; background: color-mix(in srgb, var(--si-400) 15%, transparent);
+  color: var(--si-400); flex-shrink: 0;
+}
 
 .bench-opts-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
 .opt-label { font-size: 12px; color: var(--tx-secondary); display: flex; align-items: center; gap: 8px; }
