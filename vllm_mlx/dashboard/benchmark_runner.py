@@ -292,7 +292,172 @@ def run_benchmark(
     return result
 
 
-_TEST_PROMPTS = [
+def run_custom_benchmark(
+    model_id: str,
+    custom_prompts: list[str],
+    server_url: str = "http://127.0.0.1:8000",
+    max_tokens: int = 512,
+    output_callback: Callable[[str], None] | None = None,
+    label: str = "",
+    stop_event: Any | None = None,
+) -> dict[str, Any]:
+    """Run a custom-prompt benchmark against the running inference server.
+
+    Unlike run_live_benchmark(), callers supply the exact prompt list.
+    Returns per-prompt metrics: TTFT, tok/s, and total response time.
+    """
+    import requests as _req
+
+    _ensure_state_dir()
+
+    if output_callback:
+        output_callback(f"Running custom benchmark against {server_url}\n")
+        output_callback(f"Model: {model_id} · {len(custom_prompts)} prompts · max_tokens {max_tokens}\n\n")
+
+    per_prompt: list[dict[str, Any]] = []
+    raw_lines: list[str] = []
+
+    # Verify the server is running
+    try:
+        health = _req.get(f"{server_url}/health", timeout=5)
+        if health.status_code != 200:
+            raise RuntimeError("Inference server not responding")
+    except Exception as e:
+        result: dict[str, Any] = {
+            "model": model_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "benchmark_type": "custom",
+            "custom_prompts": custom_prompts,
+            "max_tokens": max_tokens,
+            "success": False,
+            "per_prompt": [],
+            "error": f"Server not reachable: {e}",
+            "raw_output": str(e),
+            "label": label,
+        }
+        save_result(result)
+        return result
+
+    for i, prompt in enumerate(custom_prompts):
+        if stop_event and stop_event.is_set():
+            break
+
+        short = prompt[:70] + ("…" if len(prompt) > 70 else "")
+        if output_callback:
+            output_callback(f"[{i+1}/{len(custom_prompts)}] {short}\n")
+
+        start = time.monotonic()
+        first_token_time: float | None = None
+        last_content_time: float | None = None
+        char_count = 0
+        completion_tokens: int | None = None
+        content_buffer = ""
+
+        try:
+            resp = _req.post(
+                f"{server_url}/v1/chat/completions",
+                json={
+                    "model": model_id,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": max_tokens,
+                    "stream": True,
+                    "temperature": 0.0,
+                    "stream_options": {"include_usage": True},
+                },
+                stream=True,
+                timeout=300,
+            )
+            resp.raise_for_status()
+
+            for raw_line in resp.iter_lines():
+                if not raw_line:
+                    continue
+                line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+                if not line.startswith("data: ") or line == "data: [DONE]":
+                    continue
+                data_str = line[6:]
+                try:
+                    data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                usage = data.get("usage") or {}
+                if usage.get("completion_tokens"):
+                    completion_tokens = int(usage["completion_tokens"])
+                delta = data.get("choices", [{}])[0].get("delta", {})
+                content = delta.get("content", "")
+                if content:
+                    now = time.monotonic()
+                    if first_token_time is None:
+                        first_token_time = now
+                    last_content_time = now
+                    char_count += len(content)
+                    content_buffer += content
+
+            if first_token_time is not None and char_count > 0:
+                ttft_ms = round((first_token_time - start) * 1000, 1)
+                total_ms = round((last_content_time - start) * 1000, 1) if last_content_time else ttft_ms
+                actual_tokens = completion_tokens if completion_tokens else max(1, char_count // 4)
+                gen_time = (last_content_time - first_token_time) if last_content_time else 0.0
+
+                tps: float | None = None
+                if gen_time >= 0.1 or actual_tokens <= 5:
+                    tps = round(actual_tokens / gen_time, 1) if gen_time > 0.01 else None
+
+                row: dict[str, Any] = {
+                    "prompt": prompt,
+                    "ttft_ms": ttft_ms,
+                    "tps": tps,
+                    "total_ms": total_ms,
+                    "tokens": actual_tokens,
+                    "buffered": tps is None and actual_tokens > 5,
+                }
+                per_prompt.append(row)
+
+                tps_str = f"{tps:.1f} tok/s" if tps is not None else "TPS n/a (buffered)"
+                raw_lines.append(
+                    f"  TTFT {ttft_ms:.0f}ms · {tps_str} · total {total_ms:.0f}ms · {actual_tokens} tokens"
+                )
+                if output_callback:
+                    output_callback(
+                        f"  TTFT {ttft_ms:.0f}ms  |  {tps_str}  |  total {total_ms:.0f}ms  |  {actual_tokens} tokens\n\n"
+                    )
+            else:
+                per_prompt.append({"prompt": prompt, "error": "No response received"})
+                raw_lines.append("  (no response)")
+                if output_callback:
+                    output_callback("  ✗ No response received\n\n")
+
+        except Exception as e:
+            per_prompt.append({"prompt": prompt, "error": str(e)})
+            raw_lines.append(f"  Error: {e}")
+            if output_callback:
+                output_callback(f"  ✗ Error: {e}\n\n")
+
+    valid = [r for r in per_prompt if "error" not in r]
+    tps_vals = [r["tps"] for r in valid if r.get("tps") is not None]
+    ttft_vals = [r["ttft_ms"] for r in valid]
+    total_vals = [r["total_ms"] for r in valid]
+
+    result = {
+        "model": model_id,
+        "timestamp": datetime.utcnow().isoformat(),
+        "benchmark_type": "custom",
+        "custom_prompts": custom_prompts,
+        "max_tokens": max_tokens,
+        "success": len(valid) > 0,
+        "per_prompt": per_prompt,
+        "avg_tps": round(statistics.mean(tps_vals), 2) if tps_vals else None,
+        "avg_ttft_ms": round(statistics.mean(ttft_vals), 1) if ttft_vals else None,
+        "avg_total_ms": round(statistics.mean(total_vals), 1) if total_vals else None,
+        "raw_output": "\n".join(raw_lines),
+        "label": label,
+    }
+    if not result["success"]:
+        result["error"] = "No successful prompts completed"
+
+    save_result(result)
+    return result
+
     "Explain the concept of machine learning in simple terms.",
     "Write a short story about a robot learning to paint.",
     "What are the key differences between Python and JavaScript?",

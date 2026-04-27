@@ -1197,6 +1197,137 @@ def stop_quality_benchmark(run_id: str, _: None = Depends(_check_auth)) -> dict:
     return {"ok": True}
 
 
+# ── Custom benchmarks ─────────────────────────────────────────────────────────
+
+_custom_runs: dict[str, dict[str, Any]] = {}
+_custom_lock = threading.Lock()
+
+
+@app.post("/custom-benchmark/run")
+def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
+    """Start a custom-prompt benchmark run. Returns run_id to poll for output/results."""
+    import uuid
+    prompts: list[str] = req.get("prompts", [])
+    if not prompts:
+        raise HTTPException(status_code=400, detail="No prompts provided")
+    label = req.get("label", "")
+    max_tokens = int(req.get("max_tokens", 512))
+    model_ids: list[str] = req.get("model_ids", [])
+
+    model_id = sm.load_config().get("model", "") if not model_ids else model_ids[0]
+    run_id = str(uuid.uuid4())
+
+    stop_event = threading.Event()
+    run_state: dict[str, Any] = {
+        "running": True,
+        "lines": [],
+        "results": None,
+        "all_results": [],
+        "error": None,
+        "stop_event": stop_event,
+    }
+    with _custom_lock:
+        _custom_runs[run_id] = run_state
+
+    def _cb(text: str) -> None:
+        with _custom_lock:
+            _custom_runs[run_id]["lines"].append(text)
+
+    def _run() -> None:
+        from vllm_mlx.dashboard import benchmark_runner as br
+        all_results: list[dict[str, Any]] = []
+        models_to_run = model_ids if model_ids else [model_id]
+        original_model = sm.load_config().get("model", "")
+        switched = False
+
+        try:
+            for mid in models_to_run:
+                if stop_event.is_set():
+                    break
+                current_model = sm.load_config().get("model", "")
+                if current_model != mid:
+                    _cb(f"\n── Loading {mid} ──\n")
+                    cfg = sm.load_config()
+                    cfg["model"] = mid
+                    sm.save_config(cfg)
+                    sm.stop_server()
+                    sm.start_server(cfg)
+                    switched = True
+                    import time as _t
+                    server_url_inner = f"http://127.0.0.1:{cfg.get('port', 8000)}"
+                    for _ in range(120):
+                        if stop_event.is_set():
+                            break
+                        try:
+                            import requests as _req
+                            r = _req.get(f"{server_url_inner}/v1/models", timeout=2)
+                            if r.status_code == 200:
+                                break
+                        except Exception:
+                            pass
+                        _t.sleep(1)
+
+                server_url = f"http://127.0.0.1:{sm.load_config().get('port', 8000)}"
+                _cb(f"\n── Running custom benchmark: {mid} ──\n")
+                res = br.run_custom_benchmark(
+                    model_id=mid,
+                    custom_prompts=prompts,
+                    server_url=server_url,
+                    max_tokens=max_tokens,
+                    output_callback=_cb,
+                    label=label,
+                    stop_event=stop_event,
+                )
+                all_results.append(res)
+        except Exception as exc:
+            with _custom_lock:
+                _custom_runs[run_id]["error"] = str(exc)
+        finally:
+            if switched and original_model and sm.load_config().get("model", "") != original_model:
+                _cb(f"\n── Restoring {original_model} ──\n")
+                cfg = sm.load_config()
+                cfg["model"] = original_model
+                sm.save_config(cfg)
+                sm.stop_server()
+                sm.start_server(cfg)
+            with _custom_lock:
+                _custom_runs[run_id]["results"] = all_results[-1] if all_results else None
+                _custom_runs[run_id]["all_results"] = all_results
+                _custom_runs[run_id]["running"] = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True, "run_id": run_id}
+
+
+@app.get("/custom-benchmark/output/{run_id}")
+def custom_benchmark_output(run_id: str, since: int = 0, _: None = Depends(_check_auth)) -> dict:
+    """Return output lines since `since` index, plus running status and results when done."""
+    if run_id not in _custom_runs:
+        raise HTTPException(status_code=404, detail="Unknown run_id")
+    run = _custom_runs[run_id]
+    lines = run["lines"][since:]
+    return {
+        "running": run["running"],
+        "lines": lines,
+        "results": run.get("results"),
+        "all_results": run.get("all_results", []),
+        "error": run.get("error"),
+        "total_lines": len(run["lines"]),
+    }
+
+
+@app.post("/custom-benchmark/stop/{run_id}")
+def stop_custom_benchmark(run_id: str, _: None = Depends(_check_auth)) -> dict:
+    """Set the stop flag on a running custom benchmark."""
+    if run_id not in _custom_runs:
+        raise HTTPException(status_code=404, detail="Unknown run_id")
+    stop_event = _custom_runs[run_id].get("stop_event")
+    if stop_event:
+        stop_event.set()
+    _custom_runs[run_id]["running"] = False
+    return {"ok": True}
+
+
 import os as _os_mod
 import signal as _signal_mod
 import re as _re_mod

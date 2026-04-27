@@ -16,6 +16,7 @@
 <script lang="ts">
 let _qualityPollTimer: ReturnType<typeof setInterval> | null = null
 let _speedPollTimer:   ReturnType<typeof setInterval> | null = null
+let _customPollTimer:  ReturnType<typeof setInterval> | null = null
 let _lineOffset = 0
 </script>
 
@@ -261,12 +262,13 @@ const QUALITY_SUITES = [
 ]
 
 // Mode: combined runs quality questions with streaming → captures both accuracy + speed
-type BenchMode = 'combined' | 'speed' | 'quality'
+type BenchMode = 'combined' | 'speed' | 'quality' | 'custom'
 const benchMode = ref<BenchMode>('combined')
 const BENCH_MODES = [
   { id: 'combined' as BenchMode, label: 'Speed + Quality', description: 'Accuracy & real-world speed in one pass' },
   { id: 'speed'    as BenchMode, label: 'Speed only',      description: 'Throughput & TTFT with synthetic prompts' },
   { id: 'quality'  as BenchMode, label: 'Quality only',    description: 'Accuracy scores (speed captured as bonus)' },
+  { id: 'custom'   as BenchMode, label: 'Custom Prompts',  description: 'Your own prompts — TTFT, tok/s, total time per prompt' },
 ]
 
 // Quality suite selection (shown when mode !== 'speed')
@@ -332,9 +334,52 @@ const qualityLogRef    = ref<HTMLPreElement | null>(null)
 // benchRunName is local config, not persistent run state
 const benchRunName    = ref('')
 
+// ── Custom prompts state ─────────────────────────────────────────────────────
+const customPrompts    = ref<string[]>([''])
+const customRunId      = ref<string | null>(null)
+const customPhase      = ref<'idle' | 'running' | 'done' | 'error'>('idle')
+const customLines      = ref<string[]>([])
+const customAllResults = ref<any[]>([])
+const customLogRef     = ref<HTMLPreElement | null>(null)
+let _customPollTimer: ReturnType<typeof setInterval> | null = null
+let _customLineOffset = 0
+
+function addCustomPrompt() { customPrompts.value.push('') }
+function removeCustomPrompt(i: number) {
+  if (customPrompts.value.length > 1) customPrompts.value.splice(i, 1)
+}
+
+interface CustomPromptRow {
+  prompt: string
+  ttft_ms?: number
+  tps?: number | null
+  total_ms?: number
+  tokens?: number
+  buffered?: boolean
+  error?: string
+}
+
+// Flat list of all per_prompt rows across all models run
+const customPerPromptResults = computed<(CustomPromptRow & { model: string })[]>(() => {
+  const rows: (CustomPromptRow & { model: string })[] = []
+  for (const res of customAllResults.value) {
+    for (const row of (res.per_prompt ?? [])) {
+      rows.push({ ...row, model: (res.model ?? '').split('/').pop() ?? res.model })
+    }
+  }
+  return rows
+})
+
+watch(customLines, () => {
+  nextTick(() => {
+    if (customLogRef.value) customLogRef.value.scrollTop = customLogRef.value.scrollHeight
+  })
+})
+
 function stopBenchmarkPolls() {
   if (_qualityPollTimer) { clearInterval(_qualityPollTimer); _qualityPollTimer = null }
   if (_speedPollTimer)   { clearInterval(_speedPollTimer);   _speedPollTimer   = null }
+  if (_customPollTimer)  { clearInterval(_customPollTimer);  _customPollTimer  = null }
 }
 
 /** Re-attaches the quality poll after a component remount while a run is active. */
@@ -368,6 +413,9 @@ async function stopBenchmark() {
     if (qualityRunId.value) {
       await api.post(`/quality-benchmark/stop/${qualityRunId.value}`, {})
     }
+    if (customRunId.value) {
+      await api.post(`/custom-benchmark/stop/${customRunId.value}`, {})
+    }
     await api.post('/benchmark/stop', {}).catch(() => {})
   } catch { /* ignore */ }
   stopBenchmarkPolls()
@@ -375,12 +423,18 @@ async function stopBenchmark() {
   benchStopping.value = false
   if (qualityPhase.value === 'running') qualityPhase.value = 'error'
   if (speedPhase.value === 'running') speedPhase.value = 'error'
+  if (customPhase.value === 'running') customPhase.value = 'error'
 }
 
 async function runBenchmark() {
   if (!serverStore.isRunning || benchRunning.value) return
   if (benchMode.value === 'speed' && benchSelectedModels.value.length === 0) return
-  if (benchMode.value !== 'speed' && benchSuites.value.length === 0) return
+  if (benchMode.value !== 'speed' && benchMode.value !== 'custom' && benchSuites.value.length === 0) return
+  if (benchMode.value === 'custom') {
+    const validPrompts = customPrompts.value.map(p => p.trim()).filter(Boolean)
+    if (validPrompts.length === 0) return
+    return runCustomBenchmark()
+  }
 
   benchRunning.value = true
   speedPhase.value   = 'idle'
@@ -393,6 +447,51 @@ async function runBenchmark() {
   lastRunTime.value    = new Date().toLocaleTimeString()
 
   await applyPerfAndRun(_doBenchmarkRun)
+}
+
+async function runCustomBenchmark() {
+  const validPrompts = customPrompts.value.map(p => p.trim()).filter(Boolean)
+  if (!validPrompts.length || !serverStore.isRunning) return
+
+  benchRunning.value   = true
+  customPhase.value    = 'running'
+  customLines.value    = []
+  customAllResults.value = []
+  customRunId.value    = null
+  _customLineOffset    = 0
+
+  try {
+    const runData = await api.post<{ ok: boolean; run_id: string }>('/custom-benchmark/run', {
+      prompts: validPrompts,
+      model_ids: benchSelectedModels.value,
+      label: benchRunName.value,
+      max_tokens: 512,
+    })
+    customRunId.value = runData.run_id
+    _customPollTimer = setInterval(async () => {
+      try {
+        const out = await api.get<{
+          running: boolean; lines: string[]; all_results: any[]; error: string | null; total_lines: number
+        }>(`/custom-benchmark/output/${customRunId.value}?since=${_customLineOffset}`)
+        customLines.value.push(...out.lines)
+        _customLineOffset = out.total_lines
+        if (out.all_results?.length) customAllResults.value = out.all_results
+        if (!out.running) {
+          clearInterval(_customPollTimer!); _customPollTimer = null
+          customPhase.value = out.error ? 'error' : 'done'
+          benchRunning.value = false
+          modelsStore.fetchBenchmarkResults()
+        }
+      } catch {
+        clearInterval(_customPollTimer!); _customPollTimer = null
+        customPhase.value = 'error'
+        benchRunning.value = false
+      }
+    }, 1000)
+  } catch {
+    customPhase.value = 'error'
+    benchRunning.value = false
+  }
 }
 
 async function _doBenchmarkRun() {
@@ -496,8 +595,8 @@ watch(qualityLines, () => {
 })
 
 const anyResultsReady = computed(() =>
-  // Only relevant for speed-only mode now (quality results are shown inline)
-  benchMode.value === 'speed' && lastRunSpeed.value !== null
+  (benchMode.value === 'speed' && lastRunSpeed.value !== null) ||
+  (benchMode.value === 'custom' && customPerPromptResults.value.length > 0)
 )
 
 // ── PERFORMANCE SETTINGS OVERRIDE ──────────────────────────────────────────
@@ -807,7 +906,7 @@ const sortedHistory = computed(() => {
 
 const historySelected = ref<Set<number>>(new Set())
 const historySearch  = ref('')
-const historyTypeFilter = ref<'all' | 'speed' | 'quality'>('all')
+const historyTypeFilter = ref<'all' | 'speed' | 'quality' | 'custom'>('all')
 const comparePanelRef = ref<HTMLElement | null>(null)
 
 function toggleHistorySelect(id: number) {
@@ -1182,8 +1281,8 @@ watch(activeTab, (tab) => {
                 </label>
               </div>
 
-              <!-- Quality suite checkboxes (hidden for speed-only mode) -->
-              <template v-if="benchMode !== 'speed'">
+              <!-- Quality suite checkboxes (hidden for speed-only or custom mode) -->
+              <template v-if="benchMode !== 'speed' && benchMode !== 'custom'">
                 <div class="bench-section-label">Quality suites</div>
                 <div class="bench-checks">
                   <label
@@ -1224,7 +1323,7 @@ watch(activeTab, (tab) => {
                     <option :value="512">512</option>
                   </select>
                 </label>
-                <label v-if="benchMode !== 'speed'" class="opt-label">
+                <label v-if="benchMode !== 'speed' && benchMode !== 'custom'" class="opt-label">
                   Questions / suite
                   <select v-model="benchNumQuestions" :disabled="benchRunning" class="opt-select">
                     <option :value="5">5 (quick)</option>
@@ -1234,6 +1333,36 @@ watch(activeTab, (tab) => {
                   </select>
                 </label>
               </div>
+
+              <!-- Custom prompts editor -->
+              <template v-if="benchMode === 'custom'">
+                <div class="bench-section-label">Prompts</div>
+                <div class="custom-prompts-list">
+                  <div
+                    v-for="(_, i) in customPrompts"
+                    :key="i"
+                    class="custom-prompt-row"
+                  >
+                    <span class="custom-prompt-num">{{ i + 1 }}</span>
+                    <textarea
+                      v-model="customPrompts[i]"
+                      class="custom-prompt-input"
+                      :placeholder="`Prompt ${i + 1}…`"
+                      rows="2"
+                      :disabled="benchRunning"
+                    />
+                    <button
+                      class="custom-prompt-remove"
+                      :disabled="customPrompts.length <= 1 || benchRunning"
+                      @click="removeCustomPrompt(i)"
+                      title="Remove prompt"
+                    >×</button>
+                  </div>
+                </div>
+                <button class="custom-prompt-add" :disabled="benchRunning" @click="addCustomPrompt">
+                  + Add prompt
+                </button>
+              </template>
 
               <!-- Run name -->
               <div class="bench-section-label">Run name <span class="opt-hint">(optional)</span></div>
@@ -1293,7 +1422,7 @@ watch(activeTab, (tab) => {
               <!-- Run button -->
               <div class="bench-run-row">
                 <AppButton
-                  :disabled="perfApplying || benchRunning || !serverStore.isRunning || benchSelectedModels.length === 0 || (benchMode !== 'speed' && benchSuites.length === 0)"
+                  :disabled="perfApplying || benchRunning || !serverStore.isRunning || benchSelectedModels.length === 0 || (benchMode !== 'speed' && benchMode !== 'custom' && benchSuites.length === 0) || (benchMode === 'custom' && customPrompts.filter(p => p.trim()).length === 0)"
                   @click="runBenchmark"
                 >
                   <span v-if="perfApplying || benchRunning" class="spin" style="margin-right:6px" />
@@ -1375,6 +1504,57 @@ watch(activeTab, (tab) => {
           </div>
         </div>
 
+        <!-- Custom benchmark progress + results -->
+        <div v-if="benchMode === 'custom'" class="panel bench-phase-card bench-phase-card--wide">
+          <div class="panel-header">
+            <div class="panel-title">Custom Prompts</div>
+            <span class="phase-badge" :class="customPhase">
+              {{ customPhase === 'running' ? 'Running…' : customPhase === 'done' ? 'Done' : customPhase === 'error' ? 'Error' : '' }}
+            </span>
+          </div>
+          <div class="bench-phase-body">
+            <div v-if="customPhase === 'running'" class="bench-spin-row">
+              <span class="spin" />
+              <span class="dim">Running custom prompts…</span>
+            </div>
+
+            <!-- Live log during run -->
+            <pre v-if="customLines.length" ref="customLogRef" class="quality-log custom-log">{{ customLines.join('') }}</pre>
+
+            <!-- Per-prompt results table after done -->
+            <div v-if="customPhase === 'done' && customPerPromptResults.length" class="custom-results-wrap">
+              <table class="data-table custom-results-table">
+                <thead>
+                  <tr>
+                    <th v-if="benchSelectedModels.length > 1">Model</th>
+                    <th>Prompt</th>
+                    <th class="num">TTFT</th>
+                    <th class="num">Tok/s</th>
+                    <th class="num">Total</th>
+                    <th class="num">Tokens</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, i) in customPerPromptResults" :key="i" :class="{ 'row-error': row.error }">
+                    <td v-if="benchSelectedModels.length > 1" class="mono dim">{{ row.model }}</td>
+                    <td class="custom-prompt-cell" :title="row.prompt">{{ row.prompt.length > 60 ? row.prompt.slice(0, 60) + '…' : row.prompt }}</td>
+                    <td class="num mono">{{ row.ttft_ms != null ? Math.round(row.ttft_ms) + 'ms' : '—' }}</td>
+                    <td class="num mono">
+                      <span v-if="row.tps != null">{{ row.tps.toFixed(1) }}</span>
+                      <span v-else-if="row.buffered" class="dim" title="Buffered stream — TPS not measurable">n/a</span>
+                      <span v-else>—</span>
+                    </td>
+                    <td class="num mono">{{ row.total_ms != null ? Math.round(row.total_ms) + 'ms' : '—' }}</td>
+                    <td class="num mono">{{ row.tokens ?? '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div v-if="customPhase === 'error'" class="panel-empty warn">Custom benchmark failed.</div>
+          </div>
+        </div>
+
       </div>
 
     </div>
@@ -1425,7 +1605,7 @@ watch(activeTab, (tab) => {
         />
         <div class="hf-type-btns">
           <button
-            v-for="t in ['all', 'speed', 'quality']"
+            v-for="t in ['all', 'speed', 'quality', 'custom']"
             :key="t"
             class="hf-btn"
             :class="{ active: historyTypeFilter === t }"
@@ -2583,4 +2763,52 @@ watch(activeTab, (tab) => {
   background: rgba(var(--si-rgb), .08); font-size: var(--text-sm); color: var(--tx-secondary);
   border: 1px solid rgba(var(--si-rgb), .2);
 }
+
+/* ── Custom Prompts Benchmark ─────────────────────────────────────────────── */
+.custom-prompts-list {
+  display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2);
+}
+.custom-prompt-row {
+  display: flex; align-items: flex-start; gap: var(--space-2);
+}
+.custom-prompt-num {
+  font-size: 12px; font-family: var(--font-mono); color: var(--tx-muted);
+  min-width: 20px; padding-top: 8px; text-align: right; flex-shrink: 0;
+}
+.custom-prompt-input {
+  flex: 1; padding: var(--space-2) var(--space-3);
+  background: var(--bg-base); border: 1px solid var(--bd-default);
+  border-radius: var(--r-md); color: var(--tx-primary);
+  font-size: var(--text-sm); font-family: inherit;
+  resize: vertical; min-height: 52px; line-height: 1.5;
+}
+.custom-prompt-input:focus { outline: none; border-color: var(--si-400); }
+.custom-prompt-input:disabled { opacity: .55; }
+.custom-prompt-remove {
+  padding: 4px 8px; font-size: 16px; line-height: 1;
+  border: 1px solid var(--bd-default); border-radius: var(--r-sm);
+  background: transparent; color: var(--tx-muted); cursor: pointer;
+  margin-top: 6px; flex-shrink: 0;
+}
+.custom-prompt-remove:hover:not(:disabled) { color: #f87171; border-color: #f87171; }
+.custom-prompt-remove:disabled { opacity: .35; cursor: default; }
+.custom-prompt-add {
+  align-self: flex-start; margin-top: var(--space-2);
+  padding: 5px 12px; font-size: var(--text-sm);
+  border: 1px dashed var(--bd-default); border-radius: var(--r-md);
+  background: transparent; color: var(--tx-muted); cursor: pointer;
+  font-family: inherit; transition: color .1s, border-color .1s;
+}
+.custom-prompt-add:hover:not(:disabled) { color: var(--si-400); border-color: var(--si-400); }
+.custom-prompt-add:disabled { opacity: .4; cursor: default; }
+
+.bench-phase-card--wide { width: 100%; }
+.custom-log { max-height: 200px; overflow-y: auto; margin-bottom: var(--space-3); }
+.custom-results-wrap { overflow-x: auto; margin-top: var(--space-2); }
+.custom-results-table { width: 100%; }
+.custom-prompt-cell {
+  max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: default;
+}
+.row-error td { color: var(--tx-muted); font-style: italic; }
 </style>
