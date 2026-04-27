@@ -392,7 +392,8 @@ watch(qualityLines, () => {
 })
 
 const anyResultsReady = computed(() =>
-  lastRunSpeed.value !== null || lastRunQuality.value !== null
+  // Only relevant for speed-only mode now (quality results are shown inline)
+  benchMode.value === 'speed' && lastRunSpeed.value !== null
 )
 
 // ── HISTORY TAB ────────────────────────────────────────────────────────────

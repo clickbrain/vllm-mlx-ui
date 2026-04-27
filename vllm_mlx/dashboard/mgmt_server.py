@@ -562,8 +562,16 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
     return {"ok": True, "message": f"Benchmark started for {len(model_ids)} model(s)"}
 
 
-@app.get("/benchmark/status")
-def benchmark_run_status(_: None = Depends(_check_auth)) -> dict:
+@app.post("/benchmark/stop")
+def stop_benchmark_endpoint(_: None = Depends(_check_auth)) -> dict:
+    """Signal the running speed benchmark to stop (sets running flag to False)."""
+    global _benchmark_running
+    with _benchmark_lock:
+        _benchmark_running = False
+    return {"ok": True}
+
+
+
     """Return whether a benchmark run is currently in progress."""
     return {"running": _benchmark_running}
 

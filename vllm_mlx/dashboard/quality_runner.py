@@ -341,6 +341,8 @@ def run_quality_benchmark(
     suite_results: dict[str, Any] = {}
 
     for suite in suites:
+        if stop_event and stop_event.is_set():
+            break
         suite_upper = suite.upper()
 
         if suite == "gsm8k":
@@ -369,7 +371,7 @@ def run_quality_benchmark(
         for i, q in enumerate(questions, start=1):
             if stop_event and stop_event.is_set():
                 _cb(f"\n[{suite_upper}] Stopped by user.\n")
-                break
+                break  # inner loop — outer suite loop also checks below
             if suite == "mmlu":
                 choices_text = "\n".join(f"{k}. {v}" for k, v in q["choices"].items())
                 user_msg = f"{q['question']}\n\n{choices_text}"
