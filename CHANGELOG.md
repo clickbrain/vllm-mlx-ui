@@ -1,4 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.52 — 2026-04-27
+
+- Fix: Memory Used and Memory % now show consistent values — both now derived from `(total - available)` rather than psutil's `vm.used` which under-reports on macOS
+- UI: Serve page — Live Metrics moved to top of page (immediately visible after server state)
+- UI: Serve page — Base URL and Model ID quick-copy cards moved inside Connection Info section
+- Fix: Release Memory tooltip was misleading ("Stop server…") — clarified that the server stays up; it only clears MLX cache and runs OS-level memory compaction
+
 ## v0.3.51 — 2026-04-27
 
 - Fix: Benchmark quality runner was sending requests without `model` field → 422 errors on all quality/combined runs

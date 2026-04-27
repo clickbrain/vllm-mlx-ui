@@ -203,7 +203,7 @@ async function doShutdown() {
         <text x="60" y="62" text-anchor="middle" font-size="9.5" fill="var(--tx-muted)">of {{ memTotalGb }} GB</text>
       </svg>
       <div v-if="loadedModel" class="gauge-model-name">{{ loadedModel }}</div>
-      <button class="release-mem-btn" title="Stop server and release MLX memory" @click="releaseMemory">
+      <button class="release-mem-btn" title="Clears MLX model cache and runs OS-level memory compaction. Server stays up — model weights remain loaded. Use to reclaim inactive/cached RAM without restarting." @click="releaseMemory">
         ↺ Release Memory
       </button>
       <span v-if="memReleaseMsg" class="release-mem-msg">{{ memReleaseMsg }}</span>

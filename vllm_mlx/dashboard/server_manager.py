@@ -911,7 +911,10 @@ def get_memory_stats() -> dict:
         vm = psutil.virtual_memory()
         total = vm.total / (1024 ** 3)
         available = vm.available / (1024 ** 3)
-        used = vm.used / (1024 ** 3)
+        # Use (total - available) so used_gb is consistent with vm.percent,
+        # which macOS computes as (total - available) / total * 100.
+        # vm.used alone under-reports on macOS because it excludes inactive/cached pages.
+        used = total - available
         pct = vm.percent
         if pct < 60:
             pressure = "low"

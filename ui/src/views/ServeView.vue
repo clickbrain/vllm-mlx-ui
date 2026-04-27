@@ -259,16 +259,7 @@ async function doClearCache(type: string) {
       <pre class="crash-log">{{ crashLogTail }}</pre>
     </div>
 
-    <!-- Connection endpoints -->
-    <section class="page-section">
-      <div class="section-label">Connection</div>
-      <div class="endpoint-grid">
-        <EndpointCard label="Base URL" :value="baseUrl" copyable :dimWhenEmpty="true" />
-        <EndpointCard label="Model ID" :value="modelId" copyable :dimWhenEmpty="true" />
-      </div>
-    </section>
-
-    <!-- Live metrics -->
+    <!-- Live metrics — shown first so server state is immediately visible -->
     <section class="page-section">
       <div class="section-label">
         Live Metrics
@@ -282,7 +273,12 @@ async function doClearCache(type: string) {
         <MetricCard label="Uptime" :value="uptime" />
       </div>
       <div class="release-mem-row">
-        <AppButton variant="secondary" size="sm" @click="serverStore.releaseMemory()">
+        <AppButton
+          variant="secondary"
+          size="sm"
+          title="Clears MLX model cache and runs OS-level memory compaction. The running server stays up — model weights remain loaded. Use this to reclaim inactive/cached RAM without restarting."
+          @click="serverStore.releaseMemory()"
+        >
           ↺ Release Memory
         </AppButton>
         <AppButton variant="secondary" size="sm" @click="confirmClearAll = true">
@@ -298,6 +294,11 @@ async function doClearCache(type: string) {
     <!-- Connection Info -->
     <CollapsibleSection title="📡 Connection Info" :defaultOpen="true">
       <div class="conn-body">
+        <!-- Quick-copy Base URL and Model ID at the top -->
+        <div class="endpoint-grid conn-quick-copy">
+          <EndpointCard label="Base URL" :value="baseUrl" copyable :dimWhenEmpty="true" />
+          <EndpointCard label="Model ID" :value="modelId" copyable :dimWhenEmpty="true" />
+        </div>
         <div v-if="localOnly" class="conn-warning">
           ⚠ Server is only reachable from this Mac. Change listen address in Settings → Network &amp; Access to allow remote connections.
         </div>
@@ -671,6 +672,11 @@ async function doClearCache(type: string) {
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-1) 0;
+}
+
+.conn-quick-copy {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--bd-subtle);
 }
 
 .conn-warning {
