@@ -334,6 +334,17 @@ export const useModelsStore = defineStore('models', () => {
         const tps = os.avg_tokens_per_sec ?? 0
         return { avg_tps: tps, median_tps: tps, min_tps: tps, max_tps: tps }
       }
+      // Older quality results: speed nested per-suite — average across suites
+      if (r.suites && typeof r.suites === 'object' && !Array.isArray(r.suites)) {
+        const suites = r.suites as Record<string, Record<string, unknown>>
+        const tpsVals = Object.values(suites)
+          .map(s => (s.speed as Record<string, number> | undefined)?.avg_tokens_per_sec)
+          .filter((v): v is number => typeof v === 'number' && v > 0)
+        if (tpsVals.length > 0) {
+          const tps = tpsVals.reduce((a, b) => a + b, 0) / tpsVals.length
+          return { avg_tps: tps, median_tps: tps, min_tps: tps, max_tps: tps }
+        }
+      }
       // Flat numeric fallback for older or custom records
       const flat = Number(r.avg_tps ?? r.tokens_per_second ?? 0)
       return {
@@ -354,6 +365,15 @@ export const useModelsStore = defineStore('models', () => {
       if (r.overall_speed && typeof r.overall_speed === 'object' && !Array.isArray(r.overall_speed)) {
         const os = r.overall_speed as Record<string, number>
         if (os.avg_ttft_ms !== undefined) return Number(os.avg_ttft_ms)
+      }
+      // Older quality results: TTFT nested per-suite — average across suites
+      if (r.suites && typeof r.suites === 'object' && !Array.isArray(r.suites)) {
+        const suites = r.suites as Record<string, Record<string, unknown>>
+        const ttftVals = Object.values(suites)
+          .map(s => (s.speed as Record<string, number> | undefined)?.avg_ttft_ms)
+          .filter((v): v is number => typeof v === 'number' && v > 0)
+        if (ttftVals.length > 0)
+          return ttftVals.reduce((a, b) => a + b, 0) / ttftVals.length
       }
       return undefined
     }
