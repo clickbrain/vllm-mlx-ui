@@ -16,7 +16,6 @@ fi
 
 TAG="v${VERSION}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FORMULA="/opt/homebrew/Library/Taps/clickbrain/homebrew-vllm-mlx-ui/Formula/vllm-mlx-ui.rb"
 
 cd "$REPO_ROOT"
 
@@ -50,28 +49,9 @@ echo "→ Tagging and pushing code..."
 git tag "${TAG}"
 git push origin main "${TAG}"
 
-# 6. Fetch the tarball and compute SHA256
-echo "→ Computing SHA256 (downloading tarball)..."
-TARBALL_URL="https://github.com/clickbrain/vllm-mlx-ui/archive/refs/tags/${TAG}.tar.gz"
-SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | awk '{print $1}')
-echo "   SHA256: ${SHA256}"
-
-# 7. Update Homebrew formula
-echo "→ Updating formula..."
-sed -i '' "s|url \"https://github.com/clickbrain/vllm-mlx-ui/archive/refs/tags/v[^\"]*\"|url \"${TARBALL_URL}\"|" "$FORMULA"
-sed -i '' "s/sha256 \"[a-f0-9]*\"/sha256 \"${SHA256}\"/" "$FORMULA"
-sed -i '' "s/version \"[^\"]*\"/version \"${VERSION}\"/" "$FORMULA"
-
-# 8. Commit and push formula
-echo "→ Pushing formula..."
-cd "$(dirname "$FORMULA")/.."
-git add Formula/vllm-mlx-ui.rb
-git commit -m "vllm-mlx-ui ${VERSION}
-
-Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
-git pull --rebase && git push
-
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  ✅ Released ${TAG} — brew upgrade vllm-mlx-ui will deliver this version"
+echo "  ✅ Released ${TAG} — the GitHub Actions bot will update the"
+echo "     Homebrew formula automatically. brew upgrade vllm-mlx-ui"
+echo "     will deliver this version once the bot finishes (~1 min)."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
