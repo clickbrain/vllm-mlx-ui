@@ -150,10 +150,17 @@ def _extract_code(response: str) -> str:
     return response
 
 
-def grade_humaneval(response: str, entry_point: str, test_code: str) -> tuple[bool, str]:
+def grade_humaneval(response: str, prompt: str, entry_point: str, test_code: str) -> tuple[bool, str]:
     """Run extracted code + test_code in subprocess. Return (passed, error_msg)."""
     code = _extract_code(response)
-    full_script = code + "\n\n" + test_code + "\n"
+
+    # If the model returned only the function body (no def statement), prepend the
+    # prompt which contains imports + the function signature so the code is valid.
+    if f"def {entry_point}" not in code:
+        code = prompt.rstrip() + "\n" + code
+
+    # test_code defines check(candidate); call it with the entry-point function.
+    full_script = code + "\n\n" + test_code + f"\ncheck({entry_point})\n"
 
     with tempfile.TemporaryDirectory() as tmpdir:
         script_path = tmpdir + "/solution.py"
@@ -371,7 +378,7 @@ def run_quality_benchmark(
                 details.append({"id": q["id"], "correct": passed, "got": got_str, "expected": q["answer"]})
 
             elif suite == "humaneval":
-                passed, err_msg = grade_humaneval(response_text, q["entry_point"], q["test_code"])
+                passed, err_msg = grade_humaneval(response_text, q["prompt"], q["entry_point"], q["test_code"])
                 suffix = f"TTFT {ttft_ms:.0f}ms" if ttft_ms is not None else ""
                 if passed:
                     _cb(f"[{suite_upper} {i}/{total}] ✓ {q['entry_point']} passed {suffix}\n")
