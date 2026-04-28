@@ -1,4 +1,9 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.80 — 2026-04-27
+
+- Fix: **Benchmark tok/s now accurate for all models** — was dividing `completion_tokens` (total including buffered thinking) by `gen_time` (only the streaming window after first token), giving impossible numbers like 9700 tok/s on a 9B model; fixed to divide by total wall-clock time from request start, giving true effective throughput
+- Feature: **"Enable thinking mode" toggle in Custom benchmark** — thinking is off by default (faster, accurate metrics); check the box to benchmark models with full reasoning enabled
+
 ## v0.3.79 — 2026-04-27
 
 - Fix: **Custom and quality benchmarks now disable thinking mode** — added `enable_thinking: false` to all benchmark requests; thinking models (Qwen3, etc.) were spending 30-40s on internal reasoning before streaming any tokens, reporting impossible tok/s numbers and misleading TTFT values; with thinking disabled, models respond immediately with accurate timing metrics

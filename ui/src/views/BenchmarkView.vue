@@ -279,6 +279,7 @@ const benchRuns         = ref(3)
 const benchNumQuestions = ref(20)
 // Custom prompt options
 const customMaxTokens   = ref(2048)
+const customEnableThinking = ref(false)
 
 // Model selection
 const cachedModels = computed(() => modelsStore.models.filter((m: { cached: boolean }) => m.cached))
@@ -469,6 +470,7 @@ async function runCustomBenchmark() {
       model_ids: benchSelectedModels.value,
       label: benchRunName.value,
       max_tokens: customMaxTokens.value,
+      enable_thinking: customEnableThinking.value,
     })
     customRunId.value = runData.run_id
     _customPollTimer = setInterval(async () => {
@@ -1376,6 +1378,11 @@ watch(activeTab, (tab) => {
                   <option :value="2048">2048 (default)</option>
                   <option :value="4096">4096</option>
                 </select>
+                <label class="thinking-toggle-row" :class="{ disabled: benchRunning }">
+                  <input type="checkbox" v-model="customEnableThinking" :disabled="benchRunning" />
+                  Enable thinking mode
+                  <span class="opt-hint">(off = faster, accurate metrics)</span>
+                </label>
               </template>
 
               <!-- Run name -->
@@ -2649,6 +2656,13 @@ watch(activeTab, (tab) => {
 }
 .bench-name-input:disabled { opacity: 0.5; }
 .opt-hint { font-size: 13px; color: var(--tx-muted); font-weight: 400; }
+.thinking-toggle-row {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 14px; color: var(--tx-secondary); margin-top: 8px; cursor: pointer;
+  user-select: none;
+}
+.thinking-toggle-row.disabled { opacity: 0.5; cursor: default; }
+.thinking-toggle-row input[type="checkbox"] { cursor: pointer; accent-color: var(--accent); }
 .badge-pending { background: var(--bg-elevated); color: var(--tx-secondary); }
 .inline-log-wrap { margin-top: var(--space-3); }
 

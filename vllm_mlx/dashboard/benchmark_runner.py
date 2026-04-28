@@ -300,6 +300,7 @@ def run_custom_benchmark(
     output_callback: Callable[[str], None] | None = None,
     label: str = "",
     stop_event: Any | None = None,
+    enable_thinking: bool = False,
 ) -> dict[str, Any]:
     """Run a custom-prompt benchmark against the running inference server.
 
@@ -363,7 +364,7 @@ def run_custom_benchmark(
                     "stream": True,
                     "temperature": 0.0,
                     "stream_options": {"include_usage": True},
-                    "enable_thinking": False,
+                    "enable_thinking": enable_thinking,
                 },
                 stream=True,
                 timeout=300,
@@ -401,11 +402,11 @@ def run_custom_benchmark(
                 ttft_ms = round((first_token_time - start) * 1000, 1)
                 total_ms = round((last_content_time - start) * 1000, 1) if last_content_time else ttft_ms
                 actual_tokens = completion_tokens if completion_tokens else max(1, char_count // 4)
-                gen_time = (last_content_time - first_token_time) if last_content_time else 0.0
-
-                tps: float | None = None
-                if gen_time >= 0.1 or actual_tokens <= 5:
-                    tps = round(actual_tokens / gen_time, 1) if gen_time > 0.01 else None
+                # Use total wall-clock time (not just streaming window) so tok/s is
+                # accurate even when thinking tokens are buffered server-side before
+                # any streaming begins.
+                total_elapsed = total_ms / 1000.0
+                tps: float | None = round(actual_tokens / total_elapsed, 1) if total_elapsed > 0.01 else None
 
                 row: dict[str, Any] = {
                     "prompt": prompt,
@@ -413,7 +414,6 @@ def run_custom_benchmark(
                     "tps": tps,
                     "total_ms": total_ms,
                     "tokens": actual_tokens,
-                    "buffered": tps is None and actual_tokens > 5,
                 }
                 per_prompt.append(row)
 

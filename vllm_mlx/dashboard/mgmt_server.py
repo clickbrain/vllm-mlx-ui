@@ -1216,6 +1216,7 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
 
     model_id = sm.load_config().get("model", "") if not model_ids else model_ids[0]
     run_id = str(uuid.uuid4())
+    enable_thinking: bool = bool(req.get("enable_thinking", False))
 
     stop_event = threading.Event()
     run_state: dict[str, Any] = {
@@ -1277,6 +1278,7 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
                     output_callback=_cb,
                     label=label,
                     stop_event=stop_event,
+                    enable_thinking=enable_thinking,
                 )
                 all_results.append(res)
         except Exception as exc:
