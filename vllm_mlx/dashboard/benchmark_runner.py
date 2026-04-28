@@ -385,7 +385,9 @@ def run_custom_benchmark(
                     completion_tokens = int(usage["completion_tokens"])
                 choices = data.get("choices") or []
                 delta = choices[0].get("delta", {}) if choices else {}
-                content = delta.get("content", "")
+                # Accept reasoning_content (thinking tokens from Qwen3 etc.) as valid
+                # output — otherwise thinking can exhaust max_tokens with no delta.content.
+                content = delta.get("content") or delta.get("reasoning_content") or ""
                 if content:
                     now = time.monotonic()
                     if first_token_time is None:
@@ -558,7 +560,9 @@ def run_live_benchmark(
                     completion_tokens = int(usage["completion_tokens"])
                 choices = data.get("choices") or []
                 delta = choices[0].get("delta", {}) if choices else {}
-                content = delta.get("content", "")
+                # Accept reasoning_content (thinking tokens from Qwen3 etc.) as valid
+                # output — otherwise thinking can exhaust max_tokens with no delta.content.
+                content = delta.get("content") or delta.get("reasoning_content") or ""
                 if content:
                     now = time.monotonic()
                     if first_token_time is None:

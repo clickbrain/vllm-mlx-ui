@@ -277,6 +277,8 @@ const benchSuites       = ref<string[]>(['gsm8k', 'mmlu', 'humaneval'])
 const benchMaxTokens    = ref(256)
 const benchRuns         = ref(3)
 const benchNumQuestions = ref(20)
+// Custom prompt options
+const customMaxTokens   = ref(2048)
 
 // Model selection
 const cachedModels = computed(() => modelsStore.models.filter((m: { cached: boolean }) => m.cached))
@@ -466,7 +468,7 @@ async function runCustomBenchmark() {
       prompts: validPrompts,
       model_ids: benchSelectedModels.value,
       label: benchRunName.value,
-      max_tokens: 512,
+      max_tokens: customMaxTokens.value,
     })
     customRunId.value = runData.run_id
     _customPollTimer = setInterval(async () => {
@@ -1367,6 +1369,13 @@ watch(activeTab, (tab) => {
                 <button class="custom-prompt-add" :disabled="benchRunning" @click="addCustomPrompt">
                   + Add prompt
                 </button>
+                <div class="bench-section-label" style="margin-top:10px">Max tokens <span class="opt-hint">(per prompt)</span></div>
+                <select v-model="customMaxTokens" :disabled="benchRunning" class="opt-select">
+                  <option :value="512">512</option>
+                  <option :value="1024">1024</option>
+                  <option :value="2048">2048 (default)</option>
+                  <option :value="4096">4096</option>
+                </select>
               </template>
 
               <!-- Run name -->
