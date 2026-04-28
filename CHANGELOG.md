@@ -1,4 +1,8 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.78 — 2026-04-28
+
+- Fix: **`brew upgrade vllm-mlx-ui` permanently fixed** — root cause identified: Homebrew 5.x defaults to a 24-hour auto-update throttle (`HOMEBREW_AUTO_UPDATE_SECS=86400`), meaning `brew upgrade` skips all tap git-fetches for up to 24 hours after any prior `brew` invocation; this is why the formula update in v0.3.77 (which was correct and immediate) still wasn't visible with `brew upgrade` alone; dashboard "Install Updates" already used `brew update && brew upgrade` (bypasses throttle); fix: added `export HOMEBREW_AUTO_UPDATE_SECS=300` to `~/.zshenv` (5-minute throttle); formula caveats now document the correct upgrade command and the env var recommendation
+
 ## v0.3.77 — 2026-04-27
 
 - Fix: **`brew upgrade` now always delivers the latest version** — the GitHub Actions bot approach created an unavoidable 2-4 minute window after every release where the formula wasn't updated; if `brew upgrade` ran in that window it always showed the old version; root fix: `release.sh` now computes SHA256 and updates the formula itself (synchronously, ~10s after tag push), and the bot is permanently disabled so there is no more race condition; when `release.sh` exits, `brew upgrade` works immediately

@@ -149,6 +149,14 @@ class VllmMlxUi < Formula
       The browser opens automatically at http://127.0.0.1:8502
       Click ▶ Start Server on the Serve page — the model loads in ~30s.
 
+      To upgrade:
+          brew update && brew upgrade vllm-mlx-ui
+
+      Note: `brew upgrade` alone may not see new releases for up to 24 hours
+      due to Homebrew's auto-update throttle. Always use `brew update` first,
+      or add this to your ~/.zshenv to reduce the throttle to 5 minutes:
+          export HOMEBREW_AUTO_UPDATE_SECS=300
+
       Docs & source:  https://github.com/clickbrain/vllm-mlx-ui
     EOS
   end
