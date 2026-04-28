@@ -445,7 +445,7 @@ def model_presets(
 
 @app.post("/server/load")
 def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
-    """Update the configured model; restart the server if it is currently running."""
+    """Update the configured model and start (or restart) the server."""
     model_id = req.model_id.strip()
     if not model_id:
         raise HTTPException(status_code=400, detail="model_id is required")
@@ -467,9 +467,13 @@ def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
     if was_running:
         sm.stop_server()
         time.sleep(1)
-        sm.start_server(cfg)
 
-    return {"ok": True, "model": model_id, "restarted": was_running}
+    ok, msg = sm.start_server(cfg)
+    if not ok:
+        raise HTTPException(status_code=500, detail=msg)
+
+    # Always return restarted=True so the frontend polls until the model is ready.
+    return {"ok": True, "model": model_id, "restarted": True}
 
 
 # ── Memory ────────────────────────────────────────────────────────────────────
