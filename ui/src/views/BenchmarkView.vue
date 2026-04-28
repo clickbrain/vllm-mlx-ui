@@ -611,6 +611,7 @@ interface PerfSettings {
   continuous_batching: boolean
   paged_kv_cache: boolean
   kv_cache_quantization: boolean
+  kv_cache_quantization_bits: number
   gpu_memory_utilization: number
   prefill_step_size: number
 }
@@ -624,6 +625,7 @@ const perfOverride = ref<PerfSettings>({
   continuous_batching: false,
   paged_kv_cache: false,
   kv_cache_quantization: false,
+  kv_cache_quantization_bits: 8,
   gpu_memory_utilization: 90,
   prefill_step_size: 0,
 })
@@ -638,6 +640,7 @@ async function loadPerfSettings() {
       continuous_batching: !!cfg.continuous_batching,
       paged_kv_cache: !!cfg.paged_kv_cache,
       kv_cache_quantization: !!cfg.kv_cache_quantization,
+      kv_cache_quantization_bits: cfg.kv_cache_quantization_bits ?? 8,
       gpu_memory_utilization: Math.round((cfg.gpu_memory_utilization ?? 0.9) * 100),
       prefill_step_size: cfg.prefill_step_size ?? 0,
     }
@@ -654,6 +657,7 @@ const perfChanged = computed(() => {
   return o.continuous_batching !== n.continuous_batching
     || o.paged_kv_cache !== n.paged_kv_cache
     || o.kv_cache_quantization !== n.kv_cache_quantization
+    || o.kv_cache_quantization_bits !== n.kv_cache_quantization_bits
     || o.gpu_memory_utilization !== n.gpu_memory_utilization
     || o.prefill_step_size !== n.prefill_step_size
 })
@@ -669,6 +673,7 @@ async function applyPerfAndRun(callback: () => Promise<void>) {
       continuous_batching: perfOverride.value.continuous_batching,
       paged_kv_cache: perfOverride.value.paged_kv_cache,
       kv_cache_quantization: perfOverride.value.kv_cache_quantization,
+      kv_cache_quantization_bits: perfOverride.value.kv_cache_quantization_bits,
       gpu_memory_utilization: perfOverride.value.gpu_memory_utilization / 100,
       prefill_step_size: perfOverride.value.prefill_step_size,
     })
@@ -1402,32 +1407,56 @@ watch(activeTab, (tab) => {
                   <label class="perf-toggle">
                     <input type="checkbox" v-model="perfOverride.continuous_batching" :disabled="benchRunning" />
                     <span class="perf-label">Continuous Batching</span>
-                    <span class="perf-hint">Multi-user concurrent requests</span>
                   </label>
+                  <p class="perf-desc">
+                    Processes multiple requests simultaneously instead of one at a time. Dramatically improves throughput when multiple users or prompts are queued — often 3–5× faster overall. Slight latency increase per individual request.
+                    <a href="https://github.com/clickbrain/vllm-mlx-ui/blob/main/docs/guides/continuous-batching.md" target="_blank" rel="noopener" class="perf-link">Learn more ↗</a>
+                  </p>
                 </div>
                 <div class="perf-row">
                   <label class="perf-toggle">
                     <input type="checkbox" v-model="perfOverride.paged_kv_cache" :disabled="benchRunning" />
                     <span class="perf-label">Paged KV Cache</span>
-                    <span class="perf-hint">vLLM-style memory paging</span>
                   </label>
+                  <p class="perf-desc">
+                    Manages the attention key/value cache in fixed-size pages (like virtual memory), eliminating wasted reserved space. Enables longer contexts and higher concurrency. Required for continuous batching to reach its full benefit.
+                    <a href="https://github.com/clickbrain/vllm-mlx-ui/blob/main/docs/guides/continuous-batching.md#paged-kv-cache" target="_blank" rel="noopener" class="perf-link">Learn more ↗</a>
+                  </p>
                 </div>
                 <div class="perf-row">
                   <label class="perf-toggle">
                     <input type="checkbox" v-model="perfOverride.kv_cache_quantization" :disabled="benchRunning" />
                     <span class="perf-label">KV Cache Quantization</span>
-                    <span class="perf-hint">Compress KV cache to 8-bit</span>
                   </label>
+                  <p class="perf-desc">
+                    Compresses the KV cache to lower precision, reducing memory usage by up to 50%. Allows larger context windows or more concurrent sessions on the same hardware. Tiny quality reduction — often imperceptible.
+                    <a href="https://github.com/clickbrain/vllm-mlx-ui/blob/main/docs/reference/configuration.md#kv-cache" target="_blank" rel="noopener" class="perf-link">Learn more ↗</a>
+                  </p>
+                  <div v-if="perfOverride.kv_cache_quantization" class="perf-bits-row">
+                    <span class="perf-label">Quantization bits</span>
+                    <select v-model.number="perfOverride.kv_cache_quantization_bits" :disabled="benchRunning" class="opt-select">
+                      <option :value="8">8-bit (less compression, best quality)</option>
+                      <option :value="4">4-bit (more compression, slight quality loss)</option>
+                    </select>
+                  </div>
                 </div>
                 <div class="perf-row perf-row-inline">
                   <span class="perf-label">GPU Memory Utilization</span>
                   <input type="number" v-model.number="perfOverride.gpu_memory_utilization" min="10" max="100" step="5" class="perf-num-input" :disabled="benchRunning" />
                   <span class="perf-unit">%</span>
+                  <p class="perf-desc" style="flex-basis:100%">
+                    The fraction of Apple Silicon unified memory allocated to the model and KV cache. Higher = more memory for the model (longer context, bigger model fits), but leaves less for the OS and other apps. 75–90% is safe for most setups.
+                    <a href="https://github.com/clickbrain/vllm-mlx-ui/blob/main/docs/reference/configuration.md" target="_blank" rel="noopener" class="perf-link">Learn more ↗</a>
+                  </p>
                 </div>
                 <div class="perf-row perf-row-inline">
                   <span class="perf-label">Prefill Step Size</span>
                   <input type="number" v-model.number="perfOverride.prefill_step_size" min="0" max="4096" step="64" class="perf-num-input" :disabled="benchRunning" />
-                  <span class="perf-unit">tokens <span class="perf-hint">(0 = auto)</span></span>
+                  <span class="perf-unit">tokens</span>
+                  <p class="perf-desc" style="flex-basis:100%">
+                    How many tokens are processed per chunk during the initial prompt ingestion (prefill) phase. Larger = faster prefill but higher peak memory and first-token latency. <strong>0 = auto</strong> (engine chooses). Only tune if you see memory spikes on very long prompts.
+                    <a href="https://github.com/clickbrain/vllm-mlx-ui/blob/main/docs/reference/configuration.md" target="_blank" rel="noopener" class="perf-link">Learn more ↗</a>
+                  </p>
                 </div>
                 <p v-if="perfChanged" class="perf-warn">
                   ⚠ These settings differ from the current server config. The server will restart before the benchmark runs (~5–10s).
@@ -2813,13 +2842,23 @@ watch(activeTab, (tab) => {
 .perf-settings-panel {
   background: var(--bg-elevated); border: 1px solid var(--bd-default);
   border-radius: var(--r-md); padding: var(--space-3); margin-top: var(--space-2);
-  display: flex; flex-direction: column; gap: var(--space-2);
+  display: flex; flex-direction: column; gap: var(--space-3);
 }
-.perf-row { display: flex; align-items: center; }
-.perf-row-inline { gap: var(--space-2); }
-.perf-toggle { display: flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+.perf-row { display: flex; align-items: flex-start; flex-wrap: wrap; gap: var(--space-1); }
+.perf-row-inline { align-items: center; gap: var(--space-2); }
+.perf-toggle { display: flex; align-items: center; gap: var(--space-2); cursor: pointer; flex-shrink: 0; }
 .perf-label { font-size: var(--text-sm); color: var(--tx-primary); font-weight: 500; }
 .perf-hint { font-size: 13px; color: var(--tx-muted); margin-left: var(--space-1); }
+.perf-desc {
+  flex-basis: 100%; margin: 0; font-size: 12px; color: var(--tx-muted); line-height: 1.55;
+  padding-left: 22px;
+}
+.perf-link { color: var(--tx-accent, #6366f1); text-decoration: none; white-space: nowrap; }
+.perf-link:hover { text-decoration: underline; }
+.perf-bits-row {
+  flex-basis: 100%; display: flex; align-items: center; gap: var(--space-2);
+  padding-left: 22px; margin-top: var(--space-1);
+}
 .perf-num-input {
   width: 68px; padding: 3px 8px; font-size: var(--text-sm);
   background: var(--bg-base); border: 1px solid var(--bd-default); border-radius: var(--r-sm);
