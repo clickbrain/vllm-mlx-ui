@@ -913,6 +913,7 @@ const historySelected = ref<Set<number>>(new Set())
 const historySearch  = ref('')
 const historyTypeFilter = ref<'all' | 'speed' | 'quality' | 'custom'>('all')
 const comparePanelRef = ref<HTMLElement | null>(null)
+const detailPanelRef  = ref<HTMLElement | null>(null)
 
 function toggleHistorySelect(id: number) {
   const s = new Set(historySelected.value)
@@ -924,9 +925,34 @@ function scrollToCompare() {
   nextTick(() => comparePanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 }
 
+function scrollToDetail() {
+  nextTick(() => detailPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+}
+
 const compareRuns = computed(() =>
   sortedHistory.value.filter(r => historySelected.value.has(r.id))
 )
+
+const selectedRun = computed(() =>
+  historySelected.value.size === 1
+    ? sortedHistory.value.find(r => historySelected.value.has(r.id)) ?? null
+    : null
+)
+
+/** Returns true when a custom run was recorded before the tok/s fix in v0.3.80. */
+function hasStaleMetrics(run: { benchmark_type?: string; dashboard_version?: string }): boolean {
+  if (run.benchmark_type !== 'custom') return false
+  if (!run.dashboard_version) return true
+  const m = run.dashboard_version.match(/^v?(\d+)\.(\d+)\.(\d+)/)
+  if (!m) return true
+  const v = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const fix = [0, 3, 80]
+  for (let i = 0; i < 3; i++) {
+    if (v[i] < fix[i]) return true
+    if (v[i] > fix[i]) return false
+  }
+  return false
+}
 
 function formatRelTime(ts: string): string {
   if (!ts) return '—'
@@ -1648,6 +1674,14 @@ watch(activeTab, (tab) => {
             Compare {{ historySelected.size }} runs
           </AppButton>
           <AppButton
+            v-else-if="historySelected.size === 1"
+            variant="secondary"
+            size="sm"
+            @click="scrollToDetail"
+          >
+            View details
+          </AppButton>
+          <AppButton
             variant="ghost"
             size="sm"
             @click="modelsStore.clearAllBenchmarks?.()"
@@ -1657,7 +1691,7 @@ watch(activeTab, (tab) => {
         </div>
       </div>
 
-      <!-- Comparison table -->
+      <!-- Comparison table (2+ selected) -->
       <div ref="comparePanelRef" v-if="compareRuns.length >= 2" class="panel compare-panel">
         <div class="panel-header">
           <div class="panel-title">Comparison</div>
@@ -1668,9 +1702,13 @@ watch(activeTab, (tab) => {
             <thead>
               <tr>
                 <th>Model</th>
+                <th>Type</th>
                 <th>Date</th>
                 <th class="num">Speed (t/s)</th>
                 <th class="num">TTFT</th>
+                <th class="num">Max Tok</th>
+                <th class="num">Thinking</th>
+                <th class="num">KV Quant</th>
                 <th class="num">GSM8K</th>
                 <th class="num">MMLU</th>
                 <th class="num">HumanEval</th>
@@ -1680,9 +1718,22 @@ watch(activeTab, (tab) => {
             <tbody>
               <tr v-for="run in compareRuns" :key="run.id">
                 <td class="mono">{{ (run.model_id || '').split('/').pop() || '—' }}</td>
+                <td><span class="type-pill" :class="run.benchmark_type">{{ run.benchmark_type || 'speed' }}</span></td>
                 <td class="dim">{{ formatRelTime(run.timestamp) }}</td>
-                <td class="num mono">{{ run.avg_tps > 0 ? run.avg_tps.toFixed(1) : '—' }}</td>
+                <td class="num mono">
+                  <span :title="hasStaleMetrics(run) ? 'tok/s may be inaccurate (pre-v0.3.80)' : undefined">
+                    {{ run.avg_tps > 0 ? run.avg_tps.toFixed(1) : '—' }}
+                    <span v-if="hasStaleMetrics(run)" class="stale-warn">⚠</span>
+                  </span>
+                </td>
                 <td class="num mono">{{ run.avg_ttft_ms ? Math.round(run.avg_ttft_ms) + 'ms' : '—' }}</td>
+                <td class="num mono">{{ run.max_tokens ?? '—' }}</td>
+                <td class="num mono">{{ run.enable_thinking != null ? (run.enable_thinking ? '✓' : '✗') : '—' }}</td>
+                <td class="num mono">
+                  {{ run.server_settings?.kv_cache_quantization
+                    ? (run.server_settings.kv_cache_quantization_bits ?? 8) + '-bit'
+                    : '✗' }}
+                </td>
                 <td class="num mono">{{ run.suites?.gsm8k ? Math.round(run.suites.gsm8k.accuracy * 100) + '%' : '—' }}</td>
                 <td class="num mono">{{ run.suites?.mmlu ? Math.round(run.suites.mmlu.accuracy * 100) + '%' : '—' }}</td>
                 <td class="num mono">{{ run.suites?.humaneval ? Math.round(run.suites.humaneval.accuracy * 100) + '%' : '—' }}</td>
@@ -1691,7 +1742,7 @@ watch(activeTab, (tab) => {
             </tbody>
           </table>
         </div>
-        <!-- Simple bar comparison charts -->
+        <!-- Bar comparison charts -->
         <div class="compare-charts">
           <div class="compare-chart-group" v-if="compareRuns.some(r => r.avg_tps > 0)">
             <div class="compare-chart-title">Speed (tok/s)</div>
@@ -1722,6 +1773,135 @@ watch(activeTab, (tab) => {
         </div>
       </div>
 
+      <!-- Detail panel (1 selected) -->
+      <div ref="detailPanelRef" v-if="selectedRun" class="panel detail-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            Run Detail
+            <span class="type-pill" :class="selectedRun.benchmark_type">{{ selectedRun.benchmark_type || 'speed' }}</span>
+          </div>
+          <button class="icon-btn" @click="historySelected = new Set()">✕ Close</button>
+        </div>
+        <div class="detail-body">
+          <!-- Summary row -->
+          <div class="detail-summary">
+            <div class="detail-kv">
+              <span class="detail-k">Model</span>
+              <span class="detail-v mono">{{ selectedRun.model_id }}</span>
+            </div>
+            <div class="detail-kv">
+              <span class="detail-k">Run at</span>
+              <span class="detail-v">{{ new Date(selectedRun.timestamp).toLocaleString() }}</span>
+            </div>
+            <div class="detail-kv" v-if="selectedRun.label">
+              <span class="detail-k">Label</span>
+              <span class="detail-v">"{{ selectedRun.label }}"</span>
+            </div>
+            <div class="detail-kv" v-if="selectedRun.avg_tps > 0">
+              <span class="detail-k">Avg tok/s</span>
+              <span class="detail-v mono">
+                {{ selectedRun.avg_tps.toFixed(1) }}
+                <span v-if="hasStaleMetrics(selectedRun)" class="stale-warn" title="tok/s may be inaccurate — recorded before v0.3.80 fix">⚠ pre-fix</span>
+              </span>
+            </div>
+            <div class="detail-kv" v-if="selectedRun.avg_ttft_ms">
+              <span class="detail-k">Avg TTFT</span>
+              <span class="detail-v mono">{{ Math.round(selectedRun.avg_ttft_ms) }}ms</span>
+            </div>
+          </div>
+
+          <!-- Settings used -->
+          <div class="detail-section">
+            <div class="detail-section-title">Settings</div>
+            <div class="detail-settings-grid">
+              <div class="detail-kv" v-if="selectedRun.max_tokens != null">
+                <span class="detail-k">Max tokens</span>
+                <span class="detail-v mono">{{ selectedRun.max_tokens }}</span>
+              </div>
+              <div class="detail-kv" v-if="selectedRun.enable_thinking != null">
+                <span class="detail-k">Thinking mode</span>
+                <span class="detail-v">{{ selectedRun.enable_thinking ? 'On' : 'Off' }}</span>
+              </div>
+              <div class="detail-kv" v-if="selectedRun.server_settings?.kv_cache_quantization != null">
+                <span class="detail-k">KV quantization</span>
+                <span class="detail-v">
+                  {{ selectedRun.server_settings.kv_cache_quantization
+                    ? (selectedRun.server_settings.kv_cache_quantization_bits ?? 8) + '-bit on'
+                    : 'Off' }}
+                </span>
+              </div>
+              <div class="detail-kv" v-if="selectedRun.server_settings?.use_paged_cache != null">
+                <span class="detail-k">Paged KV cache</span>
+                <span class="detail-v">{{ selectedRun.server_settings.use_paged_cache ? 'On' : 'Off' }}</span>
+              </div>
+              <div class="detail-kv" v-if="selectedRun.server_settings?.continuous_batching != null">
+                <span class="detail-k">Continuous batching</span>
+                <span class="detail-v">{{ selectedRun.server_settings.continuous_batching ? 'On' : 'Off' }}</span>
+              </div>
+              <div class="detail-kv" v-if="selectedRun.server_settings?.enable_prefix_cache != null">
+                <span class="detail-k">Prefix cache</span>
+                <span class="detail-v">{{ selectedRun.server_settings.enable_prefix_cache ? 'On' : 'Off' }}</span>
+              </div>
+              <div class="detail-kv" v-if="selectedRun.server_settings?.gpu_memory_utilization != null">
+                <span class="detail-k">GPU mem util</span>
+                <span class="detail-v mono">{{ Math.round((selectedRun.server_settings.gpu_memory_utilization ?? 0) * 100) }}%</span>
+              </div>
+              <div class="detail-kv" v-if="selectedRun.dashboard_version">
+                <span class="detail-k">Dashboard ver</span>
+                <span class="detail-v mono">{{ selectedRun.dashboard_version }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Per-prompt results (custom benchmark) -->
+          <div class="detail-section" v-if="selectedRun.per_prompt?.length">
+            <div class="detail-section-title">Per-prompt results</div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Prompt</th>
+                    <th class="num">TTFT</th>
+                    <th class="num">tok/s</th>
+                    <th class="num">Total</th>
+                    <th class="num">Tokens</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(pp, i) in selectedRun.per_prompt" :key="i" :class="{ 'row-error': pp.error }">
+                    <td class="dim">{{ i + 1 }}</td>
+                    <td class="prompt-cell" :title="pp.prompt">{{ pp.prompt?.slice(0, 80) }}{{ (pp.prompt?.length ?? 0) > 80 ? '…' : '' }}</td>
+                    <td class="num mono">{{ pp.error ? '✗' : pp.ttft_ms != null ? pp.ttft_ms.toFixed(0) + 'ms' : '—' }}</td>
+                    <td class="num mono">
+                      <span v-if="pp.error" class="error-text">{{ pp.error }}</span>
+                      <span v-else>{{ pp.tps != null ? pp.tps.toFixed(1) : '—' }}</span>
+                    </td>
+                    <td class="num mono">{{ pp.total_ms != null ? (pp.total_ms / 1000).toFixed(1) + 's' : '—' }}</td>
+                    <td class="num mono">{{ pp.tokens ?? '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Quality suite results -->
+          <div class="detail-section" v-if="selectedRun.suites">
+            <div class="detail-section-title">Quality scores</div>
+            <div class="detail-settings-grid">
+              <div class="detail-kv" v-for="(suite, name) in selectedRun.suites" :key="String(name)">
+                <span class="detail-k">{{ name }}</span>
+                <span class="detail-v mono">{{ Math.round(suite.accuracy * 100) }}% ({{ suite.correct }}/{{ suite.total }})</span>
+              </div>
+              <div class="detail-kv" v-if="selectedRun.overall_score != null">
+                <span class="detail-k">Overall</span>
+                <span class="detail-v mono">{{ Math.round(selectedRun.overall_score * 100) }}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Runs list -->
       <div v-if="sortedHistory.length" class="history-list">
         <div
@@ -1739,14 +1919,24 @@ watch(activeTab, (tab) => {
           <div class="history-main">
             <div class="history-top">
               <span class="latest-badge" v-if="idx === 0">Latest</span>
+              <span class="type-pill" :class="run.benchmark_type">{{ run.benchmark_type || 'speed' }}</span>
               <span class="history-model mono">{{ (run.model_id || '').split('/').pop() || '—' }}</span>
               <span class="history-time dim">{{ formatRelTime(run.timestamp) }}</span>
               <span v-if="run.label" class="history-label">"{{ run.label }}"</span>
             </div>
             <div class="history-badges">
-              <span v-if="run.avg_tps > 0" class="h-badge speed-badge">
+              <span v-if="run.avg_tps > 0" class="h-badge speed-badge"
+                :title="hasStaleMetrics(run) ? 'tok/s may be inaccurate — recorded before v0.3.80 fix' : undefined"
+              >
                 {{ run.avg_tps.toFixed(1) }} t/s
+                <span v-if="hasStaleMetrics(run)" class="stale-warn">⚠</span>
               </span>
+              <span v-if="run.max_tokens" class="h-badge dim-badge">{{ run.max_tokens }} tok</span>
+              <span v-if="run.enable_thinking" class="h-badge thinking-badge">thinking on</span>
+              <span v-if="run.server_settings?.kv_cache_quantization" class="h-badge kv-badge">
+                KV {{ run.server_settings.kv_cache_quantization_bits ?? 8 }}-bit
+              </span>
+              <span v-if="run.server_settings?.use_paged_cache" class="h-badge kv-badge">paged KV</span>
               <span v-if="run.suites?.gsm8k" class="h-badge quality-badge"
                 :class="run.suites.gsm8k.accuracy >= 0.7 ? 'good' : run.suites.gsm8k.accuracy >= 0.5 ? 'mid' : 'bad'"
               >
@@ -2510,6 +2700,45 @@ watch(activeTab, (tab) => {
 .quality-badge.mid  { color: #f59e0b; background: rgba(245,158,11,.08); border-color: rgba(245,158,11,.2); }
 .quality-badge.bad  { color: #f87171; background: rgba(248,113,113,.08); border-color: rgba(248,113,113,.2); }
 .overall-badge { color: var(--tx-secondary); background: var(--bg-elevated); }
+.dim-badge { color: var(--tx-muted); background: var(--bg-elevated); }
+.thinking-badge { color: #818cf8; background: rgba(129,140,248,.08); border-color: rgba(129,140,248,.25); }
+.kv-badge { color: #38bdf8; background: rgba(56,189,248,.08); border-color: rgba(56,189,248,.25); }
+.stale-warn { color: #f59e0b; font-size: 11px; margin-left: 3px; cursor: help; }
+
+/* Type pill */
+.type-pill {
+  display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  padding: 1px 6px; border-radius: var(--r-pill);
+  border: 1px solid transparent;
+}
+.type-pill.custom  { color: #a78bfa; background: rgba(167,139,250,.1); border-color: rgba(167,139,250,.3); }
+.type-pill.speed   { color: var(--si-400); background: color-mix(in srgb, var(--si-400) 8%, transparent); border-color: color-mix(in srgb, var(--si-400) 25%, transparent); }
+.type-pill.quality { color: #34d399; background: rgba(52,211,153,.08); border-color: rgba(52,211,153,.25); }
+
+/* Detail panel */
+.detail-panel { margin-bottom: var(--space-4); }
+.detail-body { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
+.detail-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-2) var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--bd-default);
+}
+.detail-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.detail-section-title { font-size: 13px; font-weight: 700; color: var(--tx-muted); text-transform: uppercase; letter-spacing: .05em; }
+.detail-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-1) var(--space-4);
+}
+.detail-kv { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.detail-k { font-size: 13px; color: var(--tx-muted); white-space: nowrap; flex-shrink: 0; min-width: 110px; }
+.detail-v { font-size: 13px; color: var(--tx-primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-cell { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--tx-secondary); }
+.row-error td { color: var(--tx-muted); }
+.error-text { color: #f87171; font-size: 12px; }
 
 .history-row-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 

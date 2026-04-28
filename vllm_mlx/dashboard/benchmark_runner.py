@@ -301,6 +301,8 @@ def run_custom_benchmark(
     label: str = "",
     stop_event: Any | None = None,
     enable_thinking: bool = False,
+    server_settings: dict[str, Any] | None = None,
+    dashboard_version: str = "",
 ) -> dict[str, Any]:
     """Run a custom-prompt benchmark against the running inference server.
 
@@ -330,6 +332,9 @@ def run_custom_benchmark(
             "benchmark_type": "custom",
             "custom_prompts": custom_prompts,
             "max_tokens": max_tokens,
+            "enable_thinking": enable_thinking,
+            "server_settings": server_settings or {},
+            "dashboard_version": dashboard_version,
             "success": False,
             "per_prompt": [],
             "error": f"Server not reachable: {e}",
@@ -448,6 +453,9 @@ def run_custom_benchmark(
         "benchmark_type": "custom",
         "custom_prompts": custom_prompts,
         "max_tokens": max_tokens,
+        "enable_thinking": enable_thinking,
+        "server_settings": server_settings or {},
+        "dashboard_version": dashboard_version,
         "success": len(valid) > 0,
         "per_prompt": per_prompt,
         "avg_tps": round(statistics.mean(tps_vals), 2) if tps_vals else None,

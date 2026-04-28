@@ -58,15 +58,42 @@ export interface QualitySuiteResult {
   accuracy: number
 }
 
+export interface PerPromptResult {
+  prompt: string
+  ttft_ms?: number
+  tps?: number
+  total_ms?: number
+  tokens?: number
+  error?: string
+}
+
+export interface ServerSettingsSnapshot {
+  kv_cache_quantization?: boolean
+  kv_cache_quantization_bits?: number
+  use_paged_cache?: boolean
+  continuous_batching?: boolean
+  gpu_memory_utilization?: number
+  enable_prefix_cache?: boolean
+  ssd_cache_dir?: string
+  ssd_cache_max_gb?: number
+}
+
 export interface BenchmarkHistoryEntry {
   id: number
   timestamp: string
   model_id: string
   avg_tps: number
   avg_ttft_ms?: number
-  benchmark_type?: 'speed' | 'quality'
+  benchmark_type?: 'speed' | 'quality' | 'custom'
   overall_score?: number
   suites?: Record<string, QualitySuiteResult>
+  label?: string
+  max_tokens?: number
+  enable_thinking?: boolean
+  server_settings?: ServerSettingsSnapshot
+  per_prompt?: PerPromptResult[]
+  custom_prompts?: string[]
+  dashboard_version?: string
 }
 
 export interface BenchmarkConfig {
@@ -400,13 +427,23 @@ export const useModelsStore = defineStore('models', () => {
 
     benchmarkHistory.value = raw.map((r, idx) => {
       const tps = parseTps(r)
+      const benchType: BenchmarkHistoryEntry['benchmark_type'] =
+        (r.benchmark_type as BenchmarkHistoryEntry['benchmark_type']) ??
+        (r.suites ? 'quality' : r.custom_prompts ? 'custom' : 'speed')
       const entry: BenchmarkHistoryEntry = {
         id: Number(r.id ?? idx),
         timestamp: String(r.timestamp ?? r.created_at ?? ''),
         model_id: String(r.model ?? r.model_id ?? ''),
         avg_tps: tps.avg_tps,
         avg_ttft_ms: parseTtft(r),
-        benchmark_type: (r.benchmark_type as 'speed' | 'quality') ?? (r.suites ? 'quality' : 'speed'),
+        benchmark_type: benchType,
+        label: r.label ? String(r.label) : undefined,
+        max_tokens: r.max_tokens != null ? Number(r.max_tokens) : undefined,
+        enable_thinking: r.enable_thinking != null ? Boolean(r.enable_thinking) : undefined,
+        server_settings: r.server_settings ?? undefined,
+        per_prompt: Array.isArray(r.per_prompt) ? r.per_prompt : undefined,
+        custom_prompts: Array.isArray(r.custom_prompts) ? r.custom_prompts : undefined,
+        dashboard_version: r.dashboard_version ? String(r.dashboard_version) : undefined,
       }
       if (r.suites) {
         entry.overall_score = Number(r.overall_score ?? 0)

@@ -511,6 +511,13 @@ def delete_benchmark(result_id: int, _: None = Depends(_check_auth)) -> dict:
     return {"ok": True}
 
 
+@app.delete("/benchmarks")
+def clear_all_benchmarks(_: None = Depends(_check_auth)) -> dict:
+    """Delete all persisted benchmark results."""
+    br.clear_all_results()
+    return {"ok": True}
+
+
 _benchmark_running = False
 _benchmark_lock = threading.Lock()
 
@@ -1236,10 +1243,22 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
 
     def _run() -> None:
         from vllm_mlx.dashboard import benchmark_runner as br
+        from vllm_mlx.dashboard import __version__ as _dash_ver
         all_results: list[dict[str, Any]] = []
         models_to_run = model_ids if model_ids else [model_id]
         original_model = sm.load_config().get("model", "")
         switched = False
+
+        # Snapshot server settings at the time the benchmark starts so each
+        # saved result carries the exact config used (KV cache, batching, etc.)
+        _SETTINGS_KEYS = (
+            "kv_cache_quantization", "kv_cache_quantization_bits",
+            "use_paged_cache", "continuous_batching",
+            "gpu_memory_utilization", "enable_prefix_cache",
+            "ssd_cache_dir", "ssd_cache_max_gb",
+        )
+        base_cfg = sm.load_config()
+        server_settings_snapshot = {k: base_cfg.get(k) for k in _SETTINGS_KEYS if base_cfg.get(k) is not None}
 
         try:
             for mid in models_to_run:
@@ -1279,6 +1298,8 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
                     label=label,
                     stop_event=stop_event,
                     enable_thinking=enable_thinking,
+                    server_settings=server_settings_snapshot,
+                    dashboard_version=_dash_ver,
                 )
                 all_results.append(res)
         except Exception as exc:

@@ -1109,8 +1109,18 @@ def page_server() -> None:
             kv_quant = st.checkbox(
                 "KV cache quantization",
                 value=config.get("kv_cache_quantization", False),
-                help="Compresses the KV cache to use less RAM. Slight quality trade-off.",
+                help="Compresses the KV cache to reduce RAM usage. Slight quality trade-off. "
+                     "Choose 8-bit (faster, lower quality impact) or 4-bit (more compression).",
             )
+            if kv_quant:
+                kv_quant_bits = st.selectbox(
+                    "KV quant bits",
+                    options=[8, 4],
+                    index=0 if config.get("kv_cache_quantization_bits", 8) == 8 else 1,
+                    help="8-bit = mild compression, minimal quality loss. 4-bit = stronger compression, more noticeable quality impact.",
+                )
+            else:
+                kv_quant_bits = config.get("kv_cache_quantization_bits", 8)
             use_paged = st.checkbox(
                 "Paged KV cache (experimental)",
                 value=config.get("use_paged_cache", False),
@@ -1184,6 +1194,7 @@ def page_server() -> None:
             "enable_prefix_cache": enable_prefix_cache,
             "cache_memory_mb": int(cache_memory_mb),
             "kv_cache_quantization": kv_quant,
+            "kv_cache_quantization_bits": int(kv_quant_bits),
             "use_paged_cache": use_paged,
             "enable_mtp": enable_mtp,
             "stream_interval": int(stream_interval),
