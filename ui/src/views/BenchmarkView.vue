@@ -431,8 +431,7 @@ async function stopBenchmark() {
 
 async function runBenchmark() {
   if (benchRunning.value) return
-  if (benchMode.value === 'speed' && !serverStore.isRunning) return
-  if (benchMode.value === 'speed' && benchSelectedModels.value.length === 0) return
+  if (benchSelectedModels.value.length === 0) return
   if (benchMode.value !== 'speed' && benchMode.value !== 'custom' && benchSuites.value.length === 0) return
   if (benchMode.value === 'custom') {
     const validPrompts = customPrompts.value.map(p => p.trim()).filter(Boolean)
