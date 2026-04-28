@@ -1,4 +1,8 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.77 — 2026-04-27
+
+- Fix: **`brew upgrade` now always delivers the latest version** — the GitHub Actions bot approach created an unavoidable 2-4 minute window after every release where the formula wasn't updated; if `brew upgrade` ran in that window it always showed the old version; root fix: `release.sh` now computes SHA256 and updates the formula itself (synchronously, ~10s after tag push), and the bot is permanently disabled so there is no more race condition; when `release.sh` exits, `brew upgrade` works immediately
+
 ## v0.3.76 — 2026-04-27
 
 - Fix: **Custom benchmark "No response received" with Qwen3/thinking models** — models like Qwen3 stream output into `delta.reasoning_content` (thinking tokens) rather than `delta.content`; with only 512 max_tokens the thinking could consume the entire budget leaving no `content` tokens; fixed by accepting either field as valid output; also raised default max_tokens from 512 → 2048 and added a configurable max tokens selector (512 / 1024 / 2048 / 4096) in the custom benchmark UI

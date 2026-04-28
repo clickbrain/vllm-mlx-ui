@@ -47,11 +47,45 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 # 5. Tag and push code + tag together
 echo "→ Tagging and pushing code..."
 git tag "${TAG}"
+# Pull first to avoid rejection if any commits landed on origin since we started
+git pull --rebase
 git push origin main "${TAG}"
+
+# 6. Wait for GitHub to generate the tarball (usually ready in < 10s)
+TARBALL_URL="https://github.com/clickbrain/vllm-mlx-ui/archive/refs/tags/${TAG}.tar.gz"
+echo "→ Waiting for GitHub tarball to become available..."
+for i in $(seq 1 30); do
+  STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$TARBALL_URL")
+  if [[ "$STATUS" == "200" ]]; then
+    echo "  ✓ Tarball ready (attempt ${i})"
+    break
+  fi
+  if [[ "$i" == "30" ]]; then
+    echo "  ✗ Tarball not available after 60s — aborting"
+    exit 1
+  fi
+  sleep 2
+done
+
+# 7. Compute SHA256
+echo "→ Computing SHA256..."
+SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | cut -d' ' -f1)
+echo "  sha256: ${SHA256}"
+
+# 8. Update formula in-place — this is the ONLY formula update; the bot is disabled
+echo "→ Updating Homebrew formula..."
+sed -i '' "s|url \"https://github.com/clickbrain/vllm-mlx-ui/archive/refs/tags/v[^\"]*\"|url \"${TARBALL_URL}\"|" Formula/vllm-mlx-ui.rb
+sed -i '' "s|sha256 \"[a-f0-9]*\"|sha256 \"${SHA256}\"|" Formula/vllm-mlx-ui.rb
+sed -i '' "s|version \"[^\"]*\"|version \"${VERSION}\"|" Formula/vllm-mlx-ui.rb
+
+git add Formula/vllm-mlx-ui.rb
+git commit -m "chore: update formula to ${TAG}
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+git push origin main
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  ✅ Released ${TAG} — the GitHub Actions bot will update the"
-echo "     Homebrew formula automatically. brew upgrade vllm-mlx-ui"
-echo "     will deliver this version once the bot finishes (~1 min)."
+echo "  ✅ Released ${TAG} — formula already updated."
+echo "     brew upgrade vllm-mlx-ui is ready NOW."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

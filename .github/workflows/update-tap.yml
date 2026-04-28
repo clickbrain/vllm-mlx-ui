@@ -1,9 +1,14 @@
 name: Update Homebrew tap on release
 
+# DISABLED — release.sh handles the formula update synchronously after the tag push.
+# Changing this to manual-only so the bot never races with release.sh.
+# To trigger manually: gh workflow run update-tap.yml --field tag=vX.Y.Z
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to update formula for (e.g. v0.3.76)"
+        required: true
 
 jobs:
   update-tap:
