@@ -263,18 +263,27 @@ def main() -> None:
             UI_PID_FILE.unlink(missing_ok=True)
         except Exception:
             pass
-        # Relaunch after upgrade
+        # Relaunch after upgrade or restart request
         try:
-            from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG
+            from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG, STATE_DIR
             if RELAUNCH_FLAG.exists():
                 RELAUNCH_FLAG.unlink(missing_ok=True)
-                subprocess.Popen(
-                    _find_binary(),
-                    start_new_session=True,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                binary_parts = _find_binary()
+                cmd_str = " ".join(
+                    f'"{p}"' if " " in p else p for p in binary_parts
                 )
+                log_path = STATE_DIR / "mgmt.log"
+                STATE_DIR.mkdir(parents=True, exist_ok=True)
+                # Delay ensures this process fully exits and port 8502 is free
+                # before the new process attempts to bind.
+                with open(log_path, "a") as _lf:
+                    subprocess.Popen(
+                        ["sh", "-c", f"sleep 2 && {cmd_str}"],
+                        start_new_session=True,
+                        stdin=subprocess.DEVNULL,
+                        stdout=_lf,
+                        stderr=_lf,
+                    )
         except Exception:
             pass
 

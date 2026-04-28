@@ -1404,20 +1404,9 @@ def restart_app(_: None = Depends(_check_auth)) -> dict:
         import time as _t
         _t.sleep(0.3)
         try:
-            log_path = _os_mod.environ.get("VMUI_LOG", str(sm.STATE_DIR / "mgmt.log"))
-            binary = _find_restart_cmd()
-            # Delay so this process fully exits and releases port 8502 before
-            # the new process tries to bind.
-            cmd_str = " ".join(f'"{c}"' if " " in c else c for c in binary)
-            with open(_os_mod.devnull, "r") as devnull_in, open(log_path, "a") as log_out:
-                _sp.Popen(
-                    ["sh", "-c", f"sleep 4 && {cmd_str}"],
-                    stdin=devnull_in,
-                    stdout=log_out,
-                    stderr=_sp.STDOUT,
-                    close_fds=True,
-                    start_new_session=True,
-                )
+            from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG, STATE_DIR as _sd
+            _sd.mkdir(parents=True, exist_ok=True)
+            RELAUNCH_FLAG.write_text("1")
         except Exception:
             pass
         _os_mod.kill(_os_mod.getpid(), _signal_mod.SIGTERM)
@@ -1469,18 +1458,9 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
         _uc.upgrade_status = "restarting"
         _t.sleep(2)
         try:
-            log_path = _os_mod.environ.get("VMUI_LOG", str(sm.STATE_DIR / "mgmt.log"))
-            binary = _find_restart_cmd()
-            cmd_str = " ".join(f'"{c}"' if " " in c else c for c in binary)
-            with open(_os_mod.devnull, "r") as devnull_in, open(log_path, "a") as log_out:
-                _sp.Popen(
-                    ["sh", "-c", f"sleep 4 && {cmd_str}"],
-                    stdin=devnull_in,
-                    stdout=log_out,
-                    stderr=_sp.STDOUT,
-                    close_fds=True,
-                    start_new_session=True,
-                )
+            from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG, STATE_DIR as _sd
+            _sd.mkdir(parents=True, exist_ok=True)
+            RELAUNCH_FLAG.write_text("1")
         except Exception:
             pass
         _os_mod.kill(_os_mod.getpid(), _signal_mod.SIGTERM)
