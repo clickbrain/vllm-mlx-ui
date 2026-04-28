@@ -363,6 +363,7 @@ def run_custom_benchmark(
                     "stream": True,
                     "temperature": 0.0,
                     "stream_options": {"include_usage": True},
+                    "enable_thinking": False,
                 },
                 stream=True,
                 timeout=300,
@@ -537,6 +538,7 @@ def run_live_benchmark(
                     "temperature": 0.0,
                     # Ask the server to include token usage in the final chunk
                     "stream_options": {"include_usage": True},
+                    "enable_thinking": False,
                 },
                 stream=True,
                 timeout=120,

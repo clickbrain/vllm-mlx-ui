@@ -1,4 +1,8 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.79 — 2026-04-27
+
+- Fix: **Custom and quality benchmarks now disable thinking mode** — added `enable_thinking: false` to all benchmark requests; thinking models (Qwen3, etc.) were spending 30-40s on internal reasoning before streaming any tokens, reporting impossible tok/s numbers and misleading TTFT values; with thinking disabled, models respond immediately with accurate timing metrics
+
 ## v0.3.78 — 2026-04-28
 
 - Fix: **`brew upgrade vllm-mlx-ui` permanently fixed** — root cause identified: Homebrew 5.x defaults to a 24-hour auto-update throttle (`HOMEBREW_AUTO_UPDATE_SECS=86400`), meaning `brew upgrade` skips all tap git-fetches for up to 24 hours after any prior `brew` invocation; this is why the formula update in v0.3.77 (which was correct and immediate) still wasn't visible with `brew upgrade` alone; dashboard "Install Updates" already used `brew update && brew upgrade` (bypasses throttle); fix: added `export HOMEBREW_AUTO_UPDATE_SECS=300` to `~/.zshenv` (5-minute throttle); formula caveats now document the correct upgrade command and the env var recommendation
