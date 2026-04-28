@@ -46,22 +46,24 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 
 # 5. Tag and push code + tag together
 echo "→ Tagging and pushing code..."
-git tag "${TAG}"
-# Pull first to avoid rejection if any commits landed on origin since we started
+# Pull first to avoid rejection if any commits landed on origin since we started.
+# Tag is created AFTER the rebase so it always points to the exact commit on main.
 git pull --rebase
+git tag "${TAG}"
 git push origin main "${TAG}"
 
-# 6. Wait for GitHub to generate the tarball (usually ready in < 10s)
+# 6. Wait for GitHub to generate the tarball (usually ready in < 15s)
 TARBALL_URL="https://github.com/clickbrain/vllm-mlx-ui/archive/refs/tags/${TAG}.tar.gz"
 echo "→ Waiting for GitHub tarball to become available..."
-for i in $(seq 1 30); do
+for i in $(seq 1 45); do
   STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$TARBALL_URL")
-  if [[ "$STATUS" == "200" ]]; then
+  # GitHub returns 302 (redirect to CDN) or 200 when the tarball exists
+  if [[ "$STATUS" == "200" || "$STATUS" == "302" ]]; then
     echo "  ✓ Tarball ready (attempt ${i})"
     break
   fi
-  if [[ "$i" == "30" ]]; then
-    echo "  ✗ Tarball not available after 60s — aborting"
+  if [[ "$i" == "45" ]]; then
+    echo "  ✗ Tarball not available after 90s — aborting"
     exit 1
   fi
   sleep 2
