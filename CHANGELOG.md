@@ -1,4 +1,8 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.3.76 — 2026-04-27
+
+- Fix: **Custom benchmark "No response received" with Qwen3/thinking models** — models like Qwen3 stream output into `delta.reasoning_content` (thinking tokens) rather than `delta.content`; with only 512 max_tokens the thinking could consume the entire budget leaving no `content` tokens; fixed by accepting either field as valid output; also raised default max_tokens from 512 → 2048 and added a configurable max tokens selector (512 / 1024 / 2048 / 4096) in the custom benchmark UI
+
 ## v0.3.75 — 2026-04-27
 
 - Fix: **Install Updates & Restart no longer fails to come back** — the new process was spawning and immediately trying to bind port 8502 while the old process still owned it, causing the new process to crash silently; fixed by spawning `vllm-mlx-ui` (full entry point) with a 4-second delay so the old process exits and releases the port first
