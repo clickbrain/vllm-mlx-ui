@@ -399,6 +399,40 @@ def _is_process_alive(pid: int) -> bool:
         return False
 
 
+def _try_adopt_server(port: int, host: str) -> int | None:
+    """If our inference server is running on *port* but we've lost its PID file
+    (e.g. after a management-server restart), find the process and re-adopt it.
+
+    Returns the adopted PID if successful, None otherwise.
+    """
+    connect_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
+    # Quick HTTP probe — if nothing responds, bail out immediately.
+    try:
+        import urllib.request as _ur
+        _ur.urlopen(f"http://{connect_host}:{port}/v1/models", timeout=1).read()
+    except Exception:
+        return None  # port not responding to our API — don't adopt
+
+    # Find PID of the process holding the port via lsof.
+    try:
+        import subprocess as _sp
+        out = _sp.check_output(
+            ["lsof", "-t", "-i", f"tcp:{port}", "-n", "-P"],
+            text=True, stderr=_sp.DEVNULL,
+        ).strip()
+        for tok in out.split():
+            try:
+                pid = int(tok)
+            except ValueError:
+                continue
+            if _is_process_alive(pid):
+                PID_FILE.write_text(str(pid))
+                return pid
+    except Exception:
+        pass
+    return None
+
+
 def get_server_url(config: dict[str, Any] | None = None) -> str:
     """Return the bare base URL of the inference server — no trailing slash, no /v1.
 
@@ -469,11 +503,17 @@ def get_server_status() -> dict[str, Any]:
     # Local mode
     pid = _get_pid()
     if pid is None:
-        result: dict[str, Any] = {"running": False, "healthy": False, "pid": None, "health": {}}
-        with _server_state_lock:
-            if _last_crash_log:
-                result["crash_log"] = _last_crash_log
-        return result
+        # PID file missing — check if the server is actually running (e.g. after
+        # management-server restart) and adopt it if so.
+        _port = int(cfg.get("port", 8000))
+        _host = cfg.get("host", "127.0.0.1")
+        pid = _try_adopt_server(_port, _host)
+        if pid is None:
+            result: dict[str, Any] = {"running": False, "healthy": False, "pid": None, "health": {}}
+            with _server_state_lock:
+                if _last_crash_log:
+                    result["crash_log"] = _last_crash_log
+            return result
     if not _is_process_alive(pid):
         PID_FILE.unlink(missing_ok=True)
         # Only capture crash log when the stop was NOT intentional (real crash).
@@ -694,6 +734,11 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
             if not _port_in_use(port, host):
                 break
         else:
+            # Port still in use — check if it's already our inference server
+            # (e.g. after a management-server restart that lost the PID file).
+            adopted = _try_adopt_server(port, host)
+            if adopted:
+                return False, "Server is already running."
             return False, (
                 f"⚠️ Port {port} is already in use by a previous server session.\n"
                 f"Click **Kill stale server** below to free the port, then try again."
