@@ -158,19 +158,36 @@ def _version_gt(latest: str, installed: str) -> bool:
 
 
 def _homebrew_formula_version() -> str | None:
-    """Return the Homebrew-installed formula version from the cellar path.
+    """Return the Homebrew-installed formula version from `brew info --json`.
 
-    When pip upgrades the vllm-mlx Python package inside the brew venv, the
-    Python __version__ advances but the UI JavaScript (built during 'brew install')
-    stays from the formula tarball.  Reading the version from the cellar path
-    gives us the version of the *UI build* that's actually running, not the
-    pip package version.
+    Using brew as the primary source is authoritative regardless of which
+    Python process is running (e.g. an old cellar venv that persisted after
+    a `brew upgrade`, or a dev editable install that shadows the real version).
 
-    Returns the version string (e.g. "0.3.41") or None if not resolvable.
+    Falls back to parsing sys.prefix so the function still works when the
+    `brew` CLI is unavailable (CI, Docker, pip-only installs).
     """
+    # Primary: ask brew directly — works even if running from old/deleted cellar
+    try:
+        import json
+        result = subprocess.run(
+            ["brew", "info", "--json", "vllm-mlx-ui"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            installed = data[0].get("installed", [])
+            if installed:
+                ver = installed[0].get("version", "")
+                if ver and not ver.startswith("HEAD-"):
+                    return ver
+    except Exception:
+        pass
+
+    # Fallback: parse from sys.prefix (only works when process runs inside cellar)
     import sys
     import re
-    prefix = sys.prefix  # e.g. /opt/homebrew/Cellar/vllm-mlx-ui/0.3.41/libexec/venv
+    prefix = sys.prefix
     m = re.search(r"[Cc]ellar/vllm-mlx-ui/([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)", prefix)
     if m:
         return m.group(1)
