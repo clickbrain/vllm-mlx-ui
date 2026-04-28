@@ -964,43 +964,10 @@ function formatRelTime(ts: string): string {
   return new Date(ts).toLocaleDateString()
 }
 
-// ── Cost Analysis ────────────────────────────────────────────────────────────
-interface CostByModel {
-  model_id: string
-  tier: 'small' | 'medium' | 'large'
-  tokens_generated: number
-  estimated_cost_usd: number
-}
-interface CostStats {
-  benchmarks_analyzed: number
-  total_input_tokens: number
-  total_output_tokens: number
-  estimated_cloud_cost_usd: number
-  estimated_monthly_savings_usd: number
-  by_model: CostByModel[]
-  rates_used: Record<string, { input_per_1m: number; output_per_1m: number }>
-}
-const costStats   = ref<CostStats | null>(null)
-const costLoading = ref(false)
-const costError   = ref(false)
-
-async function fetchCostStats() {
-  costLoading.value = true
-  costError.value   = false
-  try {
-    const data = await api.get<CostStats>('/stats/cost')
-    costStats.value = data
-  } catch {
-    costError.value = true
-  } finally {
-    costLoading.value = false
-  }
-}
-
+// ── History helpers ───────────────────────────────────────────────────────────
 watch(activeTab, (tab) => {
   if (tab === 'History') {
     modelsStore.fetchBenchmarkResults()
-    fetchCostStats()
   }
 })
 </script>
@@ -1356,6 +1323,9 @@ watch(activeTab, (tab) => {
                     <option :value="128">128</option>
                     <option :value="256">256</option>
                     <option :value="512">512</option>
+                    <option :value="1024">1024</option>
+                    <option :value="2048">2048</option>
+                    <option :value="4096">4096</option>
                   </select>
                 </label>
                 <label v-if="benchMode !== 'speed' && benchMode !== 'custom'" class="opt-label">
@@ -1469,7 +1439,7 @@ watch(activeTab, (tab) => {
               <!-- Run button -->
               <div class="bench-run-row">
                 <AppButton
-                  :disabled="perfApplying || benchRunning || (benchMode === 'speed' && !serverStore.isRunning) || benchSelectedModels.length === 0 || (benchMode !== 'speed' && benchMode !== 'custom' && benchSuites.length === 0) || (benchMode === 'custom' && customPrompts.filter(p => p.trim()).length === 0)"
+                  :disabled="perfApplying || benchRunning || benchSelectedModels.length === 0 || (benchMode !== 'speed' && benchMode !== 'custom' && benchSuites.length === 0) || (benchMode === 'custom' && customPrompts.filter(p => p.trim()).length === 0)"
                   @click="runBenchmark"
                 >
                   <span v-if="perfApplying || benchRunning" class="spin" style="margin-right:6px" />
@@ -1608,39 +1578,6 @@ watch(activeTab, (tab) => {
 
     <!-- ── HISTORY TAB ────────────────────────────────────────────────────── -->
     <div v-else-if="activeTab === 'History'" class="tab-body">
-
-      <!-- Cost Analysis panel -->
-      <div class="cost-panel">
-        <div class="panel-header">
-          <div class="panel-title">Cost Analysis</div>
-        </div>
-        <div v-if="costLoading" class="cost-body">
-          <div class="cost-skeleton-row" />
-          <div class="cost-skeleton-row short" />
-        </div>
-        <div v-else-if="costError" class="panel-empty warn">Could not load cost data.</div>
-        <div v-else-if="!costStats || costStats.benchmarks_analyzed === 0" class="panel-empty">
-          Run a benchmark to see cloud cost estimates.
-        </div>
-        <div v-else class="cost-body">
-          <div class="cost-summary-row">
-            <div class="cost-summary-card">
-              <div class="cost-summary-label">Estimated cloud cost to date</div>
-              <div class="cost-summary-value cu">${{ costStats.estimated_cloud_cost_usd.toFixed(2) }}</div>
-              <div class="cost-summary-sub">
-                {{ costStats.total_input_tokens.toLocaleString() }} input &plus;
-                {{ costStats.total_output_tokens.toLocaleString() }} output tokens
-                across {{ costStats.benchmarks_analyzed }} runs
-              </div>
-            </div>
-            <div class="cost-summary-card">
-              <div class="cost-summary-label">Est. monthly savings at current usage</div>
-              <div class="cost-summary-value si">${{ costStats.estimated_monthly_savings_usd.toFixed(2) }}</div>
-              <div class="cost-summary-sub">vs equivalent cloud API calls</div>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <!-- Filter bar -->
       <div class="history-filter-bar">
@@ -2741,70 +2678,6 @@ watch(activeTab, (tab) => {
 .error-text { color: #f87171; font-size: 12px; }
 
 .history-row-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
-
-/* ── Cost Analysis ───────────────────────────────────────────────────────── */
-.cost-panel {
-  background: var(--bg-surface);
-  border: 1px solid var(--bd-default);
-  border-radius: var(--r-xl);
-  overflow: hidden;
-}
-
-.cost-body {
-  padding: var(--space-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.cost-summary-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
-}
-
-@media (max-width: 600px) { .cost-summary-row { grid-template-columns: 1fr; } }
-
-.cost-summary-card {
-  background: var(--bg-elevated);
-  border: 1px solid var(--bd-subtle);
-  border-radius: var(--r-lg);
-  padding: var(--space-3) var(--space-4);
-}
-
-.cost-summary-label {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--tx-muted);
-  margin-bottom: var(--space-1);
-}
-
-.cost-summary-value {
-  font-size: 28px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  line-height: 1.15;
-  margin-bottom: 4px;
-}
-.cost-summary-value.cu { color: var(--cu-400); }
-.cost-summary-value.si { color: var(--si-400); }
-
-.cost-summary-sub {
-  font-size: 13px;
-  color: var(--tx-muted);
-  line-height: 1.5;
-}
-
-.cost-skeleton-row {
-  height: 20px;
-  background: var(--bg-elevated);
-  border-radius: var(--r-sm);
-  margin-bottom: var(--space-2);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-.cost-skeleton-row.short { width: 55%; }
 
 /* ── Coming soon ─────────────────────────────────────────────────────────── */
 .coming-soon-card {
