@@ -182,3 +182,53 @@ Model type is auto-detected at startup via `model_registry.py`.
 **mlx-audio is optional:** It conflicts with mlx-lm versioning. It lives in `[audio]` optional deps and is imported with try/except guards.
 
 **Gemma 3 context workaround:** The `GEMMA3_SLIDING_WINDOW` env var patches mlx-vlm's RotatingKVCache at runtime. Document env var overrides for model-specific patches.
+
+---
+
+## Critical Rules (Post-Audit 2026-04-29)
+
+### Error Handling — NEVER Swallow Errors
+```python
+# ❌ NEVER do this:
+except Exception:
+    pass
+
+# ✅ ALWAYS do this:
+except Exception as e:
+    logger.warning("Operation failed: %s", e, exc_info=True)
+```
+Same rule applies to TypeScript: NEVER use `catch { /* silent */ }`. Always show user feedback or log.
+
+### Threading — NEVER Share Mutable State Without Locks
+```python
+# ❌ NEVER do this (global dict written by multiple threads):
+_cache = {}
+
+# ✅ ALWAYS do this:
+import threading
+_lock = threading.Lock()
+_cache = {}
+
+with _lock:
+    _cache[key] = value
+```
+
+### Security — NEVER Use os.system()
+```python
+# ❌ NEVER do this (command injection):
+os.system(f"afplay {args.output}")
+
+# ✅ ALWAYS do this:
+subprocess.run(["afplay", args.output])
+```
+
+### File Ownership — See AGENTS.md
+The full file ownership matrix is in `AGENTS.md`. The key rule:
+- **EDIT FREELY:** `vllm_mlx/dashboard/`, `ui/`, `docs/`, `tests/`, `scripts/`, `.github/`
+- **NEVER TOUCH:** Everything else in `vllm_mlx/` (upstream code)
+
+### Known Issues — See AGENTS.md
+The `AGENTS.md` file contains a comprehensive list of all known bugs, race conditions, and anti-patterns identified during the 2026-04-29 audit. **Do NOT re-discover these issues.** Fix them according to the plan in `PROJECT_PLAN.md`.
+
+### Project Plan
+Implementation roadmap is in `PROJECT_PLAN.md`. All work is tracked via GitHub Issues labeled `audit-2026-04-29` with `phase-1` through `phase-5` labels.
