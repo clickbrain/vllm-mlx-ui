@@ -106,7 +106,7 @@ def _github_latest_tag(owner: str, repo: str) -> str:
         tags = r.json()
         if tags:
             return tags[0].get("name", "").lstrip("v")
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
     return "unknown"
 
@@ -145,7 +145,7 @@ def _homebrew_installed_commit() -> str:
             ver = installed[0].get("version", "")  # e.g. "HEAD-c118ee2"
             if ver.startswith("HEAD-"):
                 return ver.split("-", 1)[1]
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
     return ""
 
@@ -187,7 +187,7 @@ def _homebrew_formula_version() -> str | None:
                 ver = installed[0].get("version", "")
                 if ver and not ver.startswith("HEAD-"):
                     return ver
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
 
     # Fallback: parse from sys.prefix (only works when process runs inside cellar)
@@ -301,7 +301,7 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
             idx = futures[future]
             try:
                 results[idx] = future.result()
-            except Exception as e:
+            except Exception:
                 logger.warning("Operation failed", exc_info=True)
     results = [r for r in results if r is not None]
 
@@ -373,7 +373,7 @@ def relaunch() -> None:
         else:
             AUTO_START_FLAG.unlink(missing_ok=True)
         RELAUNCH_FLAG.write_text("1")
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
 
     # Hard-exit this Streamlit subprocess immediately.

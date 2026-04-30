@@ -365,7 +365,7 @@ class DownloadManager:
                 if size_gb:
                     with self._lock:
                         item["total_bytes"] = int(size_gb * 1024**3)
-            except Exception as e:
+            except Exception:
                 logger.warning("Operation failed", exc_info=True)
 
             # Monitor bytes-in-cache while downloading
@@ -588,10 +588,10 @@ def get_model_presets(model_id: str, hf_token: str | None = None) -> dict[str, A
             temp = gen.get("temperature")
             if temp and isinstance(temp, (int, float)) and 0 < temp <= 2:
                 presets["recommended_temperature"] = float(temp)
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
 
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
     finally:
         if hf_token:
@@ -623,7 +623,7 @@ def get_total_ram_gb() -> float:
             )
             if r.status_code == 200:
                 return float(r.json().get("total_gb", 0.0))
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
     try:
         import psutil

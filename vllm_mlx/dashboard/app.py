@@ -50,7 +50,7 @@ def _find_vllm_ui_pids() -> list[int]:
                     pids.append(pid)
             except ValueError:
                 pass
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
 
     # Strategy 2: find by ports 8501/8502
@@ -70,7 +70,7 @@ def _find_vllm_ui_pids() -> list[int]:
                         pass
                 if pids:
                     break
-            except Exception as e:
+            except Exception:
                 logger.warning("Operation failed", exc_info=True)
 
     return pids
@@ -100,7 +100,7 @@ def stop_all() -> None:
     try:
         from vllm_mlx.dashboard.server_manager import UI_PID_FILE
         UI_PID_FILE.unlink(missing_ok=True)
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
     print("✅ Stopped.")
 
@@ -182,14 +182,14 @@ def main() -> None:
     # Write our PID so the Shutdown button and future startups can find us
     try:
         UI_PID_FILE.write_text(str(os.getpid()))
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
 
     # SIGTERM handler — clean exit; relaunches if RELAUNCH_FLAG is set
     def _handle_sigterm(signum, frame):
         try:
             UI_PID_FILE.unlink(missing_ok=True)
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
         try:
             from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG
@@ -202,7 +202,7 @@ def main() -> None:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
         sys.exit(0)
 
@@ -217,7 +217,7 @@ def main() -> None:
                 "is open to any host on your network. Set a key in Settings → Remote Server.",
                 file=sys.stderr,
             )
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
 
     # Auto-start inference server if configured
@@ -265,7 +265,7 @@ def main() -> None:
     finally:
         try:
             UI_PID_FILE.unlink(missing_ok=True)
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
         # Relaunch after upgrade or restart request
         try:
@@ -288,7 +288,7 @@ def main() -> None:
                         stdout=_lf,
                         stderr=_lf,
                     )
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
 
     sys.exit(0)

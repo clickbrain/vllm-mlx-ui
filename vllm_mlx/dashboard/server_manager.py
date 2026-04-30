@@ -75,7 +75,7 @@ def _force_ipv4_url(url: str) -> str:
             ipv4 = addrs[0][4][0]
             port_part = f":{parsed.port}" if parsed.port else ""
             return urlunparse(parsed._replace(netloc=f"{ipv4}{port_part}"))
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
     return url
 
@@ -278,7 +278,7 @@ def _load_local_config() -> dict[str, Any]:
             with open(CONFIG_FILE) as f:
                 saved = json.load(f)
             return {**DEFAULT_CONFIG, **saved}
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
     return DEFAULT_CONFIG.copy()
 
@@ -304,7 +304,7 @@ def load_config() -> dict[str, Any]:
             with open(CONFIG_FILE) as f:
                 saved = json.load(f)
             local = {**DEFAULT_CONFIG, **saved}
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
 
     # 10s TTL avoids repeated HTTP calls during fast Streamlit reruns (fragment
@@ -322,7 +322,7 @@ def load_config() -> dict[str, Any]:
                         and "_cfg_ts" in _st.session_state
                         and time.monotonic() - _st.session_state["_cfg_ts"] < 10):
                     return cached
-            except Exception as e:
+            except Exception:
                 logger.warning("Operation failed", exc_info=True)
         try:
             r = _http.get(f"{mgmt}/config", headers=_mgmt_headers(local), timeout=3)
@@ -339,10 +339,10 @@ def load_config() -> dict[str, Any]:
                         import streamlit as _st
                         _st.session_state["_cfg_cache"] = result
                         _st.session_state["_cfg_ts"] = time.monotonic()
-                    except Exception as e:
+                    except Exception:
                         logger.warning("Operation failed", exc_info=True)
                 return result
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)  # Fall back to local config silently
     return local
 
@@ -379,7 +379,7 @@ def save_config(config: dict[str, Any]) -> None:
     if CONFIG_FILE.exists():
         try:
             CONFIG_FILE.replace(CONFIG_FILE.with_suffix(".json.bak"))
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
@@ -389,7 +389,7 @@ def save_config(config: dict[str, Any]) -> None:
             import streamlit as _st
             _st.session_state.pop("_cfg_cache", None)
             _st.session_state.pop("_cfg_ts", None)
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
     mgmt = _mgmt_base(config)
     if mgmt:
@@ -399,7 +399,7 @@ def save_config(config: dict[str, Any]) -> None:
             remote_payload = {k: v for k, v in config.items() if k not in _LOCAL_ONLY_KEYS}
             _http.post(f"{mgmt}/config", json=remote_payload,
                        headers=_mgmt_headers(config), timeout=5)
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)  # Best effort; local save already succeeded
 
 
@@ -451,7 +451,7 @@ def _try_adopt_server(port: int, host: str) -> int | None:
             if _is_process_alive(pid):
                 PID_FILE.write_text(str(pid))
                 return pid
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
     return None
 
@@ -476,7 +476,7 @@ def get_server_url(config: dict[str, Any] | None = None) -> str:
         try:
             import streamlit as _st
             _use_remote = _st.session_state.get("connection_mode", "local") == "remote"
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)  # Fallback: assume remote (safe when remote_server_url is configured)
 
     if _use_remote:
@@ -505,7 +505,7 @@ def check_health(config: dict[str, Any] | None = None) -> tuple[bool, dict]:
         r = _http.get(f"{url}/health", timeout=2)
         if r.status_code == 200:
             return True, r.json()
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
     return False, {}
 
@@ -553,7 +553,7 @@ def get_server_status() -> dict[str, Any]:
             if LOG_FILE.exists():
                 lines = LOG_FILE.read_text(errors="replace").splitlines()
                 crash_log = "\n".join(lines[-40:])
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
         with _server_state_lock:
             _last_crash_log = crash_log or None
@@ -894,7 +894,7 @@ def get_metrics(api_key: str = "") -> dict | None:
             r = _http.get(f"{mgmt}/metrics", headers=_mgmt_headers(config), timeout=3)
             if r.status_code == 200:
                 return r.json()
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
         return None
     # Local mode — call inference API directly
@@ -907,7 +907,7 @@ def get_metrics(api_key: str = "") -> dict | None:
         r = _http.get(f"{url}/v1/status", headers=headers, timeout=3)
         if r.status_code == 200:
             return r.json()
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
     return None
 
@@ -923,7 +923,7 @@ def get_cache_stats(api_key: str = "") -> dict | None:
             r = _http.get(f"{mgmt}/cache/stats", headers=_mgmt_headers(config), timeout=3)
             if r.status_code == 200:
                 return r.json()
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
         return None
     url = get_server_url(config)
@@ -935,7 +935,7 @@ def get_cache_stats(api_key: str = "") -> dict | None:
         r = _http.get(f"{url}/v1/cache/stats", headers=headers, timeout=2)
         if r.status_code == 200:
             return r.json()
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
     return None
 
@@ -983,7 +983,7 @@ def get_memory_stats() -> dict:
             r = _http.get(f"{mgmt}/memory/stats", headers=_mgmt_headers(cfg), timeout=5)
             if r.status_code == 200:
                 return r.json()
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
         return {"total_gb": 0, "available_gb": 0, "used_gb": 0, "percent": 0, "pressure": "unknown"}
 
@@ -1175,7 +1175,7 @@ def force_release_memory() -> dict:
                     )
                     if cr.status_code in (200, 204):
                         server_heap_notes.append(f"[inference server] {cache_path} cleared")
-                except Exception as e:
+                except Exception:
                     logger.warning("Operation failed", exc_info=True)
         else:
             warnings.append(f"Inference server memory release returned HTTP {r.status_code}")
@@ -1194,7 +1194,7 @@ def force_release_memory() -> dict:
         if PID_FILE.exists():
             _active_pid = int(PID_FILE.read_text().strip())
             _protected_pids.add(_active_pid)
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
 
     # Protect the full parent-process chain (app.py, shell, etc.)
@@ -1204,7 +1204,7 @@ def force_release_memory() -> dict:
         while _p.ppid() not in (0, 1):
             _protected_pids.add(_p.ppid())
             _p = _ps.Process(_p.ppid())
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
 
     # Protect the Streamlit subprocess (child of app.py; its cmdline contains
@@ -1213,7 +1213,7 @@ def force_release_memory() -> dict:
         if STREAMLIT_PID_FILE.exists():
             _streamlit_pid = int(STREAMLIT_PID_FILE.read_text().strip())
             _protected_pids.add(_streamlit_pid)
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
 
     _VLLM_MARKERS = (

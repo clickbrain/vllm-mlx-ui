@@ -83,7 +83,7 @@ def estimate_model_memory(model_id: str) -> float | None:
         for repo in cache_info.repos:
             if repo.repo_id == model_id and repo.repo_type == "model":
                 return repo.size_on_disk / (1024 ** 3)
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
     return None
 
@@ -168,7 +168,7 @@ def _clear_memory(callback: "Callable[[str], None] | None" = None) -> None:
     try:
         if "mlx.core" in sys.modules:
             sys.modules["mlx.core"].clear_cache()
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
     if callback:
         callback("🧹 Clearing memory before benchmark…\n")
@@ -278,7 +278,7 @@ def run_benchmark(
                 data["error"] = "out_of_memory"
             save_result(data)
             return data
-        except Exception as e:
+        except Exception:
             logger.warning("Operation failed", exc_info=True)
 
     # Fallback — store raw output for debugging

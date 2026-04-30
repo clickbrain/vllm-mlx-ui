@@ -202,7 +202,7 @@ def _get_model_name(server_url: str) -> str:
         models = data.get("data", [])
         if models:
             return models[0].get("id", "unknown")
-    except Exception as e:
+    except Exception:
         logger.warning("Operation failed", exc_info=True)
     return "unknown"
 
@@ -256,7 +256,7 @@ def _stream_completion(
                         t_first = _time.monotonic()
                     chunks.append(content)
                     token_count += 1
-            except Exception as e:
+            except Exception:
                 logger.warning("Operation failed", exc_info=True)
 
     t_end = _time.monotonic()

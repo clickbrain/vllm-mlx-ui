@@ -126,7 +126,7 @@ def _init_state() -> None:
     try:
         _persisted_mode = sm._load_local_config().get("connection_mode", "local")
     except Exception as e:
-        logger.warning("Operation failed: %s", e, exc_info=True)
+        _logging.warning("Operation failed: %s", e, exc_info=True)
         _persisted_mode = "local"
 
     defaults: dict[str, Any] = {
@@ -161,8 +161,8 @@ if not st.session_state.get("_update_check_started"):
         try:
             from vllm_mlx.dashboard import update_checker as _uc
             _uc.check_updates()   # stores result in update_checker module-level cache
-        except Exception as e:
-            logger.warning("Operation failed", exc_info=True)
+        except Exception:
+            _logging.warning("Operation failed", exc_info=True)
     _threading.Thread(target=_bg_update_check, daemon=True).start()
 
 
@@ -327,8 +327,8 @@ def _get_all_local_addresses() -> list[dict[str, str]]:
                 else:
                     label = iface
                 results.append({"label": label, "ip": ip})
-    except Exception as e:
-        logger.warning("Operation failed", exc_info=True)
+    except Exception:
+        _logging.warning("Operation failed", exc_info=True)
 
     # --- fallback if ifconfig failed --------------------------------------------
     if not results:
@@ -336,8 +336,8 @@ def _get_all_local_addresses() -> list[dict[str, str]]:
             ip = _sock.gethostbyname(_sock.gethostname())
             if not ip.startswith("127."):
                 results.append({"label": "detected IP", "ip": ip})
-        except Exception as e:
-            logger.warning("Failed to detect local IP, falling back to localhost", exc_info=True)
+        except Exception:
+            _logging.warning("Failed to detect local IP, falling back to localhost", exc_info=True)
             results.append({"label": "localhost", "ip": "127.0.0.1"})
 
     # --- mDNS .local hostname ---------------------------------------------------
@@ -345,8 +345,8 @@ def _get_all_local_addresses() -> list[dict[str, str]]:
         hostname = _sock.gethostname()
         local_name = hostname if hostname.endswith(".local") else f"{hostname}.local"
         results.append({"label": ".local mDNS (works on same network without IP)", "ip": local_name})
-    except Exception as e:
-        logger.warning("Operation failed", exc_info=True)
+    except Exception:
+        _logging.warning("Operation failed", exc_info=True)
 
     return results
 
@@ -447,8 +447,8 @@ def _swap_model(new_model_id: str) -> None:
         if presets.get("max_tokens"):
             config["max_tokens"] = presets["max_tokens"]
             config["max_request_tokens"] = presets["max_tokens"]
-    except Exception as e:
-        logger.warning("Operation failed", exc_info=True)
+    except Exception:
+        _logging.warning("Operation failed", exc_info=True)
 
     config["model"] = new_model_id
     sm.save_config(config)
@@ -669,8 +669,8 @@ def page_overview() -> None:
                 if cache_data and not cache_data.get("error"):
                     with st.expander("🗄 Cache statistics"):
                         st.json(cache_data)
-            except Exception as e:
-                logger.warning("Operation failed", exc_info=True)
+            except Exception:
+                _logging.warning("Operation failed", exc_info=True)
 
     _overview_live()
 
@@ -2146,8 +2146,8 @@ def _load_chats() -> dict:
     if _CHATS_FILE.exists():
         try:
             return json.loads(_CHATS_FILE.read_text())
-        except Exception as e:
-            logger.warning("Operation failed", exc_info=True)
+        except Exception:
+            _logging.warning("Operation failed", exc_info=True)
     return {}
 
 
@@ -2705,8 +2705,8 @@ def page_settings() -> None:
     try:
         total_hf = mm.get_cache_total_size()
         st.metric("HuggingFace cache total size", f"{total_hf:.2f} GB")
-    except Exception as e:
-        logger.warning("Operation failed", exc_info=True)
+    except Exception:
+        _logging.warning("Operation failed", exc_info=True)
 
     st.divider()
     st.subheader("🌐 Remote Access")
@@ -3006,7 +3006,7 @@ def page_settings() -> None:
                 else:
                     st.warning(f"⚠️ Management API at `{_passive_mgmt}` returned HTTP {_r2.status_code}")
             except Exception as e:
-                logger.warning("Operation failed: %s", e, exc_info=True)
+                _logging.warning("Operation failed: %s", e, exc_info=True)
                 st.warning(f"⚠️ Cannot reach management API at `{_passive_mgmt}` — check server is running and firewall allows connections.")
 
     st.divider()
@@ -3146,8 +3146,8 @@ def page_settings() -> None:
     try:
         ver = importlib.metadata.version("vllm-mlx")
         st.write(f"**vllm-mlx version:** {ver}")
-    except Exception as e:
-        logger.warning("Operation failed", exc_info=True)
+    except Exception:
+        _logging.warning("Operation failed", exc_info=True)
     st.write(f"**Dashboard UI version:** {_ui_ver}")
     st.write(f"**Python:** {platform.python_version()}")
     st.write(f"**Platform:** {platform.mac_ver()[0] or platform.platform()}")
@@ -3155,8 +3155,8 @@ def page_settings() -> None:
     try:
         if "mlx.core" in sys.modules:
             st.write(f"**MLX device:** {sys.modules['mlx.core'].default_device()}")
-    except Exception as e:
-        logger.warning("Operation failed", exc_info=True)
+    except Exception:
+        _logging.warning("Operation failed", exc_info=True)
 
     st.markdown(
         "📋 [Changelog](https://github.com/clickbrain/vllm-mlx-ui/blob/main/CHANGELOG.md) &nbsp;·&nbsp; "
@@ -3216,8 +3216,8 @@ with st.sidebar:
                 _mode_cfg = sm._load_local_config()
                 _mode_cfg["connection_mode"] = _new_mode
                 sm.save_config(_mode_cfg)
-            except Exception as e:
-                logger.warning("Operation failed", exc_info=True)
+            except Exception:
+                _logging.warning("Operation failed", exc_info=True)
             st.rerun()
     else:
         st.markdown(
@@ -3305,7 +3305,7 @@ with st.sidebar:
         from vllm_mlx.dashboard import update_checker as _uc_mod
         _upd_results = _uc_mod._cache.get("results", [])
     except Exception as e:
-        logger.warning("Operation failed: %s", e, exc_info=True)
+        _logging.warning("Operation failed: %s", e, exc_info=True)
         _upd_results = []
     _upd_outdated = [p for p in _upd_results if p.update_available and p.name in _BREW_PACKAGES]
     if _upd_outdated:
@@ -3333,8 +3333,8 @@ with st.sidebar:
                 _srv_st = sm.get_server_status()
                 if _srv_st.get("running"):
                     sm.stop_server()
-            except Exception as e:
-                logger.warning("Operation failed", exc_info=True)
+            except Exception:
+                _logging.warning("Operation failed", exc_info=True)
             st.success("Shutting down…")
             import time as _st_time
             _st_time.sleep(1)
@@ -3346,7 +3346,7 @@ with st.sidebar:
                 _ui_pid = int(UI_PID_FILE.read_text().strip())
                 os.kill(_ui_pid, signal.SIGTERM)
             except Exception as e:
-                logger.warning("Operation failed: %s", e, exc_info=True)
+                _logging.warning("Operation failed: %s", e, exc_info=True)
                 os._exit(0)
         if c2.button("Cancel", key="_shutdown_cancel"):
             del st.session_state["_shutdown_confirm"]
