@@ -57,18 +57,22 @@ const searchInput = ref('')
 const hideDownloaded = ref(true)
 
 // Column sort state: column key + direction
-// server-sort: downloads, likes, trending — re-fetches from HF
+// server-sort: downloads, likes, last_modified — re-fetches from HF
 // client-sort: model (name), size — sorts displayedSearchResults locally
-type SortCol = 'model' | 'size' | 'downloads' | 'likes' | 'trending'
+type SortCol = 'model' | 'size' | 'downloads' | 'likes' | 'last_modified'
 type SortDir = 'asc' | 'desc'
-const sortCol = ref<SortCol>('trending')
+const sortCol = ref<SortCol>('last_modified')
 const sortDir = ref<SortDir>('desc')
 
 // Client-side filters
-const filterFit = ref<'all' | 'perfect' | 'good' | 'marginal' | 'too_tight'>('all')
-const filterMaxSizeGb = ref<number>(0) // 0 = no limit
-const filterMinDownloads = ref<number>(0)
-const filterMinLikes = ref<number>(0)
+const filterFitLevels = ref<Set<string>>(new Set())  // empty set = all fit levels
+const filterSizeMin = ref<number>(0)
+const filterSizeMax = ref<number>(200)  // reasonable max for Apple Silicon
+const filterDownloadsMin = ref<number>(0)
+const filterDownloadsMax = ref<number>(1000000)
+const filterLikesMin = ref<number>(0)
+const filterLikesMax = ref<number>(10000)
+const filterFitOnly = ref(false)  // quick checkbox: only "perfect" and "good"
 
 // Quick-search by company/org
 const COMPANY_FILTERS = [
@@ -84,15 +88,15 @@ const COMPANY_FILTERS = [
 
 function searchCompany(query: string) {
   searchInput.value = query
-  sortCol.value = 'downloads'
+  sortCol.value = 'last_modified'
   sortDir.value = 'desc'
-  modelsStore.searchHF(query, modelsStore.mlxOnly, 0, 'downloads')
+  modelsStore.searchHF(query, true, 0, 'last_modified')
 }
 
 const isRestarting = computed(() => modelsStore.serverRestartingFor)
 
 // Server-side sort columns (require a new HF fetch)
-const SERVER_SORT_COLS = new Set<SortCol>(['downloads', 'likes', 'trending'])
+const SERVER_SORT_COLS = new Set<SortCol>(['downloads', 'likes', 'last_modified'])
 
 function toggleSort(col: SortCol) {
   if (sortCol.value === col) {
@@ -103,7 +107,7 @@ function toggleSort(col: SortCol) {
   }
   if (SERVER_SORT_COLS.has(col)) {
     // Re-fetch with new server sort
-    modelsStore.searchHF(searchInput.value.trim(), modelsStore.mlxOnly, 0, col)
+    modelsStore.searchHF(searchInput.value.trim(), true, 0, col)
   }
 }
 
@@ -112,28 +116,53 @@ function sortArrow(col: SortCol) {
   return sortDir.value === 'desc' ? '↓' : '↑'
 }
 
+// Fit level filter helpers
+function toggleFitLevel(level: string) {
+  const current = filterFitLevels.value
+  if (current.has(level)) {
+    current.delete(level)
+  } else {
+    current.add(level)
+  }
+  filterFitLevels.value = new Set(current)
+}
+
+function hasFitLevel(level: string): boolean {
+  return filterFitLevels.value.has(level)
+}
+
 const displayedSearchResults = computed(() => {
   let list = modelsStore.searchResults
+
+  // Filter out non-MLX models (always enforce MLX)
+  list = list.filter(r => r.is_mlx)
+
   if (hideDownloaded.value) {
     const cachedIds = new Set(modelsStore.models.map(m => m.id))
     list = list.filter(r => !cachedIds.has(r.id))
   }
-  // Fit filter
-  if (filterFit.value !== 'all') {
-    list = list.filter(r => r.fit_level === filterFit.value)
+
+  // Fit filter with multi-select or quick-fit
+  if (filterFitOnly.value) {
+    // Quick filter: only perfect and good
+    list = list.filter(r => r.fit_level === 'perfect' || r.fit_level === 'good')
+  } else if (filterFitLevels.value.size > 0) {
+    // Multi-select: OR logic
+    list = list.filter(r => filterFitLevels.value.has(r.fit_level ?? ''))
   }
-  // Max size filter
-  if (filterMaxSizeGb.value > 0) {
-    list = list.filter(r => !r.size_gb || r.size_gb <= filterMaxSizeGb.value)
-  }
-  // Min downloads filter
-  if (filterMinDownloads.value > 0) {
-    list = list.filter(r => r.downloads >= filterMinDownloads.value)
-  }
-  // Min likes filter
-  if (filterMinLikes.value > 0) {
-    list = list.filter(r => r.likes >= filterMinLikes.value)
-  }
+
+  // Size range filter
+  list = list.filter(r => {
+    if (!r.size_gb) return true  // show models with unknown size
+    return r.size_gb >= filterSizeMin.value && r.size_gb <= filterSizeMax.value
+  })
+
+  // Downloads range filter
+  list = list.filter(r => r.downloads >= filterDownloadsMin.value && r.downloads <= filterDownloadsMax.value)
+
+  // Likes range filter
+  list = list.filter(r => r.likes >= filterLikesMin.value && r.likes <= filterLikesMax.value)
+
   // Client-side sort (model name or size)
   if (sortCol.value === 'model') {
     const dir = sortDir.value === 'asc' ? 1 : -1
@@ -146,24 +175,24 @@ const displayedSearchResults = computed(() => {
 })
 
 async function doSearch() {
-  sortCol.value = 'downloads'
+  sortCol.value = 'last_modified'
   sortDir.value = 'desc'
-  await modelsStore.searchHF(searchInput.value.trim(), modelsStore.mlxOnly, 0, 'downloads')
+  await modelsStore.searchHF(searchInput.value.trim(), true, 0, 'last_modified')
 }
 
 async function loadMore() {
-  const serverSort = SERVER_SORT_COLS.has(sortCol.value) ? sortCol.value : 'downloads'
+  const serverSort = SERVER_SORT_COLS.has(sortCol.value) ? sortCol.value : 'last_modified'
   await modelsStore.searchHFMore(serverSort)
 }
 
-// Preload trending mlx-community models when Find tab is opened for the first time
+// Preload newest mlx-community models when Find tab is opened for the first time
 let trendingLoaded = false
 function onFindTabActivated() {
   if (!trendingLoaded && modelsStore.searchResults.length === 0) {
     trendingLoaded = true
-    sortCol.value = 'trending'
+    sortCol.value = 'last_modified'
     sortDir.value = 'desc'
-    modelsStore.searchHF('', true, 0, 'trending')
+    modelsStore.searchHF('', true, 0, 'last_modified')
   }
 }
 
@@ -367,57 +396,79 @@ watch(activeTab, (tab) => {
           v-model="searchInput"
           type="text"
           class="search-input"
-          placeholder="Search models… (empty = trending mlx-community)"
+          placeholder="Search models… (empty = newest MLX models)"
           @keydown.enter="doSearch"
         />
-        <div class="scope-toggle">
-          <button
-            class="scope-btn"
-            :class="{ active: modelsStore.mlxOnly }"
-            @click="modelsStore.mlxOnly = true"
-          >MLX only</button>
-          <button
-            class="scope-btn"
-            :class="{ active: !modelsStore.mlxOnly }"
-            @click="modelsStore.mlxOnly = false"
-          >All of HuggingFace</button>
-        </div>
         <AppButton variant="primary" size="sm" :loading="modelsStore.searching" @click="doSearch">
           Search
         </AppButton>
       </div>
+      
+      <div class="mlx-note">
+        ✓ Search results show only MLX-compatible models
+      </div>
 
-      <!-- Options row: hide-downloaded + result filters -->
+       <!-- Options row: filters and hide-downloaded -->
       <div class="find-options-row">
+        <!-- Fit filter with quick checkbox -->
         <div class="filter-group">
-          <span class="filter-label">Fit:</span>
-          <button class="filter-btn" :class="{ active: filterFit === 'all' }" @click="filterFit = 'all'">All</button>
-          <button class="filter-btn fit-perfect" :class="{ active: filterFit === 'perfect' }" @click="filterFit = 'perfect'">Fits great</button>
-          <button class="filter-btn fit-good" :class="{ active: filterFit === 'good' }" @click="filterFit = 'good'">Fits well</button>
-          <button class="filter-btn fit-marginal" :class="{ active: filterFit === 'marginal' }" @click="filterFit = 'marginal'">Tight</button>
-          <button class="filter-btn fit-too-tight" :class="{ active: filterFit === 'too_tight' }" @click="filterFit = 'too_tight'">Too large</button>
+          <span class="filter-label">Fit level:</span>
+          <label class="fit-quick-toggle">
+            <input type="checkbox" v-model="filterFitOnly" />
+            <span>Only models that fit</span>
+          </label>
+          <div v-if="!filterFitOnly" class="fit-checkboxes">
+            <label class="filter-checkbox">
+              <input type="checkbox" :checked="hasFitLevel('perfect')" @change="toggleFitLevel('perfect')" />
+              <span>🟢 Fits great (&lt;50%)</span>
+            </label>
+            <label class="filter-checkbox">
+              <input type="checkbox" :checked="hasFitLevel('good')" @change="toggleFitLevel('good')" />
+              <span>🟡 Fits well (50-75%)</span>
+            </label>
+            <label class="filter-checkbox">
+              <input type="checkbox" :checked="hasFitLevel('marginal')" @change="toggleFitLevel('marginal')" />
+              <span>🟠 Tight fit (75-90%)</span>
+            </label>
+            <label class="filter-checkbox">
+              <input type="checkbox" :checked="hasFitLevel('too_tight')" @change="toggleFitLevel('too_tight')" />
+              <span>🔴 Too large (&gt;90%)</span>
+            </label>
+          </div>
         </div>
+
+        <!-- Size range filter -->
         <div class="filter-group">
-          <span class="filter-label">Size:</span>
-          <button class="filter-btn" :class="{ active: filterMaxSizeGb === 0 }" @click="filterMaxSizeGb = 0">All</button>
-          <button class="filter-btn" :class="{ active: filterMaxSizeGb === 3 }" @click="filterMaxSizeGb = 3">&lt;3 GB</button>
-          <button class="filter-btn" :class="{ active: filterMaxSizeGb === 8 }" @click="filterMaxSizeGb = 8">&lt;8 GB</button>
-          <button class="filter-btn" :class="{ active: filterMaxSizeGb === 20 }" @click="filterMaxSizeGb = 20">&lt;20 GB</button>
+          <span class="filter-label">Size (GB):</span>
+          <div class="range-inputs">
+            <input type="number" v-model.number="filterSizeMin" min="0" max="200" class="range-input" placeholder="min" />
+            <span class="range-dash">–</span>
+            <input type="number" v-model.number="filterSizeMax" min="0" max="200" class="range-input" placeholder="max" />
+          </div>
+          <input type="range" v-model.number="filterSizeMin" min="0" max="200" class="range-slider" />
+          <input type="range" v-model.number="filterSizeMax" min="0" max="200" class="range-slider" />
         </div>
+
+        <!-- Downloads range filter -->
         <div class="filter-group">
-          <span class="filter-label">Min downloads:</span>
-          <button class="filter-btn" :class="{ active: filterMinDownloads === 0 }" @click="filterMinDownloads = 0">All</button>
-          <button class="filter-btn" :class="{ active: filterMinDownloads === 1000 }" @click="filterMinDownloads = 1000">1k+</button>
-          <button class="filter-btn" :class="{ active: filterMinDownloads === 10000 }" @click="filterMinDownloads = 10000">10k+</button>
-          <button class="filter-btn" :class="{ active: filterMinDownloads === 100000 }" @click="filterMinDownloads = 100000">100k+</button>
+          <span class="filter-label">Downloads:</span>
+          <div class="range-inputs">
+            <input type="number" v-model.number="filterDownloadsMin" min="0" max="1000000" class="range-input range-input-small" placeholder="min" />
+            <span class="range-dash">–</span>
+            <input type="number" v-model.number="filterDownloadsMax" min="0" max="1000000" class="range-input range-input-small" placeholder="max" />
+          </div>
         </div>
+
+        <!-- Likes range filter -->
         <div class="filter-group">
-          <span class="filter-label">Min likes:</span>
-          <button class="filter-btn" :class="{ active: filterMinLikes === 0 }" @click="filterMinLikes = 0">All</button>
-          <button class="filter-btn" :class="{ active: filterMinLikes === 10 }" @click="filterMinLikes = 10">10+</button>
-          <button class="filter-btn" :class="{ active: filterMinLikes === 100 }" @click="filterMinLikes = 100">100+</button>
-          <button class="filter-btn" :class="{ active: filterMinLikes === 1000 }" @click="filterMinLikes = 1000">1k+</button>
+          <span class="filter-label">Likes:</span>
+          <div class="range-inputs">
+            <input type="number" v-model.number="filterLikesMin" min="0" max="10000" class="range-input range-input-small" placeholder="min" />
+            <span class="range-dash">–</span>
+            <input type="number" v-model.number="filterLikesMax" min="0" max="10000" class="range-input range-input-small" placeholder="max" />
+          </div>
         </div>
+
         <div class="toolbar-spacer" />
         <label class="hide-downloaded-toggle">
           <input type="checkbox" v-model="hideDownloaded" />
@@ -443,14 +494,14 @@ watch(activeTab, (tab) => {
           <button class="col-fit col-sortable" :class="{ 'col-active': sortCol === 'size' }" @click="toggleSort('size')">
             Fit / Size <span class="sort-arrow">{{ sortArrow('size') }}</span>
           </button>
+          <button class="col-date col-sortable" :class="{ 'col-active': sortCol === 'last_modified' }" @click="toggleSort('last_modified')">
+            Last Modified <span class="sort-arrow">{{ sortArrow('last_modified') }}</span>
+          </button>
           <button class="col-downloads col-sortable" :class="{ 'col-active': sortCol === 'downloads' }" @click="toggleSort('downloads')">
             Downloads <span class="sort-arrow">{{ sortArrow('downloads') }}</span>
           </button>
           <button class="col-likes col-sortable" :class="{ 'col-active': sortCol === 'likes' }" @click="toggleSort('likes')">
             Likes <span class="sort-arrow">{{ sortArrow('likes') }}</span>
-          </button>
-          <button class="col-trending col-sortable" :class="{ 'col-active': sortCol === 'trending' }" @click="toggleSort('trending')">
-            Trending <span class="sort-arrow">{{ sortArrow('trending') }}</span>
           </button>
           <span class="col-action" />
         </div>
@@ -464,7 +515,7 @@ watch(activeTab, (tab) => {
           :tags="r.tags"
           :size_gb="r.size_gb"
           :fit_level="r.fit_level"
-          :trending_score="r.trending_score"
+          :last_modified="r.last_modified"
           @download="handleDownload(r.id)"
         />
         <div v-if="modelsStore.searchHasMore" class="load-more-row">
@@ -1066,5 +1117,137 @@ watch(activeTab, (tab) => {
   border-radius: 50%;
   animation: spin .6s linear infinite;
 }
+
+/* MLX note */
+.mlx-note {
+  font-size: 13px;
+  color: var(--tx-muted);
+  padding: 0 var(--space-2);
+}
+
+/* Fit quick toggle */
+.fit-quick-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--tx-secondary);
+  user-select: none;
+}
+
+.fit-quick-toggle input {
+  cursor: pointer;
+}
+
+/* Fit level checkboxes */
+.fit-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--tx-secondary);
+  user-select: none;
+}
+
+.filter-checkbox input {
+  cursor: pointer;
+}
+
+/* Range slider inputs */
+.range-inputs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: var(--space-1) 0;
+}
+
+.range-input {
+  width: 70px;
+  padding: 4px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-sm);
+  color: var(--tx-primary);
+  font-size: 13px;
+  font-family: var(--font-mono);
+  transition: border-color var(--transition-fast);
+}
+
+.range-input-small {
+  width: 60px;
+}
+
+.range-input:focus {
+  outline: none;
+  border-color: var(--bd-focus);
+  box-shadow: 0 0 0 2px rgba(91, 106, 208, .12);
+}
+
+.range-dash {
+  color: var(--tx-muted);
+  font-size: 13px;
+}
+
+.range-slider {
+  width: 100%;
+  height: 4px;
+  margin: var(--space-1) 0;
+  border-radius: 2px;
+  background: var(--bd-default);
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--si-500);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.range-slider::-webkit-slider-thumb:hover {
+  background: var(--si-400);
+}
+
+.range-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--si-500);
+  cursor: pointer;
+  border: none;
+  transition: background var(--transition-fast);
+}
+
+.range-slider::-moz-range-thumb:hover {
+  background: var(--si-400);
+}
+
+/* Date column */
+.col-date {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--tx-muted);
+  min-width: 100px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
 </style>
 

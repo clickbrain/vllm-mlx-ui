@@ -10,7 +10,7 @@
   - tags: array of HF topic tags
   - size_gb: pre-download weight file size in GB (optional)
   - fit_level: 'perfect' | 'good' | 'marginal' | 'too_tight' from check_model_fit
-  - trending_score: HF trendingScore (float, higher = more trending)
+  - last_modified: ISO 8601 timestamp (e.g. "2025-01-15T12:30:45Z")
 
   Emits: download — user clicked the Download button
 -->
@@ -27,7 +27,7 @@ const props = defineProps<{
   tags: string[]
   size_gb?: number
   fit_level?: string
-  trending_score?: number
+  last_modified?: string
 }>()
 
 const emit = defineEmits<{
@@ -42,9 +42,17 @@ function abbreviate(n: number): string {
 
 const downloadsFormatted = computed(() => abbreviate(props.downloads))
 const likesFormatted = computed(() => abbreviate(props.likes))
-const trendingFormatted = computed(() =>
-  props.trending_score ? props.trending_score.toFixed(1) : null
-)
+
+const dateFormatted = computed(() => {
+  if (!props.last_modified) return null
+  try {
+    const date = new Date(props.last_modified)
+    // Format as "Jan 15, 2025"
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  } catch {
+    return null
+  }
+})
 
 const sizeLabel = computed(() => {
   if (!props.size_gb) return null
@@ -76,10 +84,11 @@ const fitInfo = computed(() => {
       </span>
       <span v-else-if="sizeLabel" class="fit-unknown">—</span>
     </div>
+    <!-- Date column — aligns with col-date header -->
+    <span class="stat stat-date">{{ dateFormatted ?? '—' }}</span>
     <!-- Individual stat columns — each is a direct flex child to align with header -->
     <span class="stat stat-downloads">↓ {{ downloadsFormatted }}</span>
     <span class="stat stat-likes">♥ {{ likesFormatted }}</span>
-    <span class="stat stat-trending">{{ trendingFormatted ?? '—' }}</span>
     <AppButton variant="secondary" size="sm" @click="emit('download')">Download</AppButton>
   </div>
 </template>
@@ -148,6 +157,10 @@ const fitInfo = computed(() => {
   flex-shrink: 0;
   min-width: 72px;
   text-align: right;
+}
+
+.stat-date {
+  min-width: 100px;
 }
 </style>
 

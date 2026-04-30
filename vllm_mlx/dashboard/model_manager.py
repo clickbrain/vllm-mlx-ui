@@ -818,9 +818,9 @@ def search_hf_models(
     hf_sort_map = {
         "downloads": "downloads",
         "likes": "likes",
-        "trending": "trendingScore",
+        "last_modified": "lastModified",
     }
-    hf_sort = hf_sort_map.get(sort, "downloads")
+    hf_sort = hf_sort_map.get(sort, "lastModified")
 
     # Fetch enough results to support offset slicing
     fetch_limit = min(offset + limit, 100)
