@@ -176,3 +176,12 @@ bash scripts/release.sh <version>
 - **IMPORTANT:** No code changes made yet — only documentation and issue tracking
 
 <!-- Add new entries here when agents make changes -->
+
+### 2026-04-30 — Phase 1 Code Fixes Applied
+- **#1** Fixed command injection in 3 example scripts (`os.system()` → `subprocess.run()`)
+- **#3** Replaced 98 `except Exception: pass` with proper logging across 8 dashboard files
+- **#4** Random API key (`secrets.token_urlsafe(32)`) generated on first launch
+- **#5** Fixed `get_logs()` return type — now always `list[str]` (was inconsistent)
+- **#6** Added missing CSS tokens: `--bd`, `--bg3`, `--bg4`, `--tx1`, `--tx2`, `--tx3`, `--bg-inset`
+- **#7** Theme now persisted in localStorage, respects OS `prefers-color-scheme`
+- Commit: `98830e3` — 18 files changed, +486/-223 lines
