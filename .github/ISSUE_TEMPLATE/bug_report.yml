@@ -1,0 +1,53 @@
+name: "Bug Report"
+description: "Report a bug in vllm-mlx-ui"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the form below.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "What version of vllm-mlx-ui are you running?"
+      placeholder: "e.g., v0.4.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: "Which area is affected?"
+      options:
+        - Python backend (vllm_mlx/)
+        - Vue frontend (ui/)
+        - Management API
+        - Installation/Scripts
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: "What happened and what did you expect?"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: "How can we reproduce this issue?"
+      placeholder: |
+        1. Start server with...
+        2. Navigate to...
+        3. Click on...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: "Paste any error messages or logs"
+      render: shell
