@@ -1379,8 +1379,7 @@ def _find_restart_cmd() -> list[str]:
     if found:
         return [found]
     import sys as _sys2
-    new_exe = _resolve_restart_python(_sys2.executable)
-    return [new_exe, "-m", "vllm_mlx.dashboard.mgmt_server"]
+    return [_sys2.executable, "-m", "vllm_mlx.dashboard.mgmt_server"]
 
 
 @app.post("/shutdown")

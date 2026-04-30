@@ -693,7 +693,6 @@ def kill_stale_server(port: int, host: str = "127.0.0.1") -> tuple[bool, str]:
     state files.  Called when the UI detects an EADDRINUSE situation.
     """
     import subprocess as _sp
-    check_host = "127.0.0.1" if host == "0.0.0.0" else host
     try:
         result = _sp.run(
             ["lsof", "-ti", f"TCP:{port}", "-sTCP:LISTEN"],
