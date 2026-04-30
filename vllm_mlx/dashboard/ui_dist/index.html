@@ -4,8 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>vmUI</title>
-    <script type="module" crossorigin src="/assets/index-LPLye8G8.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-B9yO_QS-.css">
+    <script>
+      // Apply theme immediately to prevent flash
+      (function() {
+        var theme = localStorage.getItem('theme');
+        if (!theme) {
+          theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        }
+        if (theme === 'light') {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-DIx3J8iv.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-E69XgmM3.css">
   </head>
   <body>
     <div id="app"></div>

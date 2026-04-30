@@ -8,6 +8,7 @@ State (PID, config, logs) is persisted to ~/.vllm_mlx_ui/.
 
 import json
 import os
+import secrets
 import signal
 import socket
 import subprocess
@@ -19,6 +20,8 @@ from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
+import logging
+logger = logging.getLogger(__name__)
 
 STATE_DIR = Path.home() / ".vllm_mlx_ui"
 PID_FILE = STATE_DIR / "server.pid"
@@ -72,8 +75,8 @@ def _force_ipv4_url(url: str) -> str:
             ipv4 = addrs[0][4][0]
             port_part = f":{parsed.port}" if parsed.port else ""
             return urlunparse(parsed._replace(netloc=f"{ipv4}{port_part}"))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
     return url
 
 
@@ -187,7 +190,8 @@ def _in_streamlit() -> bool:
     try:
         from streamlit.runtime.scriptrunner import get_script_run_ctx
         return get_script_run_ctx() is not None
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return False
 
 
@@ -221,7 +225,8 @@ def _mgmt_base(config: dict[str, Any] | None = None) -> str | None:
         import streamlit as _st
         if _st.session_state.get("connection_mode", "local") == "local":
             return None
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return None
     if config is None:
         config = load_config()
@@ -239,6 +244,21 @@ def _mgmt_headers(config: dict[str, Any] | None = None) -> dict[str, str]:
     return {"X-Api-Key": key} if key else {}
 
 
+def _init_default_api_key() -> None:
+    """Generate a random management API key on first launch.
+
+    Called when the config file doesn't exist yet. Ensures the management
+    API is never accessible without authentication when remote mode is enabled.
+    """
+    if CONFIG_FILE.exists():
+        return
+    default_key = secrets.token_urlsafe(32)
+    _ensure_state_dir()
+    with open(CONFIG_FILE, "w") as f:
+        json.dump({**DEFAULT_CONFIG, "mgmt_api_key": default_key}, f)
+    logger.info("Generated random management API key on first launch")
+
+
 def _ensure_state_dir() -> Path:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     return STATE_DIR
@@ -252,13 +272,14 @@ def _load_local_config() -> dict[str, Any]:
     _ui.py and benchmarks use load_config() instead, which may fetch from remote.
     """
     _ensure_state_dir()
+    _init_default_api_key()
     if CONFIG_FILE.exists():
         try:
             with open(CONFIG_FILE) as f:
                 saved = json.load(f)
             return {**DEFAULT_CONFIG, **saved}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
     return DEFAULT_CONFIG.copy()
 
 
@@ -283,8 +304,8 @@ def load_config() -> dict[str, Any]:
             with open(CONFIG_FILE) as f:
                 saved = json.load(f)
             local = {**DEFAULT_CONFIG, **saved}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
 
     # 10s TTL avoids repeated HTTP calls during fast Streamlit reruns (fragment
     # auto-refresh fires every 5s). Short enough that config changes propagate
@@ -301,8 +322,8 @@ def load_config() -> dict[str, Any]:
                         and "_cfg_ts" in _st.session_state
                         and time.monotonic() - _st.session_state["_cfg_ts"] < 10):
                     return cached
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Operation failed", exc_info=True)
         try:
             r = _http.get(f"{mgmt}/config", headers=_mgmt_headers(local), timeout=3)
             if r.status_code == 200:
@@ -318,11 +339,11 @@ def load_config() -> dict[str, Any]:
                         import streamlit as _st
                         _st.session_state["_cfg_cache"] = result
                         _st.session_state["_cfg_ts"] = time.monotonic()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Operation failed", exc_info=True)
                 return result
-        except Exception:
-            pass  # Fall back to local config silently
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)  # Fall back to local config silently
     return local
 
 
@@ -358,8 +379,8 @@ def save_config(config: dict[str, Any]) -> None:
     if CONFIG_FILE.exists():
         try:
             CONFIG_FILE.replace(CONFIG_FILE.with_suffix(".json.bak"))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
     # Invalidate the config cache so the next load_config() fetches fresh data.
@@ -368,8 +389,8 @@ def save_config(config: dict[str, Any]) -> None:
             import streamlit as _st
             _st.session_state.pop("_cfg_cache", None)
             _st.session_state.pop("_cfg_ts", None)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
     mgmt = _mgmt_base(config)
     if mgmt:
         try:
@@ -378,15 +399,16 @@ def save_config(config: dict[str, Any]) -> None:
             remote_payload = {k: v for k, v in config.items() if k not in _LOCAL_ONLY_KEYS}
             _http.post(f"{mgmt}/config", json=remote_payload,
                        headers=_mgmt_headers(config), timeout=5)
-        except Exception:
-            pass  # Best effort; local save already succeeded
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)  # Best effort; local save already succeeded
 
 
 def _get_pid() -> int | None:
     if PID_FILE.exists():
         try:
             return int(PID_FILE.read_text().strip())
-        except Exception:
+        except Exception as e:
+            logger.warning("Operation failed: %s", e, exc_info=True)
             return None
     return None
 
@@ -410,7 +432,8 @@ def _try_adopt_server(port: int, host: str) -> int | None:
     try:
         import urllib.request as _ur
         _ur.urlopen(f"http://{connect_host}:{port}/v1/models", timeout=1).read()
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return None  # port not responding to our API — don't adopt
 
     # Find PID of the process holding the port via lsof.
@@ -428,8 +451,8 @@ def _try_adopt_server(port: int, host: str) -> int | None:
             if _is_process_alive(pid):
                 PID_FILE.write_text(str(pid))
                 return pid
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
     return None
 
 
@@ -453,8 +476,8 @@ def get_server_url(config: dict[str, Any] | None = None) -> str:
         try:
             import streamlit as _st
             _use_remote = _st.session_state.get("connection_mode", "local") == "remote"
-        except Exception:
-            pass  # Fallback: assume remote (safe when remote_server_url is configured)
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)  # Fallback: assume remote (safe when remote_server_url is configured)
 
     if _use_remote:
         remote = config.get("remote_server_url", "").strip()
@@ -482,8 +505,8 @@ def check_health(config: dict[str, Any] | None = None) -> tuple[bool, dict]:
         r = _http.get(f"{url}/health", timeout=2)
         if r.status_code == 200:
             return True, r.json()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
     return False, {}
 
 
@@ -530,8 +553,8 @@ def get_server_status() -> dict[str, Any]:
             if LOG_FILE.exists():
                 lines = LOG_FILE.read_text(errors="replace").splitlines()
                 crash_log = "\n".join(lines[-40:])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
         with _server_state_lock:
             _last_crash_log = crash_log or None
         return {"running": False, "healthy": False, "pid": None, "health": {}, "crash_log": crash_log}
@@ -770,7 +793,7 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
         time.sleep(0.5)
         if not _is_process_alive(proc.pid):
             PID_FILE.unlink(missing_ok=True)
-            logs = get_logs(last_n_lines=20)
+            logs = "\n".join(get_logs(last_n_lines=20))
             return False, f"Server exited immediately. Check logs:\n{logs}"
 
     return True, f"Server starting (PID {proc.pid}). Loading model — this may take a minute…"
@@ -821,8 +844,8 @@ def stop_server() -> tuple[bool, str]:
             _intentional_stop_in_progress = False
 
 
-def get_logs(last_n_lines: int = 150) -> str:
-    """Return the tail of the inference server log as a single string.
+def get_logs(last_n_lines: int = 150) -> list[str]:
+    """Return the tail of the inference server log as a list of lines.
 
     In remote mode fetches from the management API.  In local mode reads
     directly from LOG_FILE.
@@ -831,14 +854,8 @@ def get_logs(last_n_lines: int = 150) -> str:
         last_n_lines: Maximum number of trailing lines to return.
 
     Returns:
-        A newline-joined string of the most recent log lines, or a
-        human-readable placeholder when no log file exists yet.
-
-    Note:
-        Remote mode bug: the mgmt API returns ``{"lines": [...]}`` but this
-        function currently calls ``.get("logs", "")``; remote logs always
-        return an empty string.  Use the ``/logs`` endpoint directly when
-        high-fidelity remote log tailing is needed.
+        A list of the most recent log lines, or a placeholder message
+        when no log file exists yet.
     """
     cfg = load_config()
     mgmt = _mgmt_base(cfg)
@@ -846,14 +863,19 @@ def get_logs(last_n_lines: int = 150) -> str:
         try:
             r = _http.get(f"{mgmt}/logs", params={"lines": last_n_lines},
                              headers=_mgmt_headers(cfg), timeout=5)
-            return r.json().get("lines", [])
+            data = r.json()
+            lines = data.get("lines", data.get("logs", []))
+            if isinstance(lines, str):
+                return lines.splitlines()
+            return list(lines)
         except Exception as e:
-            return f"(Could not fetch remote logs: {e})"
+            logger.warning("Could not fetch remote logs", exc_info=True)
+            return [f"(Could not fetch remote logs: {e})"]
     if not LOG_FILE.exists():
-        return "(No log file yet — start the server to see output here.)"
+        return ["(No log file yet — start the server to see output here.)"]
     with open(LOG_FILE) as f:
-        lines = f.readlines()
-    return "".join(lines[-last_n_lines:])
+        all_lines = f.readlines()
+    return [l.rstrip("\n") for l in all_lines[-last_n_lines:]]
 
 
 def get_metrics(api_key: str = "") -> dict | None:
@@ -872,8 +894,8 @@ def get_metrics(api_key: str = "") -> dict | None:
             r = _http.get(f"{mgmt}/metrics", headers=_mgmt_headers(config), timeout=3)
             if r.status_code == 200:
                 return r.json()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
         return None
     # Local mode — call inference API directly
     url = get_server_url(config)
@@ -885,8 +907,8 @@ def get_metrics(api_key: str = "") -> dict | None:
         r = _http.get(f"{url}/v1/status", headers=headers, timeout=3)
         if r.status_code == 200:
             return r.json()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
     return None
 
 
@@ -901,8 +923,8 @@ def get_cache_stats(api_key: str = "") -> dict | None:
             r = _http.get(f"{mgmt}/cache/stats", headers=_mgmt_headers(config), timeout=3)
             if r.status_code == 200:
                 return r.json()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
         return None
     url = get_server_url(config)
     headers = {}
@@ -913,8 +935,8 @@ def get_cache_stats(api_key: str = "") -> dict | None:
         r = _http.get(f"{url}/v1/cache/stats", headers=headers, timeout=2)
         if r.status_code == 200:
             return r.json()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
     return None
 
 
@@ -961,8 +983,8 @@ def get_memory_stats() -> dict:
             r = _http.get(f"{mgmt}/memory/stats", headers=_mgmt_headers(cfg), timeout=5)
             if r.status_code == 200:
                 return r.json()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
         return {"total_gb": 0, "available_gb": 0, "used_gb": 0, "percent": 0, "pressure": "unknown"}
 
     try:
@@ -990,7 +1012,8 @@ def get_memory_stats() -> dict:
             "percent": round(pct, 1),
             "pressure": pressure,
         }
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return {"total_gb": 0, "available_gb": 0, "used_gb": 0, "percent": 0, "pressure": "unknown"}
 
 
@@ -1043,7 +1066,8 @@ def _release_system_heap() -> list[str]:
             notes.append("MLX Metal buffer cache cleared")
         else:
             notes.append("MLX not loaded in this process — Metal cache skip")
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         notes.append("MLX cache clear skipped")
 
     # `purge`: flushes inactive file-backed pages (disk cache), freeing RAM for
@@ -1057,7 +1081,8 @@ def _release_system_heap() -> list[str]:
             notes.append("macOS purge (inactive file cache flushed)")
         else:
             notes.append("purge not available without sudo (normal)")
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         notes.append("purge not available (normal)")
 
     # Final GC pass after allocator compaction
@@ -1150,8 +1175,8 @@ def force_release_memory() -> dict:
                     )
                     if cr.status_code in (200, 204):
                         server_heap_notes.append(f"[inference server] {cache_path} cleared")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Operation failed", exc_info=True)
         else:
             warnings.append(f"Inference server memory release returned HTTP {r.status_code}")
     except Exception as e:
@@ -1169,8 +1194,8 @@ def force_release_memory() -> dict:
         if PID_FILE.exists():
             _active_pid = int(PID_FILE.read_text().strip())
             _protected_pids.add(_active_pid)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     # Protect the full parent-process chain (app.py, shell, etc.)
     try:
@@ -1179,8 +1204,8 @@ def force_release_memory() -> dict:
         while _p.ppid() not in (0, 1):
             _protected_pids.add(_p.ppid())
             _p = _ps.Process(_p.ppid())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     # Protect the Streamlit subprocess (child of app.py; its cmdline contains
     # vllm_mlx path so it would match _VLLM_MARKERS without this guard).
@@ -1188,8 +1213,8 @@ def force_release_memory() -> dict:
         if STREAMLIT_PID_FILE.exists():
             _streamlit_pid = int(STREAMLIT_PID_FILE.read_text().strip())
             _protected_pids.add(_streamlit_pid)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     _VLLM_MARKERS = (
         "vllm_mlx", "vllm-mlx", "vllm_mlx.benchmark", "vllm-mlx-bench",

@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 import requests as _requests
+import logging
+logger = logging.getLogger(__name__)
 
 # ── Fit-level constants (llmfit-inspired) ─────────────────────────────────────
 FIT_PERFECT = "perfect"  # model uses < 50 % of unified memory
@@ -80,7 +82,8 @@ def _mgmt_base() -> str | None:
 
         if _st.session_state.get("connection_mode", "local") == "local":
             return None
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return None
     cfg = sm._load_local_config()
     url = cfg.get("remote_mgmt_url", "").strip()
@@ -151,7 +154,8 @@ def get_cached_models() -> list[dict[str, Any]]:
                 f"{mgmt}/models/cached", headers=_mgmt_headers(), timeout=10
             )
             return r.json() if r.status_code == 200 else []
-        except Exception:
+        except Exception as e:
+            logger.warning("Operation failed: %s", e, exc_info=True)
             return []
     try:
         from huggingface_hub import scan_cache_dir
@@ -201,7 +205,8 @@ def get_cached_models() -> list[dict[str, Any]]:
                 }
             )
         return sorted(models, key=lambda m: m["size_bytes"], reverse=True)
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return []
 
 
@@ -278,7 +283,8 @@ def get_partial_download_bytes(model_id: str) -> int:
                 except OSError:
                     pass
         return total
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return 0
 
 
@@ -359,8 +365,8 @@ class DownloadManager:
                 if size_gb:
                     with self._lock:
                         item["total_bytes"] = int(size_gb * 1024**3)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Operation failed", exc_info=True)
 
             # Monitor bytes-in-cache while downloading
             def _monitor(it: dict) -> None:
@@ -414,7 +420,8 @@ def get_download_status(model_id: str) -> dict[str, Any]:
                 timeout=5,
             )
             return r.json() if r.status_code == 200 else {"status": "unknown"}
-        except Exception:
+        except Exception as e:
+            logger.warning("Operation failed: %s", e, exc_info=True)
             return {"status": "error"}
     return {"status": "local"}
 
@@ -458,14 +465,16 @@ def get_cache_total_size() -> float:
                 f"{mgmt}/models/cache_size", headers=_mgmt_headers(), timeout=5
             )
             return float(r.json().get("size_gb", 0.0))
-        except Exception:
+        except Exception as e:
+            logger.warning("Operation failed: %s", e, exc_info=True)
             return 0.0
     try:
         from huggingface_hub import scan_cache_dir
 
         cache_info = scan_cache_dir()
         return round(cache_info.size_on_disk / (1024**3), 2)
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return 0.0
 
 
@@ -579,11 +588,11 @@ def get_model_presets(model_id: str, hf_token: str | None = None) -> dict[str, A
             temp = gen.get("temperature")
             if temp and isinstance(temp, (int, float)) and 0 < temp <= 2:
                 presets["recommended_temperature"] = float(temp)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
 
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
     finally:
         if hf_token:
             os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
@@ -614,13 +623,14 @@ def get_total_ram_gb() -> float:
             )
             if r.status_code == 200:
                 return float(r.json().get("total_gb", 0.0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
     try:
         import psutil
 
         return psutil.virtual_memory().total / (1024**3)
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return 0.0
 
 
@@ -683,7 +693,8 @@ def get_hf_model_size_gb(model_id: str, hf_token: str | None = None) -> float | 
             if Path(f.rfilename).suffix.lower() in weight_exts:
                 total += getattr(f, "size", 0) or 0
         return total / (1024**3) if total > 0 else None
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return None
     finally:
         if hf_token:
@@ -844,7 +855,8 @@ def search_hf_models(
     try:
         import psutil
         total_gb = psutil.virtual_memory().total / (1024**3)
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         total_gb = 0.0
 
     try:

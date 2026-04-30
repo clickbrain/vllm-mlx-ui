@@ -30,6 +30,8 @@ from . import benchmark_runner as br
 from . import model_manager as mm
 from . import quality_runner as qr
 from . import server_manager as sm
+import logging
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="vllm-mlx Management API",
@@ -85,7 +87,8 @@ def _get_auth_key() -> str:
     if now - _auth_key_cache["ts"] > _AUTH_KEY_TTL:
         try:
             _auth_key_cache["key"] = sm.load_config().get("mgmt_api_key", "").strip()
-        except Exception:
+        except Exception as e:
+            logger.warning("Operation failed: %s", e, exc_info=True)
             _auth_key_cache["key"] = ""
         _auth_key_cache["ts"] = now
     return _auth_key_cache["key"] or ""
@@ -142,7 +145,7 @@ def logs(lines: int = 200, _: None = Depends(_check_auth)) -> dict:
         lines: Maximum number of trailing lines to return (default 200).
     """
     raw = sm.get_logs(lines)
-    return {"lines": raw.splitlines() if isinstance(raw, str) else list(raw)}
+    return {"lines": raw}
 
 
 @app.get("/metrics")
@@ -209,7 +212,8 @@ def cache_size(_: None = Depends(_check_auth)) -> dict:
     """Return the total size of the HuggingFace model cache in GB."""
     try:
         size_gb = mm.get_cache_total_size()
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         size_gb = 0.0
     return {"size_gb": size_gb}
 
@@ -248,8 +252,8 @@ def download_model(req: DownloadRequest, _: None = Depends(_check_auth)) -> dict
                     total_bytes = int(size_gb * 1024 ** 3)
                     with _download_lock:
                         _download_status[model_id]["total_bytes"] = total_bytes
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Operation failed", exc_info=True)
 
             def _monitor() -> None:
                 import time as _t
@@ -458,8 +462,8 @@ def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
         if presets.get("max_tokens"):
             cfg["max_tokens"] = presets["max_tokens"]
             cfg["max_request_tokens"] = presets["max_tokens"]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     cfg["model"] = model_id
     sm.save_config(cfg)
@@ -744,8 +748,8 @@ def _hot_swap_if_needed(requested_model: str) -> None:
             if presets.get("max_tokens"):
                 cfg["max_tokens"] = presets["max_tokens"]
                 cfg["max_request_tokens"] = presets["max_tokens"]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
 
         cfg["model"] = requested_model
         sm.stop_server()
@@ -1127,8 +1131,8 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
                             if r.status_code == 200:
                                 ready = True
                                 break
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning("Operation failed", exc_info=True)
                     if not ready:
                         _cb(f"[✗ Timeout waiting for {target_model} to start]\n")
                         continue
@@ -1287,8 +1291,8 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
                             r = _req.get(f"{server_url_inner}/v1/models", timeout=2)
                             if r.status_code == 200:
                                 break
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning("Operation failed", exc_info=True)
                         _t.sleep(1)
 
                 server_url = f"http://127.0.0.1:{sm.load_config().get('port', 8000)}"
@@ -1391,7 +1395,8 @@ def shutdown(_: None = Depends(_check_auth)) -> dict:
             from vllm_mlx.dashboard.server_manager import UI_PID_FILE
             pid = int(UI_PID_FILE.read_text().strip())
             _os_mod.kill(pid, _signal_mod.SIGTERM)
-        except Exception:
+        except Exception as e:
+            logger.warning("Operation failed: %s", e, exc_info=True)
             _os_mod.kill(_os_mod.getpid(), _signal_mod.SIGTERM)
     _thr.Thread(target=_do_shutdown, daemon=True).start()
     return {"ok": True}
@@ -1411,8 +1416,8 @@ def restart_app(_: None = Depends(_check_auth)) -> dict:
             from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG, STATE_DIR as _sd
             _sd.mkdir(parents=True, exist_ok=True)
             RELAUNCH_FLAG.write_text("1")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
         _os_mod.kill(_os_mod.getpid(), _signal_mod.SIGTERM)
 
     _thr.Thread(target=_do_restart, daemon=True).start()
@@ -1454,7 +1459,8 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
         _uc.upgrade_status = "upgrading"
         try:
             _sp.run(cmd, timeout=300, check=False)
-        except Exception:
+        except Exception as e:
+            logger.warning("Operation failed: %s", e, exc_info=True)
             _uc.upgrade_status = "error:upgrade command failed"
             return
         # Bust cache so the next /updates check reflects newly installed versions
@@ -1465,8 +1471,8 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
             from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG, STATE_DIR as _sd
             _sd.mkdir(parents=True, exist_ok=True)
             RELAUNCH_FLAG.write_text("1")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
         _os_mod.kill(_os_mod.getpid(), _signal_mod.SIGTERM)
 
     _thr.Thread(target=_do_upgrade, daemon=True).start()
@@ -1504,8 +1510,8 @@ def network_interfaces(_: None = Depends(_check_auth)) -> list:
                 device = line.split(":", 1)[1].strip()
                 device_label[device] = port_name
                 port_name = ""
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     addrs: list[dict] = []
     seen: set[str] = set()
@@ -1518,7 +1524,8 @@ def network_interfaces(_: None = Depends(_check_auth)) -> list:
                 ["ipconfig", "getifaddr", device],
                 text=True, stderr=_sp.DEVNULL,
             ).strip()
-        except Exception:
+        except Exception as e:
+            logger.warning("Operation failed: %s", e, exc_info=True)
             ip = ""
         if not ip or ip in seen:
             continue
@@ -1530,8 +1537,8 @@ def network_interfaces(_: None = Depends(_check_auth)) -> list:
         if not local_name.endswith(".local"):
             local_name = local_name.split(".")[0] + ".local"
         addrs.append({"ip": local_name, "label": "mDNS (.local — works on same network)"})
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     return addrs
 
@@ -1564,10 +1571,10 @@ def network_scan(_: None = Depends(_check_auth)) -> list:
                     try:
                         base = ".".join(ip.split(".")[:3])
                         subnets.add(base)
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+                    except Exception as e:
+                        logger.warning("Operation failed", exc_info=True)
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     if not subnets:
         return []
@@ -1577,8 +1584,8 @@ def network_scan(_: None = Depends(_check_auth)) -> list:
     own_ips: set[str] = set()
     try:
         own_ips = {r[4][0] for r in socket.getaddrinfo(socket.gethostname(), None)}
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     for base in subnets:
         for i in range(1, 255):
@@ -1595,11 +1602,11 @@ def network_scan(_: None = Depends(_check_auth)) -> list:
                     name = ip
                     try:
                         name = socket.gethostbyaddr(ip)[0].split(".")[0]
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Operation failed", exc_info=True)
                     return {"ip": ip, "port": MGMT_PORT, "name": name}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
         return None
 
     found: list[dict] = []
@@ -1646,8 +1653,8 @@ def fleet_discover(_: None = Depends(_check_auth)) -> list:
                     ip = parts[1]
                     base = ".".join(ip.split(".")[:3])
                     subnets.add(base)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     if not subnets:
         return []
@@ -1656,8 +1663,8 @@ def fleet_discover(_: None = Depends(_check_auth)) -> list:
     own_ips: set[str] = set()
     try:
         own_ips = {r[4][0] for r in socket.getaddrinfo(socket.gethostname(), None)}
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     candidates: list[str] = [
         f"{base}.{i}"
@@ -1671,7 +1678,8 @@ def fleet_discover(_: None = Depends(_check_auth)) -> list:
         try:
             with socket.create_connection((ip, MGMT_PORT), timeout=CONNECT_TIMEOUT):
                 pass
-        except Exception:
+        except Exception as e:
+            logger.warning("Operation failed: %s", e, exc_info=True)
             return None
 
         # Phase 2: confirm vllm-mlx-ui by fetching /status
@@ -1680,15 +1688,15 @@ def fleet_discover(_: None = Depends(_check_auth)) -> list:
             req = urllib.request.Request(url, headers={"Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
                 body = _json.loads(resp.read().decode())
-        except Exception:
-            # Port was open but /status failed — skip
+        except Exception as e:
+            logger.warning("Port was open but /status failed — skipping", exc_info=True)
             return None
 
         hostname = ip
         try:
             hostname = socket.gethostbyaddr(ip)[0]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
 
         return {
             "ip": ip,

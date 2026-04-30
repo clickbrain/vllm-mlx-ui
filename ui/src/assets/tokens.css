@@ -54,6 +54,15 @@
   --bd-default:  rgba(255, 255, 255, .09);
   --bd-emphasis: rgba(255, 255, 255, .16);
   --bd-focus:    var(--si-500);
+  --bd:          var(--bd-default);  /* alias for legacy usage */
+  --bg-inset:    var(--g-950);
+
+  /* Legacy aliases — mapped to semantic tokens */
+  --bg3:         var(--bg-surface);
+  --bg4:         var(--bg-elevated);
+  --tx1:         var(--tx-primary);
+  --tx2:         var(--tx-secondary);
+  --tx3:         var(--tx-tertiary);
 
   /* Text hierarchy — all four levels */
   --tx-primary:   var(--g-100);
@@ -133,4 +142,12 @@
   --ac-border: rgba(91, 106, 208, .18);
 
   --arc-track: #D1D1D6;
+
+  --bd:          var(--bd-default);
+  --bg-inset:    #FFFFFF;
+  --bg3:         var(--bg-surface);
+  --bg4:         var(--bg-elevated);
+  --tx1:         var(--tx-primary);
+  --tx2:         var(--tx-secondary);
+  --tx3:         var(--tx-tertiary);
 }

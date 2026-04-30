@@ -12,7 +12,7 @@ Usage:
 
 import argparse
 import sys
-import os
+import subprocess
 
 # Add parent to path for local development
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -131,7 +131,7 @@ def main():
     # Play on macOS
     if args.play:
         print("\nPlaying audio...")
-        os.system(f"afplay {args.output}")
+        subprocess.run(["afplay", args.output], check=True)
 
 
 if __name__ == "__main__":

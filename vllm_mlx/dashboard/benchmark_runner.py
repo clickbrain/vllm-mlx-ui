@@ -14,6 +14,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+import logging
+logger = logging.getLogger(__name__)
 
 STATE_DIR = Path.home() / ".vllm_mlx_ui"
 RESULTS_FILE = STATE_DIR / "benchmark_results.json"
@@ -35,7 +37,8 @@ def load_results() -> list[dict[str, Any]]:
     try:
         with open(RESULTS_FILE) as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return []
 
 
@@ -80,8 +83,8 @@ def estimate_model_memory(model_id: str) -> float | None:
         for repo in cache_info.repos:
             if repo.repo_id == model_id and repo.repo_type == "model":
                 return repo.size_on_disk / (1024 ** 3)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
     return None
 
 
@@ -91,7 +94,8 @@ def get_available_memory_gb() -> tuple[float, float]:
         import psutil
         vm = psutil.virtual_memory()
         return vm.available / (1024 ** 3), vm.total / (1024 ** 3)
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return 0.0, 0.0
 
 
@@ -164,8 +168,8 @@ def _clear_memory(callback: "Callable[[str], None] | None" = None) -> None:
     try:
         if "mlx.core" in sys.modules:
             sys.modules["mlx.core"].clear_cache()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
     if callback:
         callback("🧹 Clearing memory before benchmark…\n")
     time.sleep(1.5)
@@ -274,8 +278,8 @@ def run_benchmark(
                 data["error"] = "out_of_memory"
             save_result(data)
             return data
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
 
     # Fallback — store raw output for debugging
     result: dict[str, Any] = {

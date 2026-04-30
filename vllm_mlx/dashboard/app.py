@@ -8,6 +8,8 @@ import sys
 import threading
 import webbrowser
 from pathlib import Path
+import logging
+logger = logging.getLogger(__name__)
 
 
 def _find_binary() -> list[str]:
@@ -48,8 +50,8 @@ def _find_vllm_ui_pids() -> list[int]:
                     pids.append(pid)
             except ValueError:
                 pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     # Strategy 2: find by ports 8501/8502
     for port in [8501, 8502]:
@@ -68,8 +70,8 @@ def _find_vllm_ui_pids() -> list[int]:
                         pass
                 if pids:
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Operation failed", exc_info=True)
 
     return pids
 
@@ -98,8 +100,8 @@ def stop_all() -> None:
     try:
         from vllm_mlx.dashboard.server_manager import UI_PID_FILE
         UI_PID_FILE.unlink(missing_ok=True)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
     print("✅ Stopped.")
 
 
@@ -119,7 +121,8 @@ def _kill_stale_ui(ui_pid_file: Path) -> bool:
     except (ValueError, ProcessLookupError, FileNotFoundError):
         ui_pid_file.unlink(missing_ok=True)
         return False
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return False
 
 
@@ -149,7 +152,8 @@ def main() -> None:
         cfg = _load_local_config()
         ui_host = cfg.get("ui_host", "127.0.0.1")
         mgmt_port = int(cfg.get("mgmt_port", 8502))
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         from pathlib import Path as _Path
         UI_PID_FILE = _Path.home() / ".vllm_mlx_ui" / "ui.pid"
         ui_host = "127.0.0.1"
@@ -178,15 +182,15 @@ def main() -> None:
     # Write our PID so the Shutdown button and future startups can find us
     try:
         UI_PID_FILE.write_text(str(os.getpid()))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     # SIGTERM handler — clean exit; relaunches if RELAUNCH_FLAG is set
     def _handle_sigterm(signum, frame):
         try:
             UI_PID_FILE.unlink(missing_ok=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
         try:
             from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG
             if RELAUNCH_FLAG.exists():
@@ -198,8 +202,8 @@ def main() -> None:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -213,8 +217,8 @@ def main() -> None:
                 "is open to any host on your network. Set a key in Settings → Remote Server.",
                 file=sys.stderr,
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     # Auto-start inference server if configured
     try:
@@ -261,8 +265,8 @@ def main() -> None:
     finally:
         try:
             UI_PID_FILE.unlink(missing_ok=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
         # Relaunch after upgrade or restart request
         try:
             from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG, STATE_DIR
@@ -284,8 +288,8 @@ def main() -> None:
                         stdout=_lf,
                         stderr=_lf,
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Operation failed", exc_info=True)
 
     sys.exit(0)
 

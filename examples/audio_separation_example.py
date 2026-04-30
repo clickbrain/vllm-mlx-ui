@@ -16,7 +16,7 @@ Models:
 
 import argparse
 import sys
-import os
+import subprocess
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -113,7 +113,7 @@ Examples:
     if args.play:
         print()
         print("Playing isolated audio...")
-        os.system(f"afplay {args.output}")
+        subprocess.run(["afplay", args.output], check=True)
 
 
 if __name__ == "__main__":

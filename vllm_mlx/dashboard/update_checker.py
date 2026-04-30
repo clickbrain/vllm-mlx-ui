@@ -18,6 +18,8 @@ import time
 from typing import NamedTuple
 
 import requests
+import logging
+logger = logging.getLogger(__name__)
 
 _CACHE_TTL = 3600  # seconds
 
@@ -76,7 +78,8 @@ def _installed_version(package: str) -> str:
             if best is None:
                 best = ver
         return best or "unknown"
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return "unknown"
 
 
@@ -86,7 +89,8 @@ def _pypi_latest(package: str) -> str:
         r = requests.get(f"https://pypi.org/pypi/{package}/json", timeout=6)
         r.raise_for_status()
         return r.json()["info"]["version"]
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return "unknown"
 
 
@@ -102,8 +106,8 @@ def _github_latest_tag(owner: str, repo: str) -> str:
         tags = r.json()
         if tags:
             return tags[0].get("name", "").lstrip("v")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
     return "unknown"
 
 
@@ -117,7 +121,8 @@ def _github_latest_commit_sha(owner: str, repo: str, branch: str = "main") -> st
         )
         r.raise_for_status()
         return r.json().get("sha", "")[:7]
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         return "unknown"
 
 
@@ -140,8 +145,8 @@ def _homebrew_installed_commit() -> str:
             ver = installed[0].get("version", "")  # e.g. "HEAD-c118ee2"
             if ver.startswith("HEAD-"):
                 return ver.split("-", 1)[1]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
     return ""
 
 
@@ -152,7 +157,8 @@ def _version_gt(latest: str, installed: str) -> bool:
     try:
         from packaging.version import Version
         return Version(latest) > Version(installed)
-    except Exception:
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
         # Fallback: simple string compare after stripping 'v'
         return latest.lstrip("v") != installed.lstrip("v")
 
@@ -181,8 +187,8 @@ def _homebrew_formula_version() -> str | None:
                 ver = installed[0].get("version", "")
                 if ver and not ver.startswith("HEAD-"):
                     return ver
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     # Fallback: parse from sys.prefix (only works when process runs inside cellar)
     import sys
@@ -295,8 +301,8 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
             idx = futures[future]
             try:
                 results[idx] = future.result()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Operation failed", exc_info=True)
     results = [r for r in results if r is not None]
 
     _cache = {"ts": time.time(), "results": results}
@@ -367,8 +373,8 @@ def relaunch() -> None:
         else:
             AUTO_START_FLAG.unlink(missing_ok=True)
         RELAUNCH_FLAG.write_text("1")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Operation failed", exc_info=True)
 
     # Hard-exit this Streamlit subprocess immediately.
     # app.py's finally block detects RELAUNCH_FLAG and starts the new process

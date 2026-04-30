@@ -20,7 +20,7 @@ Usage:
 
 import argparse
 import sys
-import os
+import subprocess
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -333,7 +333,7 @@ Examples:
     # Play
     if output and args.play:
         print("\nPlaying audio...")
-        os.system(f"afplay {output}")
+        subprocess.run(["afplay", output], check=True)
 
 
 if __name__ == "__main__":

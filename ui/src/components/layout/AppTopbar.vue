@@ -17,7 +17,33 @@ import { useUpdatesStore } from '@/stores/updates'
 const route = useRoute()
 const router = useRouter()
 const updatesStore = useUpdatesStore()
-const isLight = ref(false)
+
+// Initialize theme: localStorage → OS preference → default dark
+function getInitialTheme(): boolean {
+  const stored = localStorage.getItem('theme')
+  if (stored) return stored === 'light'
+  return window.matchMedia('(prefers-color-scheme: light)').matches
+}
+
+const isLight = ref(getInitialTheme())
+
+function setTheme(light: boolean) {
+  isLight.value = light
+  if (light) {
+    document.documentElement.setAttribute('data-theme', 'light')
+    localStorage.setItem('theme', 'light')
+  } else {
+    document.documentElement.removeAttribute('data-theme')
+    localStorage.setItem('theme', 'dark')
+  }
+}
+
+// Apply initial theme
+setTheme(isLight.value)
+
+function toggleTheme() {
+  setTheme(!isLight.value)
+}
 
 const pageTitle = computed(() => {
   const titles: Record<string, string> = {
@@ -29,15 +55,6 @@ const pageTitle = computed(() => {
   }
   return titles[route.path] ?? 'vmUI'
 })
-
-function toggleTheme() {
-  isLight.value = !isLight.value
-  if (isLight.value) {
-    document.documentElement.setAttribute('data-theme', 'light')
-  } else {
-    document.documentElement.removeAttribute('data-theme')
-  }
-}
 </script>
 
 <template>
