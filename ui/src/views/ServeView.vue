@@ -43,8 +43,8 @@ const cacheMsg = ref<string | null>(null)
 onMounted(() => {
   modelsStore.fetchModels()
   refreshLogs()
-  api.get<NetworkInterface[]>('/network/interfaces').then(r => { networkInterfaces.value = r }).catch(() => {})
-  api.get<{ enabled: boolean }>('/auto_switch_enabled').then(r => { autoSwitchEnabled.value = r.enabled }).catch(() => {})
+  api.get<NetworkInterface[]>('/network/interfaces').then(r => { networkInterfaces.value = r }).catch(() => { /* non-critical network info */ })
+  api.get<{ enabled: boolean }>('/auto_switch_enabled').then(r => { autoSwitchEnabled.value = r.enabled }).catch(() => { /* non-critical auto-switch status */ })
 })
 
 const status = computed(() => {
@@ -177,7 +177,9 @@ async function copyUrl(url: string) {
     await navigator.clipboard.writeText(url)
     copiedUrl.value = url
     setTimeout(() => { if (copiedUrl.value === url) copiedUrl.value = null }, 1500)
-  } catch { /* silent */ }
+  } catch {
+    // Clipboard unavailable (e.g. non-secure context) — non-critical
+  }
 }
 
 // Clear cache
@@ -213,6 +215,7 @@ async function doClearCache(type: string) {
               class="model-select"
               :value="serverStore.modelId ?? ''"
               :disabled="switchingModel"
+              aria-label="Select inference model"
               @change="handleModelSwitch"
             >
               <option v-if="!serverStore.modelId" value="" disabled>No model loaded</option>
@@ -232,6 +235,7 @@ async function doClearCache(type: string) {
           variant="primary"
           size="sm"
           :loading="serverStore.loading"
+          aria-label="Start inference server"
           @click="serverStore.startServer()"
         >▶ Start</AppButton>
         <AppButton
@@ -239,6 +243,7 @@ async function doClearCache(type: string) {
           variant="secondary"
           size="sm"
           :loading="serverStore.loading"
+          aria-label="Stop inference server"
           @click="serverStore.stopServer()"
         >■ Stop</AppButton>
       </div>
@@ -277,14 +282,15 @@ async function doClearCache(type: string) {
           variant="secondary"
           size="sm"
           title="Clears MLX model cache and runs OS-level memory compaction. The running server stays up — model weights remain loaded. Use this to reclaim inactive/cached RAM without restarting."
+          aria-label="Release memory"
           @click="serverStore.releaseMemory()"
         >
           ↺ Release Memory
         </AppButton>
-        <AppButton variant="secondary" size="sm" @click="confirmClearAll = true">
+        <AppButton variant="secondary" size="sm" aria-label="Clear all cache" @click="confirmClearAll = true">
           🗑 Clear All Cache
         </AppButton>
-        <AppButton variant="secondary" size="sm" @click="confirmClearPrefix = true">
+        <AppButton variant="secondary" size="sm" aria-label="Clear prefix cache" @click="confirmClearPrefix = true">
           🗑 Clear Prefix Cache
         </AppButton>
         <span v-if="cacheMsg" class="cache-msg">{{ cacheMsg }}</span>
@@ -515,6 +521,10 @@ async function doClearCache(type: string) {
   transition: color var(--transition-fast);
 }
 .view-full-link:hover { color: var(--tx-secondary); }
+.view-full-link:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 1px;
+}
 
 .endpoint-grid {
   display: grid;
@@ -764,6 +774,10 @@ async function doClearCache(type: string) {
 }
 .copy-btn:hover { border-color: var(--bd-emphasis); color: var(--tx-primary); }
 .copy-btn.copied { color: var(--ph-400); border-color: rgba(74,222,128,.3); }
+.copy-btn:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 2px;
+}
 
 .conn-empty { font-size: 14px; color: var(--tx-muted); font-style: italic; }
 

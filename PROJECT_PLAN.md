@@ -139,10 +139,10 @@ Phase 5 (Features) ── depends on Phases 1-4 (stable base) ───┘
 
 ## Progress Tracking
 
-- [ ] Phase 1: Critical Fixes (0/7 tasks)
-- [ ] Phase 2: Frontend Polish (0/8 tasks)
-- [ ] Phase 3: Backend Stability (0/7 tasks)
-- [ ] Phase 4: Performance (0/7 tasks)
+- [x] Phase 1: Critical Fixes (7/7 tasks)
+- [x] Phase 2: Frontend Polish (8/8 tasks)
+- [x] Phase 3: Backend Stability (7/7 tasks)
+- [x] Phase 4: Performance (2/2 editable tasks; 5 upstream → PRs)
 - [ ] Phase 5: Architecture & Features (0/8 tasks)
 
-**Total:** 0/37 tasks complete
+**Total:** 24/37 editable tasks complete (5 upstream tasks tracked for PRs)

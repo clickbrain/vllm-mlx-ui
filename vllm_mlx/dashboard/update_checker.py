@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import threading
 import time
 from typing import NamedTuple
 
@@ -24,7 +25,9 @@ logger = logging.getLogger(__name__)
 _CACHE_TTL = 3600  # seconds
 
 # Module-level cache — written by background threads, read by UI thread.
+# Protected by _cache_lock for thread-safe access.
 _cache: dict = {}
+_cache_lock = threading.Lock()
 
 # Upgrade progress: set by mgmt_server._do_upgrade so the frontend can poll.
 # Values: 'idle' | 'upgrading' | 'restarting' | 'done' | 'error:<msg>'
@@ -159,8 +162,17 @@ def _version_gt(latest: str, installed: str) -> bool:
         return Version(latest) > Version(installed)
     except Exception as e:
         logger.warning("Operation failed: %s", e, exc_info=True)
-        # Fallback: simple string compare after stripping 'v'
-        return latest.lstrip("v") != installed.lstrip("v")
+        # Fallback: parse semver tuples for numeric comparison
+        def _parse(ver: str) -> tuple[int, ...]:
+            parts = ver.lstrip("v").split(".")
+            result: list[int] = []
+            for p in parts:
+                try:
+                    result.append(int(p))
+                except ValueError:
+                    break
+            return tuple(result) or (0,)
+        return _parse(latest) > _parse(installed)
 
 
 def _homebrew_formula_version() -> str | None:
@@ -228,8 +240,9 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
     Safe to call from background threads — does not touch st.session_state.
     """
     global _cache
-    if not force and _cache.get("ts", 0) + _CACHE_TTL > time.time():
-        return _cache.get("results", [])
+    with _cache_lock:
+        if not force and _cache.get("ts", 0) + _CACHE_TTL > time.time():
+            return _cache.get("results", [])
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -305,14 +318,16 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
                 logger.warning("Operation failed", exc_info=True)
     results = [r for r in results if r is not None]
 
-    _cache = {"ts": time.time(), "results": results}
+    with _cache_lock:
+        _cache = {"ts": time.time(), "results": results}
     return results
 
 
 def bust_cache() -> None:
     """Invalidate the update cache so the next check_updates() hits the network."""
     global _cache
-    _cache = {}
+    with _cache_lock:
+        _cache = {}
 
 
 def upgrade_command() -> list[str]:

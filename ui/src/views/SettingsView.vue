@@ -29,6 +29,7 @@ const showAddForm = ref(false)
 const form = reactive({ name: '', host: '', port: 8502, type: 'remote' as 'remote' | 'local' })
 const formError = ref('')
 const confirmRemove = ref<Machine | null>(null)
+const settingsError = ref('')
 
 // Fleet discovery
 interface DiscoveredMachine { ip: string; hostname: string; port: number; version: string; model_id: string }
@@ -165,12 +166,14 @@ onMounted(async () => {
     rateLimit.value = cfg.rate_limit ?? 0
     rerankModel.value = cfg.rerank_model ?? ''
     warmPrompts.value = cfg.warm_prompts ?? ''
-  } catch { /* silent */ }
+  } catch (e: any) {
+    settingsError.value = `Failed to load settings: ${e?.message ?? 'unknown error'}`
+  }
   try {
     const r = await api.get<{ size_gb: number }>('/models/cache_size')
     diskUsedGb.value = r.size_gb
-  } catch { /* silent */ }
-  updatesStore.checkUpdates().catch(() => {})
+  } catch { /* cache size is non-critical */ }
+  updatesStore.checkUpdates().catch(() => { /* non-critical */ })
 })
 
 async function saveCachePath() {
@@ -178,7 +181,9 @@ async function saveCachePath() {
     await api.post('/config', { model_cache_dir: cachePathInput.value })
     savedCachePath.value = cachePathInput.value
     editCachePath.value = false
-  } catch { /* silent */ }
+  } catch (e: any) {
+    settingsError.value = `Failed to save cache path: ${e?.message ?? 'unknown error'}`
+  }
 }
 
 function cancelCachePath() {
@@ -208,16 +213,22 @@ function doRemove() {
 
 async function saveStartupBehavior(val: 'auto' | 'ask' | 'none') {
   startupBehavior.value = val
-  try { await api.post('/config', { startup_model_behavior: val }) } catch { /* silent */ }
+  try { await api.post('/config', { startup_model_behavior: val }) } catch (e: any) {
+    settingsError.value = `Failed to save startup behavior: ${e?.message ?? 'unknown error'}`
+  }
 }
 
 async function saveListenAddress(allInterfaces: boolean) {
   listenAllInterfaces.value = allInterfaces
-  try { await api.post('/config', { host: allInterfaces ? '0.0.0.0' : '127.0.0.1' }) } catch { /* silent */ }
+  try { await api.post('/config', { host: allInterfaces ? '0.0.0.0' : '127.0.0.1' }) } catch (e: any) {
+    settingsError.value = `Failed to save listen address: ${e?.message ?? 'unknown error'}`
+  }
 }
 
 async function saveApiKey() {
-  try { await api.post('/config', { api_key: inferenceApiKey.value }) } catch { /* silent */ }
+  try { await api.post('/config', { api_key: inferenceApiKey.value }) } catch (e: any) {
+    settingsError.value = `Failed to save API key: ${e?.message ?? 'unknown error'}`
+  }
 }
 
 function saveHfToken() {
@@ -231,12 +242,16 @@ function saveOpenBrowserOnStart(val: boolean) {
 
 async function saveOfflineMode(val: boolean) {
   offlineMode.value = val
-  try { await api.post('/config', { offline: val }) } catch { /* silent */ }
+  try { await api.post('/config', { offline: val }) } catch (e: any) {
+    settingsError.value = `Failed to save offline mode: ${e?.message ?? 'unknown error'}`
+  }
 }
 
 async function saveAutoModelSwitch(val: boolean) {
   autoModelSwitch.value = val
-  try { await api.post('/auto_switch_enabled', { enabled: val }) } catch { /* silent */ }
+  try { await api.post('/auto_switch_enabled', { enabled: val }) } catch (e: any) {
+    settingsError.value = `Failed to save auto model switch: ${e?.message ?? 'unknown error'}`
+  }
 }
 
 async function saveAdvancedSettings() {
@@ -260,14 +275,18 @@ async function saveAdvancedSettings() {
     })
     advancedSaved.value = true
     setTimeout(() => { advancedSaved.value = false }, 2000)
-  } catch { /* silent */ }
+  } catch (e: any) {
+    settingsError.value = `Failed to save advanced settings: ${e?.message ?? 'unknown error'}`
+  }
 }
 
 async function doRestart() {
   showRestartConfirm.value = false
   restarting.value = true
   restartCountdown.value = 5
-  try { await serverStore.restart() } catch { /* silent */ }
+  try { await serverStore.restart() } catch (e: any) {
+    settingsError.value = `Failed to restart: ${e?.message ?? 'unknown error'}`
+  }
   restartTimer = setInterval(() => {
     restartCountdown.value--
     if (restartCountdown.value <= 0) {
@@ -282,14 +301,19 @@ async function doRestart() {
   <div class="settings-view">
     <h1 class="page-title">Settings</h1>
 
+    <div v-if="settingsError" class="settings-error-banner">
+      ⚠ {{ settingsError }}
+      <button class="error-dismiss" @click="settingsError = ''">✕</button>
+    </div>
+
     <!-- Software Updates -->
-    <section class="settings-section">
+    <section class="settings-section" aria-labelledby="updates-heading">
       <div class="section-header">
         <div>
-          <div class="section-title">Software Updates</div>
+          <div class="section-title" id="updates-heading">Software Updates</div>
           <div class="section-desc">Check and install updates for vllm-mlx-ui and its dependencies.</div>
         </div>
-        <AppButton variant="secondary" size="sm" :loading="updatesStore.checking" @click="updatesStore.checkUpdates(true)">
+        <AppButton variant="secondary" size="sm" :loading="updatesStore.checking" aria-label="Check for updates now" @click="updatesStore.checkUpdates(true)">
           {{ updatesStore.checking ? 'Checking…' : '↻ Check Now' }}
         </AppButton>
       </div>
@@ -335,10 +359,10 @@ async function doRestart() {
       </div>
     </section>
 
-    <section class="settings-section">
+    <section class="settings-section" aria-labelledby="fleet-heading">
       <div class="section-header">
         <div>
-          <div class="section-title">Fleet</div>
+          <div class="section-title" id="fleet-heading">Fleet</div>
           <div class="section-desc">Manage local and remote machines running vllm-mlx.</div>
         </div>
         <div class="fleet-header-actions">
@@ -411,10 +435,10 @@ async function doRestart() {
       </div>
     </section>
 
-    <section class="settings-section">
+    <section class="settings-section" aria-labelledby="prefs-heading">
       <div class="section-header">
         <div>
-          <div class="section-title">Preferences</div>
+          <div class="section-title" id="prefs-heading">Preferences</div>
           <div class="section-desc">Startup and interface behaviour.</div>
         </div>
       </div>
@@ -450,10 +474,10 @@ async function doRestart() {
       </div>
     </section>
 
-    <section class="settings-section">
+    <section class="settings-section" aria-labelledby="storage-heading">
       <div class="section-header">
         <div>
-          <div class="section-title">Storage</div>
+          <div class="section-title" id="storage-heading">Storage</div>
           <div class="section-desc">Model cache location and disk usage.</div>
         </div>
       </div>
@@ -499,10 +523,10 @@ async function doRestart() {
     </section>
 
     <!-- Startup Behavior -->
-    <section class="settings-section">
+    <section class="settings-section" aria-labelledby="startup-heading">
       <div class="section-header">
         <div>
-          <div class="section-title">Startup Behavior</div>
+          <div class="section-title" id="startup-heading">Startup Behavior</div>
           <div class="section-desc">Control what happens to the inference server when vmUI starts.</div>
         </div>
       </div>
@@ -526,10 +550,10 @@ async function doRestart() {
     </section>
 
     <!-- Advanced Inference Settings -->
-    <section class="settings-section">
+    <section class="settings-section" aria-labelledby="advanced-heading">
       <div class="section-header">
         <div>
-          <div class="section-title">Advanced Inference</div>
+          <div class="section-title" id="advanced-heading">Advanced Inference</div>
           <div class="section-desc">Engine, memory, and API tuning. Changes take effect on the next server restart.</div>
         </div>
       </div>
@@ -764,10 +788,10 @@ async function doRestart() {
     </section>
 
     <!-- Network & Access -->
-    <section class="settings-section">
+    <section class="settings-section" aria-labelledby="network-heading">
       <div class="section-header">
         <div>
-          <div class="section-title">Network &amp; Access</div>
+          <div class="section-title" id="network-heading">Network &amp; Access</div>
           <div class="section-desc">Control who can reach the inference server and this dashboard.</div>
         </div>
       </div>
@@ -876,10 +900,10 @@ async function doRestart() {
     </section>
 
     <!-- Maintenance -->
-    <section class="settings-section">
+    <section class="settings-section" aria-labelledby="maintenance-heading">
       <div class="section-header">
         <div>
-          <div class="section-title">Maintenance</div>
+          <div class="section-title" id="maintenance-heading">Maintenance</div>
           <div class="section-desc">Restart or manage the dashboard process.</div>
         </div>
       </div>
@@ -923,6 +947,12 @@ async function doRestart() {
 <style scoped>
 .settings-view { display: flex; flex-direction: column; gap: var(--space-6); max-width: 800px; }
 .page-title { font-size: var(--text-lg); font-weight: 700; letter-spacing: -.3px; color: var(--tx-primary); }
+.settings-error-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: rgba(239, 68, 68, .08); border: 1px solid rgba(239, 68, 68, .25);
+  border-radius: var(--r-md); font-size: var(--text-sm); color: var(--cr-300);
+}
 .settings-section { background: var(--bg-surface); border: 1px solid var(--bd-default); border-radius: var(--r-lg); overflow: hidden; }
 .section-header { display: flex; align-items: flex-start; justify-content: space-between; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--bd-subtle); }
 .section-title {

@@ -488,6 +488,21 @@ def memory_stats(_: None = Depends(_check_auth)) -> dict:
     return sm.get_memory_stats()
 
 
+@app.get("/poll")
+def poll(_: None = Depends(_check_auth)) -> dict:
+    """Batch endpoint: returns status, metrics, memory, and config in one call.
+
+    Reduces 4 sequential API calls (every 3 s) into a single round-trip,
+    cutting network overhead and CPU polling cost by ~75%.
+    """
+    return {
+        "status": sm.get_server_status(),
+        "metrics": sm.get_metrics() or {},
+        "memory": sm.get_memory_stats(),
+        "config": sm.load_config(),
+    }
+
+
 @app.post("/memory/release")
 def memory_release(_: None = Depends(_check_auth)) -> dict:
     """Release memory on this machine (stops server, GC, MLX cache clear)."""

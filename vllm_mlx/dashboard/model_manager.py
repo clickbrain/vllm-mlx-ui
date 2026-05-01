@@ -295,6 +295,7 @@ class DownloadManager:
         self._lock = threading.Lock()
         self._queue: list[dict] = []
         self._worker: threading.Thread | None = None
+        self._monitor_threads: dict[str, threading.Thread] = {}  # model_id → monitor thread
 
     def enqueue(self, model_id: str, hf_token: str | None = None) -> bool:
         """Add to queue. Returns False if already queued or downloading."""
@@ -383,9 +384,14 @@ class DownloadManager:
                             it["pct"] = min(partial / it["total_bytes"], 0.98)
                     _t.sleep(2)
 
-            import threading as _th
+                # Self-unregister when done
+                with self._lock:
+                    self._monitor_threads.pop(it["model_id"], None)
 
-            _th.Thread(target=_monitor, args=(item,), daemon=True).start()
+            monitor = threading.Thread(target=_monitor, args=(item,), daemon=True, name=f"download-monitor-{model_id}")
+            with self._lock:
+                self._monitor_threads[model_id] = monitor
+            monitor.start()
 
             try:
                 ok, msg = download_model_local(model_id, hf_token)
@@ -398,6 +404,11 @@ class DownloadManager:
                 with self._lock:
                     item["status"] = "error"
                     item["error"] = str(exc)
+
+            # Signal monitor to stop and wait for cleanup
+            monitor.join(timeout=5)
+            with self._lock:
+                self._monitor_threads.pop(model_id, None)
 
 
 download_manager = DownloadManager()

@@ -11,9 +11,17 @@
   - confirm: user clicked the confirm button
   - cancel: user clicked Cancel or the backdrop
 
+  Accessibility:
+  - Traps focus inside the dialog while open
+  - Closes on Escape key press
+  - autofocus on Cancel button for safe default
+  - role="dialog" + aria-modal="true"
+
   Usage: pair with a v-if flag; listen for @confirm/@cancel to act and dismiss.
 -->
 <script setup lang="ts">
+import { onMounted, onUnmounted, ref } from 'vue'
+
 defineProps<{
   title: string
   message: string
@@ -25,20 +33,61 @@ defineEmits<{
   confirm: []
   cancel: []
 }>()
+
+const modalRef = ref<HTMLElement | null>(null)
+
+function handleEscape(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    emit('cancel')
+  }
+}
+
+function trapFocus(e: KeyboardEvent) {
+  if (e.key !== 'Tab' || !modalRef.value) return
+  const focusable = modalRef.value.querySelectorAll<HTMLElement>(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  )
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (e.shiftKey) {
+    if (document.activeElement === first) {
+      e.preventDefault()
+      last.focus()
+    }
+  } else {
+    if (document.activeElement === last) {
+      e.preventDefault()
+      first.focus()
+    }
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', handleEscape)
+  document.addEventListener('keydown', trapFocus)
+  // Focus the Cancel button on open (safe default)
+  setTimeout(() => modalRef.value?.querySelector('.btn-cancel')?.focus(), 50)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleEscape)
+  document.removeEventListener('keydown', trapFocus)
+})
 </script>
 
 <template>
   <Teleport to="body">
     <div class="modal-backdrop" @click.self="$emit('cancel')">
-      <div class="modal-box" role="dialog" aria-modal="true">
+      <div ref="modalRef" class="modal-box" role="dialog" aria-modal="true" :aria-labelledby="'modal-title-' + title">
         <div class="modal-header">
-          <span class="modal-title">{{ title }}</span>
+          <span :id="'modal-title-' + title" class="modal-title">{{ title }}</span>
         </div>
         <div class="modal-body">
           <p class="modal-message">{{ message }}</p>
         </div>
         <div class="modal-footer">
-          <button class="btn-cancel" @click="$emit('cancel')">Cancel</button>
+          <button class="btn-cancel" autofocus @click="$emit('cancel')">Cancel</button>
           <button class="btn-confirm" :class="{ destructive }" @click="$emit('confirm')">
             {{ confirmLabel ?? 'Confirm' }}
           </button>

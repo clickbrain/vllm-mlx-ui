@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import MappingProxyType
 from pathlib import Path
 from typing import Any
 
@@ -81,13 +82,18 @@ def _force_ipv4_url(url: str) -> str:
 
 
 _resolved_urls: dict[str, str] = {}  # cache: original_url → ipv4_url
+_resolved_urls_lock = threading.Lock()
 
 
 def _mgmt_url(base: str) -> str:
     """Return an IPv4-resolved version of the mgmt base URL (cached)."""
-    if base not in _resolved_urls:
-        _resolved_urls[base] = _force_ipv4_url(base)
-    return _resolved_urls[base]
+    with _resolved_urls_lock:
+        if base in _resolved_urls:
+            return _resolved_urls[base]
+    ipv4_url = _force_ipv4_url(base)
+    with _resolved_urls_lock:
+        _resolved_urls[base] = ipv4_url
+    return ipv4_url
 
 TOOL_CALL_PARSERS = [
     "",
@@ -112,7 +118,7 @@ TOOL_CALL_PARSERS = [
 
 REASONING_PARSERS = ["", "qwen3", "deepseek_r1", "gemma4", "harmony", "gpt_oss", "glm4"]
 
-DEFAULT_CONFIG: dict[str, Any] = {
+_DEFAULT_CONFIG: dict[str, Any] = {
     "model": "",
     "served_model_name": "",
     "host": "127.0.0.1",
@@ -165,6 +171,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # restores the correct target on browser refresh / app restart.
     "connection_mode": "local",
 }
+
+# Immutable default config — prevents accidental mutation at module level.
+# All callers use DEFAULT_CONFIG.copy() or {**DEFAULT_CONFIG, ...} which work
+# correctly with MappingProxyType.
+DEFAULT_CONFIG: MappingProxyType = MappingProxyType(_DEFAULT_CONFIG)
 
 
 # ── Streamlit context detection ────────────────────────────────────────────────
