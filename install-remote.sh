@@ -58,16 +58,13 @@ fi
 
 # ── Install dashboard deps ─────────────────────────────────────
 step "Installing dashboard libraries"
-info "Installing Streamlit, Plotly, Pandas, httpx, HuggingFace Hub (no MLX / no model weights)…"
+info "Installing FastAPI, httpx, HuggingFace Hub (no MLX / no model weights)…"
 "$PYTHON" -m pip install --upgrade pip -q
 "$PYTHON" -m pip install \
-    "streamlit>=1.30.0" \
-    "plotly>=5.0.0" \
-    "pandas>=2.0.0" \
-    "requests>=2.28.0" \
-    "httpx>=0.27.0" \
     "fastapi>=0.100.0" \
     "uvicorn>=0.23.0" \
+    "httpx>=0.27.0" \
+    "requests>=2.28.0" \
     "huggingface-hub>=0.23.0" \
     -q
 success "Dashboard libraries installed"
@@ -110,16 +107,7 @@ for FILE in "${FILES[@]}"; do
     curl -fsSL "$GITHUB_RAW/$FILE" -o "$DEST" || error "Failed to download $FILE — check your internet connection."
 done
 
-# Streamlit config to allow iFrame embedding
-mkdir -p "$INSTALL_DIR/.streamlit"
-cat > "$INSTALL_DIR/.streamlit/config.toml" << 'TOML'
-[server]
-enableXsrfProtection = false
-enableCORS = false
-
-[browser]
-gatherUsageStats = false
-TOML
+# No Streamlit config needed — using FastAPI + Vue dashboard
 
 success "Dashboard files downloaded to $INSTALL_DIR"
 
@@ -132,7 +120,7 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
 #!/usr/bin/env bash
 cd "$INSTALL_DIR"
 echo "Starting vllm-mlx remote dashboard…"
-"$PYTHON" -m streamlit run vllm_mlx/dashboard/_ui.py
+"$PYTHON" -m vllm_mlx.dashboard.app
 LAUNCH
     chmod +x "$LAUNCH_SCRIPT"
     success "Shortcut created: 'vllm-mlx Remote.command' on your Desktop"

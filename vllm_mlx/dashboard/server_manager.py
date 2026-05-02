@@ -201,8 +201,10 @@ def _in_streamlit() -> bool:
     try:
         from streamlit.runtime.scriptrunner import get_script_run_ctx
         return get_script_run_ctx() is not None
+    except ImportError:
+        return False
     except Exception as e:
-        logger.warning("Operation failed: %s", e, exc_info=True)
+        logger.warning("Unexpected error checking Streamlit context: %s", e, exc_info=True)
         return False
 
 

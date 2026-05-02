@@ -80,11 +80,8 @@ vision = [
     "torch>=2.8.0",
     "torchvision>=0.23.0",
 ]
-# Dashboard UI dependencies
+# Dashboard UI dependencies (FastAPI + Vue)
 ui = [
-    "streamlit>=1.30.0",
-    "plotly>=5.0.0",
-    "pandas>=2.0.0",
     "httpx>=0.27.0",
 ]
 # Audio dependencies for TTS/STT (mlx-audio)

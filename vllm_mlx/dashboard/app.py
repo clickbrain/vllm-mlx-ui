@@ -54,14 +54,18 @@ def _find_vllm_ui_pids() -> list[int]:
         logger.warning("Operation failed", exc_info=True)
 
     # Strategy 2: find by ports 8501/8502
+    # lsof exits with code 1 when no processes match — that is expected, not an error.
     for port in [8501, 8502]:
         for fmt in [f"tcp:{port}", f":{port}"]:
             try:
-                out = _sp.check_output(
+                result = _sp.run(
                     ["lsof", "-t", "-i", fmt, "-n", "-P"],
-                    text=True, stderr=_sp.DEVNULL
-                ).strip()
-                for tok in out.split():
+                    text=True, capture_output=True
+                )
+                if result.returncode not in (0, 1):
+                    logger.warning("lsof exited with unexpected code %d", result.returncode)
+                    continue
+                for tok in result.stdout.strip().split():
                     try:
                         pid = int(tok)
                         if pid != own and pid not in pids:
@@ -70,8 +74,8 @@ def _find_vllm_ui_pids() -> list[int]:
                         pass
                 if pids:
                     break
-            except Exception:
-                logger.warning("Operation failed", exc_info=True)
+            except Exception as e:
+                logger.warning("Failed to run lsof for port %d: %s", port, e, exc_info=True)
 
     return pids
 
