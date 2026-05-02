@@ -14,6 +14,8 @@ import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import { useModelsStore } from '@/stores/models'
 import { useServerStore } from '@/stores/server'
 import { useRouter } from 'vue-router'
+import { RecycleScroller } from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import TabBar from '@/components/models/TabBar.vue'
 import LibCard from '@/components/models/LibCard.vue'
 import DownloadQueueCard from '@/components/models/DownloadQueueCard.vue'
@@ -362,18 +364,24 @@ watch(activeTab, (tab) => {
           <span class="lib-hdr-fit">Size · Fit <span class="lib-hdr-note">(based on available RAM)</span></span>
           <span class="lib-hdr-actions">Actions</span>
         </div>
-        <LibCard
-          v-for="m in filteredModels"
-          :key="m.id"
-          :model-id="m.id"
-          :size-gb="m.size_gb"
-          :quantization="m.quantization"
-          :active="m.active"
-          :cached="m.cached"
-          @load="handleLoad(m.id)"
-          @delete="handleDelete(m.id)"
-          @download="handleDownload(m.id)"
-        />
+        <RecycleScroller
+          :items="filteredModels"
+          :item-size="120"
+          key-field="id"
+          class="virtual-scroller"
+          v-slot="{ item }"
+        >
+          <LibCard
+            :model-id="item.id"
+            :size-gb="item.size_gb"
+            :quantization="item.quantization"
+            :active="item.active"
+            :cached="item.cached"
+            @load="handleLoad(item.id)"
+            @delete="handleDelete(item.id)"
+            @download="handleDownload(item.id)"
+          />
+        </RecycleScroller>
       </div>
     </div>
 
@@ -1247,6 +1255,12 @@ watch(activeTab, (tab) => {
   min-width: 100px;
   text-align: right;
   flex-shrink: 0;
+}
+
+/* Virtual scroller */
+.virtual-scroller {
+  height: calc(100vh - 350px);
+  overflow-y: auto;
 }
 
 </style>

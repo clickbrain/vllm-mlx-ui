@@ -1,0 +1,40 @@
+{
+  "nav": {
+    "serve": "Serve",
+    "models": "Models",
+    "benchmarks": "Benchmarks",
+    "chat": "Chat",
+    "settings": "Settings",
+    "docs": "Docs"
+  },
+  "serve": {
+    "title": "Server Control",
+    "start": "Start Server",
+    "stop": "Stop Server",
+    "status": "Status",
+    "running": "Running",
+    "stopped": "Stopped"
+  },
+  "models": {
+    "title": "Models",
+    "loading": "Loading models...",
+    "noModels": "No models found",
+    "load": "Load Model",
+    "unload": "Unload Model"
+  },
+  "settings": {
+    "title": "Settings",
+    "general": "General",
+    "server": "Server",
+    "advanced": "Advanced"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success"
+  }
+}

@@ -5,6 +5,7 @@ import { resolve } from 'path'
 export default defineConfig(({ mode }) => {
   const mgmtPort = process.env.VITE_MGMT_PORT ?? '8502'
   return {
+    appType: 'spa',
     plugins: [vue()],
     resolve: {
       alias: {

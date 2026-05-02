@@ -9,10 +9,14 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import router from './router'
+import { i18n } from './i18n'
+import { provideStores } from './di/container'
 import App from './App.vue'
 import './assets/tokens.css'
 
 const app = createApp(App)
 app.use(createPinia())
 app.use(router)
+app.use(i18n)
+provideStores(app)
 app.mount('#app')

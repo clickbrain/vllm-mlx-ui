@@ -1,4 +1,4 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 import ServeView from '@/views/ServeView.vue'
 import ModelsView from '@/views/ModelsView.vue'
 import SettingsView from '@/views/SettingsView.vue'
@@ -7,7 +7,7 @@ import BenchmarkView from '@/views/BenchmarkView.vue'
 import DocsView from '@/views/DocsView.vue'
 
 export default createRouter({
-  history: createWebHashHistory(),
+  history: createWebHistory(),
   routes: [
     { path: '/', redirect: '/serve' },
     { path: '/serve', component: ServeView },
