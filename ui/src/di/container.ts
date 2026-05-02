@@ -1,4 +1,5 @@
 import type { App } from 'vue'
+import { inject } from 'vue'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
 import { useMachinesStore } from '@/stores/machines'
@@ -9,7 +10,7 @@ export const SYMBOLS = {
   modelsStore: Symbol('modelsStore'),
   machinesStore: Symbol('machinesStore'),
   updatesStore: Symbol('updatesStore'),
-} as const
+}
 
 export function provideStores(app: App) {
   app.provide(SYMBOLS.serverStore, useServerStore())
@@ -19,7 +20,6 @@ export function provideStores(app: App) {
 }
 
 export function useDI() {
-  const { inject } = require('vue')
   return {
     serverStore: inject(SYMBOLS.serverStore) as ReturnType<typeof useServerStore>,
     modelsStore: inject(SYMBOLS.modelsStore) as ReturnType<typeof useModelsStore>,

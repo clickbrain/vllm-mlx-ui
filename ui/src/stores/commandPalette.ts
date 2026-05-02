@@ -120,6 +120,7 @@ export const useCommandPaletteStore = defineStore('commandPalette', () => {
   function close() {
     isOpen.value = false
     query.value = ''
+    selectedIndex.value = 0
   }
 
   function toggle() {

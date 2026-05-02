@@ -14,7 +14,7 @@ const steps = [
 <template>
   <Teleport to="body">
     <Transition name="fade">
-      <div v-if="tour.isActive" class="tour-overlay" @click.self="tour.skip()">
+      <div v-if="tour.isActive && steps[tour.currentStep]" class="tour-overlay" @click.self="tour.skip()">
         <div class="tour-card">
           <h3>{{ steps[tour.currentStep].title }}</h3>
           <p>{{ steps[tour.currentStep].text }}</p>
