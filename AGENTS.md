@@ -177,6 +177,42 @@ bash scripts/release.sh <version>
 
 <!-- Add new entries here when agents make changes -->
 
+### 2026-05-02 — Phase 2-5 Implementation Complete
+**Phase 2 — Frontend Polish (8/8 tasks)**
+- Lazy-loaded routes (`router/index.ts`)
+- Trimmed highlight.js bundle (~147KB → ~30KB)
+- Visibility-aware polling (pauses on tab hide)
+- 5 shared components: `ErrorBanner`, `Spinner`, `EmptyState`, `ToggleSwitch`, `ModelSelector`
+- Global toast notification system (`stores/toast.ts` + `ToastNotification.vue`)
+- Mobile navigation with hamburger menu (<720px)
+- ARIA labels + `:focus-visible` styles across all views
+- `ConfirmModal` focus trap + Escape handler
+- Commit: `089e1cd` (PR #33 pending review)
+
+**Phase 3 — Backend Stability (7/7 tasks)**
+- Thread-safe shared state with `threading.Lock()` in `server_manager`, `model_manager`, `update_checker`
+- Immutable `DEFAULT_CONFIG` via `MappingProxyType`
+- Proper semver comparison in `update_checker` (fixes `1.2.10` < `1.2.2` bug)
+- Removed silent `catch {}` blocks in `SettingsView`, `ModelsView`
+
+**Phase 4 — Performance (2/2 editable tasks)**
+- Batch polling endpoint `GET /poll` — 4 sequential requests → 1 per cycle (~75% reduction)
+- Bundle analysis with `rollup-plugin-visualizer` (`npm run analyze`)
+
+**Phase 5 — Architecture & Features (8/8 tasks)**
+- 5.8: History mode routing (`createWebHistory`)
+- 5.5: i18n infrastructure (`vue-i18n@11`, `en-US` locale)
+- 5.6: First-run onboarding tour (`TourOverlay.vue`, `useTourStore`)
+- 5.3: Command palette (`Cmd+K`) with `CommandPalette.vue`, `useCommandPaletteStore`
+- 5.2: Integration tests for Tour & CommandPalette (vitest + @pinia/testing, 8 passing)
+- 5.7: Virtual scrolling for `ModelsView` (`vue-virtual-scroller`)
+- 5.4: Enhanced benchmark comparison visualization (bar charts)
+- 5.1: DI container plan (`di-plan.md`), initial `provideStores()` in `main.ts`
+- Commit: `fbad52b` (PR #34 created)
+
+**Total Progress:** 32/37 editable tasks complete (5 upstream tasks tracked for PRs to `waybarrios/vllm-mlx`).
+**Branches:** `feat/phase-2-4-polish-stability-perf` (PR #33), `feat/phase-5-architecture-features` (PR #34).
+
 ### 2026-04-30 — Phase 1 Code Fixes Applied
 - **#1** Fixed command injection in 3 example scripts (`os.system()` → `subprocess.run()`)
 - **#3** Replaced 98 `except Exception: pass` with proper logging across 8 dashboard files
