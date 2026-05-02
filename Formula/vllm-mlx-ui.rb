@@ -2,7 +2,7 @@
 require "json"
 
 # Homebrew formula for vllm-mlx-ui
-# Tap:  brew tap clickbrain/vllm-mlx-ui https://github.com/clickbrain/vllm-mlx-ui
+# Tap:  brew tap clickbrain/homebrew-vllm-mlx-ui https://github.com/clickbrain/homebrew-vllm-mlx-ui
 # Install: brew install clickbrain/vllm-mlx-ui/vllm-mlx-ui
 #
 # This formula installs the vllm-mlx inference server and the browser-based
