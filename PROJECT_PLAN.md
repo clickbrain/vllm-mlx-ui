@@ -143,6 +143,22 @@ Phase 5 (Features) ── depends on Phases 1-4 (stable base) ───┘
 - [x] Phase 2: Frontend Polish (8/8 tasks)
 - [x] Phase 3: Backend Stability (7/7 tasks)
 - [x] Phase 4: Performance (2/2 editable tasks; 5 upstream → PRs)
-- [ ] Phase 5: Architecture & Features (0/8 tasks)
+- [x] Phase 5: Architecture & Features (8/8 tasks)
 
-**Total:** 24/37 editable tasks complete (5 upstream tasks tracked for PRs)
+**Total:** 32/37 editable tasks complete (5 upstream tasks tracked for PRs)
+
+## Completed Work
+
+### Phase 5 — Architecture & Features (2026-05-02)
+- 5.8: Switched to history mode routing (`createWebHistory`)
+- 5.5: i18n infrastructure with `vue-i18n@11`, `en-US` locale, integrated in `main.ts`
+- 5.6: Onboarding first-run tour (`TourOverlay.vue`, `useTourStore`, `data-tour` attrs)
+- 5.3: Command palette (`Cmd+K`) with `CommandPalette.vue`, `useCommandPaletteStore`
+- 5.4: Enhanced benchmark comparison visualization (bar charts in History tab)
+- 5.7: Virtual scrolling for `ModelsView` via `vue-virtual-scroller`
+- 5.2: Integration tests for Tour & CommandPalette (vitest + @pinia/testing, 8 passing)
+- 5.1: DI container plan (`di-plan.md`), initial `provideStores()` in `main.ts`
+
+### Branches
+- `feat/phase-2-4-polish-stability-perf` → PR #33 (pending review)
+- `feat/phase-5-architecture-features` → PR pending creation

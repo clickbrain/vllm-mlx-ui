@@ -124,15 +124,15 @@ async function doShutdown() {
     </div>
 
     <!-- Nav — above the gauge -->
-    <nav class="sidebar-nav" aria-label="Main navigation">
-      <RouterLink to="/serve" class="nav-item" :class="{ active: isActive('/serve') }" :aria-current="isActive('/serve') ? 'page' : undefined">
+    <nav class="sidebar-nav">
+      <RouterLink to="/serve" class="nav-item" :class="{ active: isActive('/serve') }" data-tour="serve">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
         </svg>
         <span>Serve</span>
       </RouterLink>
 
-      <RouterLink to="/models" class="nav-item" :class="{ active: isActive('/models') }" :aria-current="isActive('/models') ? 'page' : undefined">
+      <RouterLink to="/models" class="nav-item" :class="{ active: isActive('/models') }" data-tour="models">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path d="M4.25 2A2.25 2.25 0 002 4.25v2.5A2.25 2.25 0 004.25 9h2.5A2.25 2.25 0 009 6.75v-2.5A2.25 2.25 0 006.75 2h-2.5zm0 9A2.25 2.25 0 002 13.25v2.5A2.25 2.25 0 004.25 18h2.5A2.25 2.25 0 009 15.75v-2.5A2.25 2.25 0 006.75 11h-2.5zm6.5-9A2.25 2.25 0 008.5 4.25v2.5A2.25 2.25 0 0010.75 9h2.5A2.25 2.25 0 0015.5 6.75v-2.5A2.25 2.25 0 0013.25 2h-2.5zm0 9a2.25 2.25 0 00-2.25 2.25v2.5A2.25 2.25 0 0010.75 18h2.5a2.25 2.25 0 002.25-2.25v-2.5a2.25 2.25 0 00-2.25-2.25h-2.5z" />
         </svg>
@@ -146,7 +146,7 @@ async function doShutdown() {
         <span>Benchmarks</span>
       </RouterLink>
 
-      <RouterLink to="/settings" class="nav-item" :class="{ active: isActive('/settings') }" :aria-current="isActive('/settings') ? 'page' : undefined">
+      <RouterLink to="/settings" class="nav-item" :class="{ active: isActive('/settings') }" data-tour="settings">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path fill-rule="evenodd" d="M7.84 1.804A1 1 0 018.82 1h2.36a1 1 0 01.98.804l.331 1.652a6.993 6.993 0 011.929 1.115l1.598-.54a1 1 0 011.186.447l1.18 2.044a1 1 0 01-.205 1.251l-1.267 1.113a7.047 7.047 0 010 2.228l1.267 1.113a1 1 0 01.206 1.25l-1.18 2.045a1 1 0 01-1.187.447l-1.598-.54a6.993 6.993 0 01-1.929 1.115l-.33 1.652a1 1 0 01-.98.804H8.82a1 1 0 01-.98-.804l-.331-1.652a6.993 6.993 0 01-1.929-1.115l-1.598.54a1 1 0 01-1.186-.447l-1.18-2.044a1 1 0 01.205-1.251l1.267-1.114a7.05 7.05 0 010-2.227L1.821 7.773a1 1 0 01-.206-1.25l1.18-2.045a1 1 0 011.187-.447l1.598.54A6.993 6.993 0 017.51 3.456l.33-1.652zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
         </svg>
@@ -156,7 +156,7 @@ async function doShutdown() {
 
       <div class="nav-divider" role="separator" />
 
-      <RouterLink to="/chat" class="nav-item nav-item-util" :class="{ active: isActive('/chat') }" :aria-current="isActive('/chat') ? 'page' : undefined">
+      <RouterLink to="/chat" class="nav-item nav-item-util" :class="{ active: isActive('/chat') }" data-tour="chat">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd" />
           <path d="M15 7h1a2 2 0 012 2v5.5a.5.5 0 01-.5.5H15V7z" />

@@ -6,20 +6,40 @@
   on mount so all views share live inference server state.
 -->
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppTopbar from '@/components/layout/AppTopbar.vue'
-import ToastNotification from '@/components/shared/ToastNotification.vue'
+import TourOverlay from '@/components/shared/TourOverlay.vue'
+import CommandPalette from '@/components/shared/CommandPalette.vue'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
+import { useTourStore } from '@/stores/tour'
+import { useCommandPaletteStore } from '@/stores/commandPalette'
 
 const serverStore = useServerStore()
 const modelsStore = useModelsStore()
-onMounted(() => { serverStore.startPolling() })
+const tour = useTourStore()
+const palette = useCommandPaletteStore()
+
+function handleGlobalKeydown(e: KeyboardEvent) {
+  palette.onKeydown(e)
+}
+
+onMounted(() => {
+  serverStore.startPolling()
+  tour.checkFirstRun()
+  document.addEventListener('keydown', handleGlobalKeydown)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleGlobalKeydown)
+})
 </script>
 
 <template>
   <div class="app-shell">
+    <TourOverlay />
+    <CommandPalette />
     <AppSidebar />
     <div class="app-main">
       <AppTopbar />
