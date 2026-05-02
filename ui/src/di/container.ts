@@ -1,15 +1,17 @@
 import type { App } from 'vue'
+import type { InjectionKey } from 'vue'
 import { inject } from 'vue'
+import type { Pinia } from 'pinia'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
 import { useMachinesStore } from '@/stores/machines'
 import { useUpdatesStore } from '@/stores/updates'
 
-export const SYMBOLS = {
-  serverStore: Symbol('serverStore'),
-  modelsStore: Symbol('modelsStore'),
-  machinesStore: Symbol('machinesStore'),
-  updatesStore: Symbol('updatesStore'),
+export const SYMBOLS: Record<string, InjectionKey<unknown>> = {
+  serverStore: Symbol('serverStore') as InjectionKey<ReturnType<typeof useServerStore>>,
+  modelsStore: Symbol('modelsStore') as InjectionKey<ReturnType<typeof useModelsStore>>,
+  machinesStore: Symbol('machinesStore') as InjectionKey<ReturnType<typeof useMachinesStore>>,
+  updatesStore: Symbol('updatesStore') as InjectionKey<ReturnType<typeof useUpdatesStore>>,
 }
 
 export function provideStores(app: App) {
@@ -21,9 +23,9 @@ export function provideStores(app: App) {
 
 export function useDI() {
   return {
-    serverStore: inject(SYMBOLS.serverStore) as ReturnType<typeof useServerStore>,
-    modelsStore: inject(SYMBOLS.modelsStore) as ReturnType<typeof useModelsStore>,
-    machinesStore: inject(SYMBOLS.machinesStore) as ReturnType<typeof useMachinesStore>,
-    updatesStore: inject(SYMBOLS.updatesStore) as ReturnType<typeof useUpdatesStore>,
+    serverStore: inject(SYMBOLS.serverStore),
+    modelsStore: inject(SYMBOLS.modelsStore),
+    machinesStore: inject(SYMBOLS.machinesStore),
+    updatesStore: inject(SYMBOLS.updatesStore),
   }
 }
