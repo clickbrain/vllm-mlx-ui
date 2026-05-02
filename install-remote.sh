@@ -76,9 +76,15 @@ success "Dashboard libraries installed"
 step "Downloading dashboard files"
 INSTALL_DIR="$HOME/.vllm_mlx_remote"
 mkdir -p "$INSTALL_DIR"
-
 REPO="clickbrain/vllm-mlx-ui"
+
+# Try clickbrain fork first, fall back to upstream if needed
 GITHUB_RAW="https://raw.githubusercontent.com/${REPO}/main"
+if ! curl -fsSL --head "$GITHUB_RAW/vllm_mlx/dashboard/_ui.py" &>/dev/null; then
+    REPO="waybarrios/vllm-mlx"
+    GITHUB_RAW="https://raw.githubusercontent.com/${REPO}/main"
+    info "Using upstream repo: $REPO"
+fi
 
 # Fallback to upstream repo if clickbrain/vllm-mlx-ui is unavailable
 if ! curl -fsSL --head "${GITHUB_RAW}/vllm_mlx/dashboard/_ui.py" &>/dev/null; then

@@ -111,6 +111,7 @@ else
     info "Downloading and installing from GitHub…"
     # Install from clickbrain/vllm-mlx-ui — the fork that includes the dashboard UI
     GITHUB_REPO="https://github.com/clickbrain/vllm-mlx-ui.git"
+    info "Installing from $GITHUB_REPO ..."
     "$PYTHON" -m pip install "vllm-mlx[ui] @ git+${GITHUB_REPO}" -q
 fi
 success "vllm-mlx installed"
@@ -126,12 +127,20 @@ for cmd in vllm-mlx vllm-mlx-ui; do
     fi
 done
 
+# Verify the dashboard can be started
+if "$PYTHON" -c "import vllm_mlx.dashboard.app" 2>/dev/null; then
+    success "Dashboard module (vllm_mlx.dashboard.app) is importable"
+else
+    warn "Dashboard module not importable — PATH to scripts may differ."
+fi
+
 # ── Download starter model ───────────────────────────────────
 step "Downloading starter model"
 MODEL="mlx-community/Llama-3.2-3B-Instruct-4bit"
 info "Model: $MODEL"
 info "Size: approximately 1.8 GB"
 info "This is a fast, capable AI model that works well on all Apple Silicon Macs."
+info "You can change models later in the Models tab of the dashboard."
 echo ""
 
 "$PYTHON" - << PYEOF
@@ -184,26 +193,26 @@ cat > "$LAUNCH_SCRIPT" << LAUNCH
 
 # Attempt to initialise conda/pyenv/nix environments if present
 for CONDA_INIT in \
-    "\$HOME/opt/miniconda3/etc/profile.d/conda.sh" \
-    "\$HOME/miniconda3/etc/profile.d/conda.sh" \
+    "$HOME/opt/miniconda3/etc/profile.d/conda.sh" \
+    "$HOME/miniconda3/etc/profile.d/conda.sh" \
     "/opt/homebrew/Caskroom/miniconda/base/etc/profile.d/conda.sh" \
     "/opt/miniconda3/etc/profile.d/conda.sh"; do
-    if [[ -f "\$CONDA_INIT" ]]; then
-        source "\$CONDA_INIT" 2>/dev/null
+    if [[ -f "$CONDA_INIT" ]]; then
+        source "$CONDA_INIT" 2>/dev/null
         conda activate base 2>/dev/null || true
         break
     fi
 done
 
-cd "\$HOME"
+cd "$HOME"
 echo "Starting vllm-mlx dashboard…"
 
-# Priority 1: use the exact Python/scripts dir from install time
-if [[ -x "${PYTHON_BIN_DIR}/vllm-mlx-ui" ]]; then
-    "${PYTHON_BIN_DIR}/vllm-mlx-ui"
-# Priority 2: vllm-mlx-ui is already on PATH (e.g. Homebrew install)
-elif command -v vllm-mlx-ui &>/dev/null; then
+# Priority 1: vllm-mlx-ui entry point (installed by pip/brew)
+if command -v vllm-mlx-ui &>/dev/null; then
     vllm-mlx-ui
+# Priority 2: use the exact Python/scripts dir from install time
+elif [[ -x "${PYTHON_BIN_DIR}/vllm-mlx-ui" ]]; then
+    "${PYTHON_BIN_DIR}/vllm-mlx-ui"
 # Priority 3: run as a Python module directly
 else
     "${PYTHON_FULL}" -m vllm_mlx.dashboard.app
