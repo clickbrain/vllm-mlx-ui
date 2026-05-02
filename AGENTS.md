@@ -185,3 +185,64 @@ bash scripts/release.sh <version>
 - **#6** Added missing CSS tokens: `--bd`, `--bg3`, `--bg4`, `--tx1`, `--tx2`, `--tx3`, `--bg-inset`
 - **#7** Theme now persisted in localStorage, respects OS `prefers-color-scheme`
 - Commit: `98830e3` — 18 files changed, +486/-223 lines
+
+### 2026-04-30 — Phase 2 Frontend Polish Applied
+- **#8** Dynamic imports: `router/index.ts` — all 7 views lazy-loaded via `() => import()`
+- **#9** Trimmed highlight.js: `DocsView.vue` — full bundle → `lib/core` + 12 language modules (~147 KB → ~30 KB)
+- **#10** Visibility-aware polling: `stores/server.ts` — polling pauses on tab hide, resumes on show
+- **#12** Global toast system:
+  - New `stores/toast.ts` — Pinia store with `info()`, `success()`, `warning()`, `error()` helpers
+  - New `components/shared/ToastNotification.vue` — Teleported toast stack with auto-dismiss and type-coloured borders
+  - Integrated in `App.vue` — mounted globally, no manual instantiation needed
+- **#13** Mobile navigation: `AppTopbar.vue` — hamburger button + slide-out nav drawer at <720px
+- **#15** Modal accessibility: `ConfirmModal.vue` — focus trap, Escape handler, autofocus Cancel
+- **#11** 5 new shared components:
+  - `ErrorBanner.vue` — dismissable error banner with `role="alert"`, icon, message, dismiss
+  - `Spinner.vue` — configurable size/color spinner with `role="status"` and `aria-label="Loading"`
+  - `EmptyState.vue` — reusable placeholder with title, description, optional icon and action slot
+  - `ToggleSwitch.vue` — accessible on/off toggle with label, description, built-in focus-visible
+  - `ModelSelector.vue` — model dropdown with loading spinner, placeholder, disabled state
+- **#14** ARIA labels + focus-visible styles:
+  - `tokens.css`: Added global `:focus-visible` / `:focus:not(:focus-visible)` rules + skip-link styles
+  - `AppSidebar.vue`: `aria-label` on nav, `aria-current="page"` on active links, `aria-pressed` on machine buttons, `aria-labelledby` on model selector, focus-visible on all interactive elements
+  - `AppTopbar.vue`: Mobile menu close button, hamburger button already had `aria-label`
+  - `ServeView.vue`: `aria-label` on start/stop/clear buttons, model select, copy buttons; focus-visible on copy buttons and view-full-link
+  - `ModelsView.vue`: `role="group"` on filter chips, `aria-pressed` on active filters, `aria-label` on search inputs and company chips; focus-visible on chips, sort headers, filter buttons
+  - `SettingsView.vue`: `aria-labelledby` on all 8 sections linking to section title IDs
+  - `ConfirmModal.vue`: Already had focus trap, Escape handler, autofocus, `role="dialog"`, `aria-modal`
+
+### 2026-04-30 — Phase 3 Backend Stability Fixes Applied
+- **#16** Thread-safe shared state:
+  - `server_manager.py`: Added `_resolved_urls_lock` to protect `_resolved_urls` dict from concurrent reads/writes
+  - `model_manager.py`: Added `_monitor_threads` tracking dict; monitor threads now tracked, self-unregister, and are joined with 5s timeout before download completion
+  - `update_checker.py`: Added `_cache_lock` to protect `_cache` dict from concurrent access across background threads and UI thread
+- **#17** Replaced mutable `DEFAULT_CONFIG` dict with `MappingProxyType` wrapper — prevents accidental module-level mutation while maintaining `.copy()` and `{**...}` compatibility
+- **#18** Fixed version comparison fallback in `update_checker.py` — replaced `!=` string comparison with proper semver tuple parsing (e.g. `1.2.10` > `1.2.2` now correct)
+- **#22** Removed silent `catch { /* silent */ }` blocks in frontend:
+  - `SettingsView.vue`: Added `settingsError` banner; all 10 silent catches now show user-facing error messages
+  - `ServeView.vue`: Added comments to non-critical catches (clipboard, network info)
+  - `ModelsView.vue`: Changed `console.error` to `modelsStore.actionError` for delete/download failures
+
+### 2026-04-30 — Phase 2 Bug Fixes Applied
+- **Critical**: `ToastNotification.vue` — removed `.value` from template (Vue auto-unwraps store refs)
+- **Medium**: `ModelsView.vue` — `aria-pressed` missing `:` binding (was string literal)
+- **Medium**: `ModelsView.vue` — undefined `--bg-2` CSS token → replaced with `var(--bg-elevated)` (3 occurrences)
+
+### 2026-04-30 — Phase 4 Performance Optimizations Applied
+- **#24** Batch polling endpoint:
+  - `mgmt_server.py`: New `GET /poll` endpoint returns status + metrics + memory + config in one HTTP call
+  - `stores/server.ts`: `startPolling()` now calls `fetchAllBatched()` — 4 sequential requests → 1 per poll cycle
+  - Falls back to individual fetches for older servers without `/poll` endpoint
+  - Estimated ~75% reduction in polling network overhead
+- **#29** Bundle analysis tooling:
+  - `package.json`: Added `rollup-plugin-visualizer` dev dependency + `npm run analyze` script
+  - `vite.config.ts`: Visualizer plugin generates `dist/stats.html` treemap with gzip/brotli sizes
+  - Run `cd ui && npm run analyze` to open interactive bundle visualization
+
+### 2026-04-30 — Phase 4 Upstream PRs (Not Applied)
+The following Phase 4 tasks are in upstream `vllm_mlx/` code (outside `dashboard/`). Should be filed as PRs to `waybarrios/vllm-mlx`:
+- **#23** `server.py:1250-1257` — Add `@lru_cache` to tokenizer lookup (hot path)
+- **#25** `ssd_cache.py:247-280` — Replace O(N) linear prefix scan with hash index
+- **#26** `ssd_cache.py:503-540` — Replace O(N log N) eviction with priority queue
+- **#27** `server.py:934-946` — Memoize model path resolution
+- **#28** `ssd_cache.py` / `memory_cache.py` — Memory-map large token arrays

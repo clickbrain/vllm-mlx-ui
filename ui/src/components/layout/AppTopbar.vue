@@ -17,6 +17,7 @@ import { useUpdatesStore } from '@/stores/updates'
 const route = useRoute()
 const router = useRouter()
 const updatesStore = useUpdatesStore()
+const showMobileMenu = ref(false)
 
 // Initialize theme: localStorage → OS preference → default dark
 function getInitialTheme(): boolean {
@@ -59,6 +60,11 @@ const pageTitle = computed(() => {
 
 <template>
   <header class="topbar">
+    <button class="mobile-menu-btn" aria-label="Open navigation menu" @click="showMobileMenu = true">
+      <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden="true">
+        <path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd" />
+      </svg>
+    </button>
     <h1 class="topbar-title">{{ pageTitle }}</h1>
     <div class="topbar-actions">
       <button
@@ -80,6 +86,31 @@ const pageTitle = computed(() => {
       </button>
     </div>
   </header>
+
+  <!-- Mobile overlay menu -->
+  <Teleport to="body">
+    <div v-if="showMobileMenu" class="mobile-overlay" @click.self="showMobileMenu = false" @keydown.escape="showMobileMenu = false">
+      <nav class="mobile-nav" role="dialog" aria-label="Navigation menu">
+        <div class="mobile-nav-header">
+          <span class="logo-mark">vm</span><span class="logo-accent">UI</span>
+          <button class="mobile-nav-close" aria-label="Close menu" @click="showMobileMenu = false">
+            <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
+              <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+            </svg>
+          </button>
+        </div>
+        <RouterLink to="/serve" class="mobile-nav-item" :class="{ active: route.path === '/serve' || route.path === '/' }" @click="showMobileMenu = false">Serve</RouterLink>
+        <RouterLink to="/models" class="mobile-nav-item" :class="{ active: route.path.startsWith('/models') }" @click="showMobileMenu = false">Models</RouterLink>
+        <RouterLink to="/benchmarks" class="mobile-nav-item" :class="{ active: route.path.startsWith('/benchmarks') }" @click="showMobileMenu = false">Benchmarks</RouterLink>
+        <RouterLink to="/chat" class="mobile-nav-item" :class="{ active: route.path.startsWith('/chat') }" @click="showMobileMenu = false">Chat</RouterLink>
+        <RouterLink to="/docs" class="mobile-nav-item" :class="{ active: route.path.startsWith('/docs') }" @click="showMobileMenu = false">Docs</RouterLink>
+        <RouterLink to="/settings" class="mobile-nav-item" :class="{ active: route.path.startsWith('/settings') }" @click="showMobileMenu = false">
+          Settings
+          <span v-if="updatesStore.anyUpdate" class="update-badge" />
+        </RouterLink>
+      </nav>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -154,5 +185,112 @@ const pageTitle = computed(() => {
   background: var(--bg-elevated);
   border-color: var(--bd-emphasis);
   color: var(--tx-primary);
+}
+
+/* Mobile hamburger — hidden on desktop */
+.mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  background: transparent;
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  color: var(--tx-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.mobile-menu-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--tx-primary);
+}
+
+/* Mobile overlay */
+.mobile-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .55);
+  z-index: 10000;
+  animation: fade-in .12s ease;
+}
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.mobile-nav {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 260px;
+  max-width: 85vw;
+  height: 100%;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--bd-default);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-4);
+  gap: 4px;
+  animation: slide-right .15s ease;
+  overflow-y: auto;
+}
+
+@keyframes slide-right { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+
+.mobile-nav-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--bd-subtle);
+  margin-bottom: var(--space-2);
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -.4px;
+}
+.logo-mark { color: var(--tx-primary); }
+.logo-accent { color: var(--si-400); }
+
+.mobile-nav-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-sm);
+  color: var(--tx-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.mobile-nav-close:hover { background: var(--bg-elevated); color: var(--tx-primary); }
+
+.mobile-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px var(--space-3);
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  color: var(--tx-secondary);
+  font-size: var(--text-base);
+  font-weight: 500;
+  text-decoration: none;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.mobile-nav-item:hover {
+  background: var(--bg-elevated);
+  color: var(--tx-primary);
+}
+.mobile-nav-item.active {
+  background: var(--ac-bg);
+  border-color: var(--ac-border);
+  color: var(--si-300);
+}
+
+@media (max-width: 720px) {
+  .mobile-menu-btn { display: flex; }
+  .topbar-title { margin-left: var(--space-2); }
 }
 </style>

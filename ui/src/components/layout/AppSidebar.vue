@@ -124,29 +124,29 @@ async function doShutdown() {
     </div>
 
     <!-- Nav — above the gauge -->
-    <nav class="sidebar-nav">
-      <RouterLink to="/serve" class="nav-item" :class="{ active: isActive('/serve') }">
+    <nav class="sidebar-nav" aria-label="Main navigation">
+      <RouterLink to="/serve" class="nav-item" :class="{ active: isActive('/serve') }" :aria-current="isActive('/serve') ? 'page' : undefined">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
         </svg>
         <span>Serve</span>
       </RouterLink>
 
-      <RouterLink to="/models" class="nav-item" :class="{ active: isActive('/models') }">
+      <RouterLink to="/models" class="nav-item" :class="{ active: isActive('/models') }" :aria-current="isActive('/models') ? 'page' : undefined">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path d="M4.25 2A2.25 2.25 0 002 4.25v2.5A2.25 2.25 0 004.25 9h2.5A2.25 2.25 0 009 6.75v-2.5A2.25 2.25 0 006.75 2h-2.5zm0 9A2.25 2.25 0 002 13.25v2.5A2.25 2.25 0 004.25 18h2.5A2.25 2.25 0 009 15.75v-2.5A2.25 2.25 0 006.75 11h-2.5zm6.5-9A2.25 2.25 0 008.5 4.25v2.5A2.25 2.25 0 0010.75 9h2.5A2.25 2.25 0 0015.5 6.75v-2.5A2.25 2.25 0 0013.25 2h-2.5zm0 9a2.25 2.25 0 00-2.25 2.25v2.5A2.25 2.25 0 0010.75 18h2.5a2.25 2.25 0 002.25-2.25v-2.5a2.25 2.25 0 00-2.25-2.25h-2.5z" />
         </svg>
         <span>Models</span>
       </RouterLink>
 
-      <RouterLink to="/benchmarks" class="nav-item" :class="{ active: isActive('/benchmarks') }">
+      <RouterLink to="/benchmarks" class="nav-item" :class="{ active: isActive('/benchmarks') }" :aria-current="isActive('/benchmarks') ? 'page' : undefined">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
         </svg>
         <span>Benchmarks</span>
       </RouterLink>
 
-      <RouterLink to="/settings" class="nav-item" :class="{ active: isActive('/settings') }">
+      <RouterLink to="/settings" class="nav-item" :class="{ active: isActive('/settings') }" :aria-current="isActive('/settings') ? 'page' : undefined">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path fill-rule="evenodd" d="M7.84 1.804A1 1 0 018.82 1h2.36a1 1 0 01.98.804l.331 1.652a6.993 6.993 0 011.929 1.115l1.598-.54a1 1 0 011.186.447l1.18 2.044a1 1 0 01-.205 1.251l-1.267 1.113a7.047 7.047 0 010 2.228l1.267 1.113a1 1 0 01.206 1.25l-1.18 2.045a1 1 0 01-1.187.447l-1.598-.54a6.993 6.993 0 01-1.929 1.115l-.33 1.652a1 1 0 01-.98.804H8.82a1 1 0 01-.98-.804l-.331-1.652a6.993 6.993 0 01-1.929-1.115l-1.598.54a1 1 0 01-1.186-.447l-1.18-2.044a1 1 0 01.205-1.251l1.267-1.114a7.05 7.05 0 010-2.227L1.821 7.773a1 1 0 01-.206-1.25l1.18-2.045a1 1 0 011.187-.447l1.598.54A6.993 6.993 0 017.51 3.456l.33-1.652zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
         </svg>
@@ -154,9 +154,9 @@ async function doShutdown() {
         <span v-if="updatesStore.anyUpdate" class="update-badge" title="Software updates available — see Settings" />
       </RouterLink>
 
-      <div class="nav-divider" />
+      <div class="nav-divider" role="separator" />
 
-      <RouterLink to="/chat" class="nav-item nav-item-util" :class="{ active: isActive('/chat') }">
+      <RouterLink to="/chat" class="nav-item nav-item-util" :class="{ active: isActive('/chat') }" :aria-current="isActive('/chat') ? 'page' : undefined">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd" />
           <path d="M15 7h1a2 2 0 012 2v5.5a.5.5 0 01-.5.5H15V7z" />
@@ -164,7 +164,7 @@ async function doShutdown() {
         <span>Chat</span>
       </RouterLink>
 
-      <RouterLink to="/docs" class="nav-item nav-item-util" :class="{ active: isActive('/docs') }">
+      <RouterLink to="/docs" class="nav-item nav-item-util" :class="{ active: isActive('/docs') }" :aria-current="isActive('/docs') ? 'page' : undefined">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z" />
         </svg>
@@ -174,8 +174,8 @@ async function doShutdown() {
 
     <!-- Model Selector -->
     <div class="sidebar-section model-section">
-      <div class="section-label">Model</div>
-      <div v-if="modelsStore.serverRestartingFor" class="model-switching">
+      <div class="section-label" id="model-selector-label">Model</div>
+      <div v-if="modelsStore.serverRestartingFor" class="model-switching" aria-live="polite">
         <span class="switch-spinner" />
         <span class="switch-text">Switching…</span>
       </div>
@@ -184,6 +184,7 @@ async function doShutdown() {
         class="model-select"
         :value="serverStore.modelId ?? ''"
         :disabled="serverStore.loading || !modelsStore.models.length"
+        aria-labelledby="model-selector-label"
         @change="(e) => modelsStore.loadModel((e.target as HTMLSelectElement).value)"
       >
         <option value="" disabled>{{ modelsStore.models.length ? 'Select model…' : 'No models cached' }}</option>
@@ -216,7 +217,7 @@ async function doShutdown() {
         <button
           class="scan-btn"
           :disabled="scanning"
-          :title="scanning ? 'Scanning…' : 'Scan local network for vllm-mlx servers'"
+          :aria-label="scanning ? 'Scanning network' : 'Scan local network for vllm-mlx servers'"
           @click="scanForMachines"
         >
           <svg v-if="!scanning" viewBox="0 0 20 20" fill="currentColor" width="11" height="11">
@@ -225,12 +226,15 @@ async function doShutdown() {
           <span v-if="scanning" class="scan-spinner" />
         </button>
       </div>
-      <div class="machine-list">
+      <div class="machine-list" role="list" aria-label="Connected machines">
         <button
           v-for="m in machinesStore.machines"
           :key="m.id"
           class="machine-item"
           :class="{ active: m.id === machinesStore.activeMachineId }"
+          role="listitem"
+          :aria-pressed="m.id === machinesStore.activeMachineId"
+          :title="`${m.name} — ${m.online ? 'Online' : 'Offline'}`"
           @click="selectMachine(m.id)"
         >
           <span class="machine-dot" :class="m.online ? 'online' : 'offline'" />
@@ -261,7 +265,7 @@ async function doShutdown() {
     <div class="sidebar-footer">
       <button
         class="shutdown-btn"
-        title="Shut down vllm-mlx-ui"
+        aria-label="Shut down vllm-mlx-ui"
         :disabled="shuttingDown"
         @click="showShutdownConfirm = true"
       >
@@ -351,6 +355,10 @@ async function doShutdown() {
 .machine-item:hover {
   background: var(--bg-elevated);
 }
+.machine-item:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: -2px;
+}
 .machine-item.active {
   background: var(--ac-bg);
   border-color: var(--ac-border);
@@ -403,6 +411,10 @@ async function doShutdown() {
 .scan-btn:hover:not(:disabled) {
   color: var(--tx-secondary);
   border-color: var(--bd-emphasis);
+}
+.scan-btn:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 1px;
 }
 .scan-btn:disabled { opacity: 0.5; cursor: default; }
 
@@ -465,6 +477,10 @@ async function doShutdown() {
 .add-machine-btn:hover {
   background: var(--ac-bg);
   color: var(--si-300);
+}
+.add-machine-btn:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 1px;
 }
 
 .fleet-hint {
@@ -531,6 +547,10 @@ async function doShutdown() {
   background: var(--bg-elevated);
   color: var(--tx-primary);
 }
+.nav-item:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: -2px;
+}
 .nav-item.active {
   background: var(--ac-bg);
   border-color: var(--ac-border);
@@ -589,6 +609,10 @@ async function doShutdown() {
 .release-mem-btn:hover {
   color: var(--tx-secondary);
   border-color: var(--bd-emphasis);
+}
+.release-mem-btn:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 2px;
 }
 
 .release-mem-msg {
@@ -661,6 +685,10 @@ async function doShutdown() {
   background: rgba(239, 68, 68, .15);
   border-color: rgba(239, 68, 68, .40);
 }
+.shutdown-btn:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 2px;
+}
 .shutdown-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -684,7 +712,16 @@ async function doShutdown() {
   transition: border-color var(--transition-fast);
   appearance: auto;
 }
-.model-select:focus { outline: none; border-color: var(--bd-focus); }
+.model-select:focus {
+  outline: none;
+  border-color: var(--bd-focus);
+  box-shadow: 0 0 0 3px rgba(91, 106, 208, .12);
+}
+.model-select:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 1px;
+  box-shadow: none;
+}
 .model-select:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .model-switching {
@@ -718,7 +755,12 @@ async function doShutdown() {
   color: var(--tx-muted);
   text-decoration: none;
   padding: 2px 2px;
+  border-radius: var(--r-sm);
   transition: color var(--transition-fast);
 }
 .manage-models-link:hover { color: var(--si-300); }
+.manage-models-link:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 0;
+}
 </style>

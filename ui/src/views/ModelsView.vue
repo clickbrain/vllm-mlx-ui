@@ -245,12 +245,12 @@ async function doDelete() {
   const modelId = confirmModal.value.modelId
   confirmModal.value = null
   try { await modelsStore.deleteModel(modelId) }
-  catch (err) { console.error('Delete failed', err) }
+  catch (err) { modelsStore.actionError = `Failed to delete ${modelId}: ${String(err)}` }
 }
 
 async function handleDownload(modelId: string) {
   try { await modelsStore.downloadModel(modelId) }
-  catch (err) { console.error('Download failed', err) }
+  catch (err) { modelsStore.actionError = `Failed to download ${modelId}: ${String(err)}` }
 }
 
 onMounted(() => {
@@ -317,15 +317,17 @@ watch(activeTab, (tab) => {
       </div>
 
       <div class="library-toolbar">
-        <div class="filter-chips">
+        <div class="filter-chips" role="group" aria-label="Filter models">
           <button
             class="filter-chip"
             :class="{ active: libraryFilter === 'all' }"
+            :aria-pressed="libraryFilter === 'all'"
             @click="libraryFilter = 'all'"
           >All</button>
           <button
             class="filter-chip"
             :class="{ active: libraryFilter === 'active' }"
+            :aria-pressed="libraryFilter === 'active'"
             @click="libraryFilter = 'active'"
           >Active</button>
         </div>
@@ -335,6 +337,7 @@ watch(activeTab, (tab) => {
             type="text"
             class="lib-search-input"
             placeholder="Filter…"
+            aria-label="Filter models by name"
           />
         </div>
         <div class="toolbar-spacer" />
@@ -380,7 +383,7 @@ watch(activeTab, (tab) => {
     <!-- Find tab -->
     <div v-else-if="activeTab === 'Find'" class="tab-content">
       <!-- Company quick-search chips -->
-      <div class="company-filter-row">
+      <div class="company-filter-row" role="group" aria-label="Browse models by company">
         <span class="company-row-label">Browse by:</span>
         <button
           v-for="c in COMPANY_FILTERS"
@@ -397,6 +400,7 @@ watch(activeTab, (tab) => {
           type="text"
           class="search-input"
           placeholder="Search models… (empty = newest MLX models)"
+          aria-label="Search HuggingFace models"
           @keydown.enter="doSearch"
         />
         <AppButton variant="primary" size="sm" :loading="modelsStore.searching" @click="doSearch">
@@ -616,7 +620,10 @@ watch(activeTab, (tab) => {
   border-color: var(--bd-emphasis);
   color: var(--tx-secondary);
 }
-
+.filter-chip:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 2px;
+}
 .filter-chip.active {
   background: var(--ac-bg);
   border-color: var(--ac-border);
@@ -639,6 +646,10 @@ watch(activeTab, (tab) => {
 .sort-btn:hover {
   color: var(--tx-secondary);
   border-color: var(--bd-default);
+}
+.sort-btn:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 1px;
 }
 
 /* Model list */
@@ -812,8 +823,12 @@ watch(activeTab, (tab) => {
   transition: color var(--transition-fast), background var(--transition-fast);
   user-select: none;
 }
-.col-sortable:hover { color: var(--tx-secondary); background: var(--bg-2); }
+.col-sortable:hover { color: var(--tx-secondary); background: var(--bg-elevated); }
 .col-sortable.col-active { color: var(--si-300); }
+.col-sortable:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 1px;
+}
 
 .sort-arrow {
   font-size: 12px;
@@ -1025,11 +1040,14 @@ watch(activeTab, (tab) => {
 }
 
 .company-chip:hover:not(.active) {
-  background: var(--bg-2);
+  background: var(--bg-elevated);
   border-color: var(--bd-emphasis);
   color: var(--tx-primary);
 }
-
+.company-chip:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 2px;
+}
 .company-chip.active {
   background: var(--ac-bg);
   border-color: var(--ac-border);
@@ -1075,7 +1093,7 @@ watch(activeTab, (tab) => {
 }
 
 .filter-btn:hover:not(.active) {
-  background: var(--bg-2);
+  background: var(--bg-elevated);
   color: var(--tx-secondary);
   border-color: var(--bd-default);
 }

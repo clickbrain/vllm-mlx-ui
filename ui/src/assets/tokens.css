@@ -151,3 +151,32 @@
   --tx2:         var(--tx-secondary);
   --tx3:         var(--tx-tertiary);
 }
+
+/* ─── Global Accessibility ─── */
+/* Visible focus ring for keyboard navigation */
+:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 2px;
+}
+
+/* Remove outline for mouse clicks while keeping keyboard focus */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Skip-to-content link (screen-reader only, visible on focus) */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--si-600);
+  color: #fff;
+  border-radius: var(--r-md);
+  font-weight: 600;
+  z-index: 999999;
+  transition: top var(--transition-fast);
+}
+.skip-link:focus {
+  top: var(--space-4);
+}

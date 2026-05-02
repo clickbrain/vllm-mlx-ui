@@ -221,20 +221,87 @@ export const useServerStore = defineStore('server', () => {
   }
 
   /**
+   * Single batched fetch: returns status, metrics, memory, config in one HTTP call.
+   * Falls back to individual fetches for older servers without /poll.
+   */
+  async function fetchAllBatched() {
+    try {
+      const r = await api.get<{
+        status: ServerStatus;
+        metrics: Metrics | Record<string, never>;
+        memory: MemoryStats;
+        config: ServerConfig;
+      }>('/poll')
+
+      // Status
+      status.value = r.status
+      if (r.status.running) {
+        crashLog.value = null
+      } else if (r.status.crash_log) {
+        crashLog.value = r.status.crash_log
+      }
+      error.value = null
+
+      // Metrics
+      if (r.metrics && Object.keys(r.metrics).length) {
+        metrics.value = r.metrics as Metrics
+        metricsError.value = false
+        metricsHistory.value.push({
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          active: (r.metrics as Metrics).num_running ?? 0,
+          queued: (r.metrics as Metrics).num_waiting ?? 0,
+          total: (r.metrics as Metrics).total_requests_processed ?? 0,
+          memory_gb: (r.metrics as Metrics).metal?.active_memory_gb ?? 0,
+        })
+        if (metricsHistory.value.length > MAX_HISTORY)
+          metricsHistory.value = metricsHistory.value.slice(-MAX_HISTORY)
+      }
+
+      // Memory
+      memory.value = r.memory
+
+      // Config
+      config.value = r.config
+    } catch {
+      // Fallback: if /poll doesn't exist (old server), do individual fetches
+      await fetchStatus()
+      if (isRunning.value) await fetchMetrics()
+      await fetchMemory()
+      await fetchConfig()
+    }
+  }
+
+  /**
    * Starts background polling for all server state.
-   * Returns a cleanup function to stop polling.
+   * Pauses when the tab is hidden (user switches away) to save CPU/network,
+   * resumes when the tab becomes visible again.
+   * Returns a cleanup function to stop polling entirely.
    */
   function startPolling(intervalMs = 3000): () => void {
-    fetchStatus()
-    fetchMemory()
-    fetchConfig()
-    const id = setInterval(() => {
-      fetchStatus()
-      fetchMemory()
-      fetchConfig()
-      if (isRunning.value) fetchMetrics()
+    let currentInterval: ReturnType<typeof setInterval> = setInterval(() => {
+      fetchAllBatched()
     }, intervalMs)
-    return () => clearInterval(id)
+
+    // Initial fetch
+    fetchAllBatched()
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        clearInterval(currentInterval)
+      } else {
+        // Resume: immediate fetch then restart interval
+        fetchAllBatched()
+        currentInterval = setInterval(() => {
+          fetchAllBatched()
+        }, intervalMs)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    return () => {
+      clearInterval(currentInterval)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   }
 
   async function releaseMemory() {

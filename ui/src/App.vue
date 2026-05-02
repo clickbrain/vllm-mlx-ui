@@ -9,6 +9,7 @@
 import { onMounted } from 'vue'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppTopbar from '@/components/layout/AppTopbar.vue'
+import ToastNotification from '@/components/shared/ToastNotification.vue'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
 
@@ -38,6 +39,7 @@ onMounted(() => { serverStore.startPolling() })
         </RouterView>
       </main>
     </div>
+    <ToastNotification />
   </div>
 </template>
 
