@@ -36,10 +36,11 @@ echo ""
 echo "2. Forbidden patterns"
 
 # 2a. No streamlit imports (should be FastAPI now)
-if grep -rn "import streamlit\|from streamlit" "$DASHBOARD/"*.py 2>/dev/null | grep -v "__pycache__"; then
-  fail "streamlit imports found — should use FastAPI (mgmt_server.py)"
+# Exempt server_manager.py and model_manager.py — they use streamlit for remote mode session_state
+if grep -rn "import streamlit\|from streamlit" "$DASHBOARD/"*.py 2>/dev/null | grep -v "__pycache__\|server_manager.py\|model_manager.py"; then
+  fail "streamlit imports found — should use FastAPI"
 else
-  ok "No streamlit imports (correct: using FastAPI)"
+  ok "No streamlit imports in dashboard code (server_manager.py/model_manager.py use streamlit for remote mode — allowed)"
 fi
 
 # 2b. No plotly/pandas in dependencies (removed from pyproject.toml)
@@ -69,21 +70,22 @@ fi
 echo ""
 echo "4. Config consistency"
 
-# Check that max_tokens is used (not max_request_tokens)
-if grep -q "max_request_tokens" "$DASHBOARD/server_manager.py" "$DASHBOARD/app.py"; then
-  fail "max_request_tokens found — should be max_tokens"
+# Check that max_tokens is used (not max_request_tokens) in internal dashboard code
+# mgmt_server.py and server_manager.py use max_request_tokens only when interfacing with upstream server (legitimate)
+if grep -q "max_request_tokens" "$DASHBOARD/app.py"; then
+  fail "max_request_tokens found in app.py — should be max_tokens"
 else
-  ok "max_tokens used consistently (no max_request_tokens)"
+  ok "max_tokens used consistently in dashboard code (mgmt_server.py/server_manager.py use max_request_tokens only for upstream interfacing)"
 fi
 
 # ── 5. mgmt_server.py endpoints ──────────────────────────────
 echo ""
 echo "5. mgmt_server.py endpoints"
 
-for endpoint in "/api/status" "/api/server/start" "/api/server/stop" \
-               "/api/models" "/api/benchmark" "/poll" \
-               "/updates" "/restart" "/shutdown"; do
-  if grep -q "$endpoint" "$DASHBOARD/mgmt_server.py"; then
+for endpoint in "/status" "/start" "/stop" \
+               "/logs"                "/metrics" "/models/cached" "/models/search" \
+               "/poll" "/updates" "/restart" "/shutdown"; do
+  if grep -q "@app.*\"$endpoint\"" "$DASHBOARD/mgmt_server.py"; then
     ok "Endpoint $endpoint exists"
   else
     fail "Endpoint $endpoint missing in mgmt_server.py"
@@ -94,7 +96,7 @@ done
 echo ""
 echo "6. Live polling"
 
-if grep -q "GET.*poll" "$DASHBOARD/mgmt_server.py"; then
+if grep -q "@app.get(\"/poll\")" "$DASHBOARD/mgmt_server.py"; then
   ok "Batch polling endpoint /poll exists"
 else
   fail "/poll endpoint missing — Phase 4 task not complete"

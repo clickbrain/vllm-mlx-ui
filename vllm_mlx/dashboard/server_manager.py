@@ -282,7 +282,7 @@ def _load_local_config() -> dict[str, Any]:
 
     NOTE: This function reads from disk ONLY and never contacts the remote mgmt API.
     Used by mgmt_server.py to read config without triggering _mgmt_base() recursion.
-    _ui.py and benchmarks use load_config() instead, which may fetch from remote.
+    Benchmarks use load_config() instead, which may fetch from remote.
     """
     _ensure_state_dir()
     _init_default_api_key()
