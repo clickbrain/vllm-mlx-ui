@@ -117,8 +117,17 @@ def _strip_thinking(text: str) -> str:
 
 
 def grade_gsm8k(response: str, expected: str) -> bool:
-    """Extract last number from response (after stripping any thinking block)."""
+    """Extract answer from GSM8K response, supporting both #### and last-number formats."""
     text = _strip_thinking(response)
+    # GSM8K canonical format: model writes "#### <answer>" at the end
+    boxed = re.search(r"####\s*(-?\d+\.?\d*)", text)
+    if boxed:
+        got = boxed.group(1).rstrip(".")
+        try:
+            return float(got) == float(expected)
+        except ValueError:
+            return got.strip() == expected.strip()
+    # Fallback: last number in the response
     nums = re.findall(r"-?\d+\.?\d*", text)
     if not nums:
         return False
@@ -234,11 +243,13 @@ def _stream_completion(
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": True,
+            "stream_options": {"include_usage": True},
         },
         stream=True,
         timeout=timeout,
     ) as resp:
         resp.raise_for_status()
+        server_completion_tokens: int | None = None
         for raw_line in resp.iter_lines():
             if not raw_line:
                 continue
@@ -250,6 +261,10 @@ def _stream_completion(
                 break
             try:
                 obj = json.loads(payload)
+                # Capture server-reported usage if present (final chunk)
+                usage = obj.get("usage") or {}
+                if usage.get("completion_tokens"):
+                    server_completion_tokens = int(usage["completion_tokens"])
                 content = obj["choices"][0]["delta"].get("content", "")
                 if content:
                     if t_first is None:
@@ -263,9 +278,9 @@ def _stream_completion(
     text = "".join(chunks)
     ttft_ms = (t_first - t_start) * 1000.0 if t_first is not None else None
     total_ms = (t_end - t_start) * 1000.0
-    # Estimate completion tokens: SSE chunks are roughly 1 token each; use
-    # char-count fallback (avg 4 chars/token) as a sanity floor.
-    completion_tokens = max(token_count, len(text) // 4)
+    # Prefer server-reported completion_tokens; fall back to SSE chunk count
+    # or char-count estimate (avg 4 chars/token) as a sanity floor.
+    completion_tokens = server_completion_tokens if server_completion_tokens else max(token_count, len(text) // 4)
     elapsed_s = (t_end - t_start) or 1e-6
     tps = completion_tokens / elapsed_s
     return text, ttft_ms, total_ms, completion_tokens, tps
@@ -414,13 +429,27 @@ def run_quality_benchmark(
             speed_str += f" | TTFT {avg_ttft:.0f}ms avg"
         _cb(f"\n[{suite_upper}] Finished: {correct}/{total} ({accuracy:.0%}){speed_str}\n\n")
 
-    # Overall accuracy: weighted average across suites
+    # Overall accuracy: question-count-weighted mean across suites
+    # (prevents a 5-question suite from equalling a 100-question suite)
     if suite_results:
-        overall = sum(s["accuracy"] for s in suite_results.values()) / len(suite_results)
-        all_tps = [s["speed"]["avg_tokens_per_sec"] for s in suite_results.values() if s["speed"]["avg_tokens_per_sec"] is not None]
+        total_q = sum(s["total"] for s in suite_results.values())
+        overall = (
+            sum(s["correct"] for s in suite_results.values()) / total_q
+            if total_q > 0 else 0.0
+        )
+        all_tps_weighted = [
+            (s["speed"]["avg_tokens_per_sec"], s["speed"]["questions_timed"])
+            for s in suite_results.values()
+            if s["speed"]["avg_tokens_per_sec"] is not None and s["speed"]["questions_timed"] > 0
+        ]
         all_ttft = [s["speed"]["avg_ttft_ms"] for s in suite_results.values() if s["speed"]["avg_ttft_ms"] is not None]
+        if all_tps_weighted:
+            total_w = sum(w for _, w in all_tps_weighted)
+            avg_overall_tps = sum(v * w for v, w in all_tps_weighted) / total_w if total_w else None
+        else:
+            avg_overall_tps = None
         overall_speed = {
-            "avg_tokens_per_sec": round(sum(all_tps) / len(all_tps), 1) if all_tps else None,
+            "avg_tokens_per_sec": round(avg_overall_tps, 1) if avg_overall_tps is not None else None,
             "avg_ttft_ms": round(sum(all_ttft) / len(all_ttft), 1) if all_ttft else None,
             "total_tokens": sum(s["speed"]["total_tokens"] for s in suite_results.values()),
         }

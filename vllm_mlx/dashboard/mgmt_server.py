@@ -543,6 +543,7 @@ def clear_all_benchmarks(_: None = Depends(_check_auth)) -> dict:
 
 _benchmark_running = False
 _benchmark_lock = threading.Lock()
+_benchmark_stop_event: threading.Event | None = None
 
 
 @app.post("/benchmark/run")
@@ -550,15 +551,16 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
     """Start a benchmark run for one or more models in the background.
     Poll GET /benchmark/status to check progress, GET /benchmarks for results.
     """
-    global _benchmark_running
+    global _benchmark_running, _benchmark_stop_event
     with _benchmark_lock:
         if _benchmark_running:
             return {"ok": False, "message": "A benchmark is already running"}
         _benchmark_running = True
+        _benchmark_stop_event = threading.Event()
 
     model_ids: list[str] = req.get("model_ids", [])
     config: dict[str, Any] = req.get("config", {})
-    runs = int(config.get("runs", 3))
+    runs = int(config.get("runs", 10))
     max_tokens = int(config.get("max_tokens", 256))
     label = req.get("label", "") or config.get("label", "")
 
@@ -567,6 +569,17 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
             _benchmark_running = False
         raise HTTPException(status_code=400, detail="model_ids is required")
 
+    _SETTINGS_KEYS = (
+        "kv_cache_quantization", "kv_cache_quantization_bits",
+        "use_paged_cache", "continuous_batching",
+        "gpu_memory_utilization", "enable_prefix_cache",
+        "ssd_cache_dir", "ssd_cache_max_gb",
+    )
+    base_cfg = sm.load_config()
+    server_settings_snapshot = {k: base_cfg.get(k) for k in _SETTINGS_KEYS if base_cfg.get(k) is not None}
+
+    _stop = _benchmark_stop_event
+
     def _run() -> None:
         global _benchmark_running
         try:
@@ -574,6 +587,8 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
             server_running = sm.get_server_status().get("running", False)
             server_url = sm.get_server_url()
             for model_id in model_ids:
+                if _stop.is_set():
+                    break
                 if server_running and running_model and running_model == model_id:
                     br.run_live_benchmark(
                         model_id,
@@ -581,6 +596,8 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
                         prompts=runs,
                         max_tokens=max_tokens,
                         label=label,
+                        stop_event=_stop,
+                        server_settings=server_settings_snapshot,
                     )
                 else:
                     br.run_benchmark(model_id, prompts=runs, max_tokens=max_tokens)
@@ -595,9 +612,11 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
 @app.post("/benchmark/stop")
 def stop_benchmark_endpoint(_: None = Depends(_check_auth)) -> dict:
     """Signal the running speed benchmark to stop (sets running flag to False)."""
-    global _benchmark_running
+    global _benchmark_running, _benchmark_stop_event
     with _benchmark_lock:
         _benchmark_running = False
+        if _benchmark_stop_event:
+            _benchmark_stop_event.set()
     return {"ok": True}
 
 

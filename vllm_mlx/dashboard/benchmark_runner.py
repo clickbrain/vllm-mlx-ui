@@ -6,12 +6,15 @@ Executes vllm-mlx-bench as a subprocess, streams output back to the caller,
 and persists results history to ~/.vllm_mlx_ui/benchmark_results.json.
 """
 
+import contextlib
 import json
 import statistics
 import subprocess
 import sys
+import threading
 import time
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 import logging
@@ -19,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 STATE_DIR = Path.home() / ".vllm_mlx_ui"
 RESULTS_FILE = STATE_DIR / "benchmark_results.json"
+_SCHEMA_VERSION = 2
+_save_lock = threading.Lock()
 
 
 def _ensure_state_dir() -> Path:
@@ -45,14 +50,25 @@ def load_results() -> list[dict[str, Any]]:
 def save_result(result: dict[str, Any]) -> None:
     """Append a benchmark result dict to the persisted results file.
 
+    Uses a threading lock and atomic rename (write to .tmp then replace) to
+    prevent data loss when two benchmark threads finish simultaneously.
+
     Args:
         result: A benchmark result dict to append.
     """
     _ensure_state_dir()
-    results = load_results()
-    results.append(result)
-    with open(RESULTS_FILE, "w") as f:
-        json.dump(results, f, indent=2)
+    with _save_lock:
+        results = load_results()
+        results.append(result)
+        tmp = RESULTS_FILE.with_suffix(".tmp")
+        try:
+            with open(tmp, "w") as f:
+                json.dump(results, f, indent=2)
+            tmp.replace(RESULTS_FILE)
+        except Exception:
+            with contextlib.suppress(Exception):
+                tmp.unlink()
+            raise
 
 
 def delete_result(index: int) -> None:
@@ -62,11 +78,19 @@ def delete_result(index: int) -> None:
         index: Zero-based index into the results list. Out-of-range values are
             silently ignored.
     """
-    results = load_results()
-    if 0 <= index < len(results):
-        results.pop(index)
-        with open(RESULTS_FILE, "w") as f:
-            json.dump(results, f, indent=2)
+    with _save_lock:
+        results = load_results()
+        if 0 <= index < len(results):
+            results.pop(index)
+            tmp = RESULTS_FILE.with_suffix(".tmp")
+            try:
+                with open(tmp, "w") as f:
+                    json.dump(results, f, indent=2)
+                tmp.replace(RESULTS_FILE)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    tmp.unlink()
+                raise
 
 
 def clear_all_results() -> None:
@@ -211,13 +235,14 @@ def run_benchmark(
     # Metal cache inside the subprocess before any model weights are loaded.
     cmd = [sys.executable, "-c", _BENCH_PREAMBLE]
 
-    output_file = STATE_DIR / f"bench_{int(time.time())}.json"
+    output_file = STATE_DIR / f"bench_{uuid.uuid4().hex}.json"
     cmd += [
         "--model", model,
         "--prompts", str(prompts),
         "--max-tokens", str(max_tokens),
         "--output", str(output_file),
     ]
+    cmd += ["--temperature", "0.0"]
     if is_mllm:
         cmd += ["--mllm"]
     if video:
@@ -264,36 +289,45 @@ def run_benchmark(
         sig.lower() in raw_output.lower() for sig in _OOM_SIGNALS
     )
 
-    # Try to parse the JSON output file written by vllm-mlx-bench --output
-    if output_file.exists():
-        try:
-            with open(output_file) as f:
-                data = json.load(f)
-            data.setdefault("model", model)
-            data["timestamp"] = datetime.now().isoformat()
-            data["prompts"] = prompts
-            data["max_tokens"] = max_tokens
-            data["success"] = success
-            if is_oom:
-                data["error"] = "out_of_memory"
-            save_result(data)
-            return data
-        except Exception:
-            logger.warning("Operation failed", exc_info=True)
+    ts = datetime.now(timezone.utc).isoformat()
+    try:
+        # Try to parse the JSON output file written by vllm-mlx-bench --output
+        if output_file.exists():
+            try:
+                with open(output_file) as f:
+                    data = json.load(f)
+                data.setdefault("model", model)
+                data["timestamp"] = ts
+                data["prompts"] = prompts
+                data["max_tokens"] = max_tokens
+                data["success"] = success
+                data["schema_version"] = _SCHEMA_VERSION
+                data["result_type"] = "subprocess"
+                if is_oom:
+                    data["error"] = "out_of_memory"
+                save_result(data)
+                return data
+            except Exception:
+                logger.warning("Operation failed", exc_info=True)
 
-    # Fallback — store raw output for debugging
-    result: dict[str, Any] = {
-        "model": model,
-        "timestamp": datetime.now().isoformat(),
-        "prompts": prompts,
-        "max_tokens": max_tokens,
-        "success": success,
-        "raw_output": raw_output,
-    }
-    if is_oom:
-        result["error"] = "out_of_memory"
-    save_result(result)
-    return result
+        # Fallback — store raw output for debugging
+        result: dict[str, Any] = {
+            "schema_version": _SCHEMA_VERSION,
+            "result_type": "subprocess",
+            "model": model,
+            "timestamp": ts,
+            "prompts": prompts,
+            "max_tokens": max_tokens,
+            "success": success,
+            "raw_output": raw_output,
+        }
+        if is_oom:
+            result["error"] = "out_of_memory"
+        save_result(result)
+        return result
+    finally:
+        with contextlib.suppress(Exception):
+            output_file.unlink(missing_ok=True)
 
 
 def run_custom_benchmark(
@@ -331,8 +365,10 @@ def run_custom_benchmark(
             raise RuntimeError("Inference server not responding")
     except Exception as e:
         result: dict[str, Any] = {
+            "schema_version": _SCHEMA_VERSION,
+            "result_type": "custom",
             "model": model_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "benchmark_type": "custom",
             "custom_prompts": custom_prompts,
             "max_tokens": max_tokens,
@@ -452,8 +488,10 @@ def run_custom_benchmark(
     total_vals = [r["total_ms"] for r in valid]
 
     result = {
+        "schema_version": _SCHEMA_VERSION,
+        "result_type": "custom",
         "model": model_id,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "benchmark_type": "custom",
         "custom_prompts": custom_prompts,
         "max_tokens": max_tokens,
@@ -487,10 +525,12 @@ _TEST_PROMPTS = [
 def run_live_benchmark(
     model_id: str,
     server_url: str = "http://127.0.0.1:8000",
-    prompts: int = 3,
+    prompts: int = 10,
     max_tokens: int = 256,
     output_callback: Callable[[str], None] | None = None,
     label: str = "",
+    stop_event: threading.Event | None = None,
+    server_settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Benchmark the RUNNING inference server by sending live requests.
 
@@ -505,8 +545,9 @@ def run_live_benchmark(
         output_callback(f"Running live benchmark against {server_url}...\n")
         output_callback(f"Model: {model_id}\nPrompts: {prompts}\nMax tokens: {max_tokens}\n")
 
-    tps_list: list[float] = []
-    ttft_list: list[float] = []
+    ttft_list: list[float] = []        # per-run TTFT in milliseconds
+    e2e_tps_list: list[float] = []     # per-run e2e TPS (tokens / wall-clock)
+    gen_tps_list: list[float] = []     # per-run gen TPS ((tokens-1) / post-first-token)
     raw_lines: list[str] = []
 
     # Verify the server is running
@@ -516,10 +557,14 @@ def run_live_benchmark(
             raise RuntimeError("Inference server not responding")
     except Exception as e:
         result: dict[str, Any] = {
+            "schema_version": _SCHEMA_VERSION,
+            "result_type": "live",
             "model": model_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "label": label,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "prompts": prompts,
             "max_tokens": max_tokens,
+            "server_settings": server_settings,
             "success": False,
             "error": f"Server not reachable: {e}",
             "raw_output": str(e),
@@ -527,7 +572,36 @@ def run_live_benchmark(
         save_result(result)
         return result
 
+    # Warmup: two throwaway requests to prime KV cache and JIT kernels before measuring
+    _WARMUP_PROMPTS = ["Hello!", "What is 2+2?"]
+    if output_callback:
+        output_callback("[warmup] Running 2 warmup requests (not measured)...\n")
+    for wp in _WARMUP_PROMPTS:
+        try:
+            wr = _req.post(
+                f"{server_url}/v1/chat/completions",
+                json={
+                    "model": model_id,
+                    "messages": [{"role": "user", "content": wp}],
+                    "max_tokens": 32,
+                    "stream": True,
+                    "temperature": 0.0,
+                },
+                stream=True,
+                timeout=60,
+            )
+            for _chunk in wr.iter_lines():
+                pass
+        except Exception as we:
+            logger.warning("Warmup request failed (non-fatal): %s", we)
+    if output_callback:
+        output_callback("[warmup] done\n")
+
     for i in range(prompts):
+        if stop_event and stop_event.is_set():
+            if output_callback:
+                output_callback("[stopped] Benchmark interrupted.\n")
+            break
         prompt = _TEST_PROMPTS[i % len(_TEST_PROMPTS)]
         if output_callback:
             output_callback(f"\n[{i+1}/{prompts}] {prompt[:60]}...\n")
@@ -537,6 +611,7 @@ def run_live_benchmark(
         last_content_time: float | None = None
         char_count = 0          # sum of content char lengths for token estimation
         completion_tokens: int | None = None   # from server usage field (preferred)
+        finish_reason: str | None = None
         content_buffer = ""
 
         try:
@@ -573,6 +648,10 @@ def run_live_benchmark(
                 if usage.get("completion_tokens"):
                     completion_tokens = int(usage["completion_tokens"])
                 choices = data.get("choices") or []
+                if choices:
+                    fr = choices[0].get("finish_reason")
+                    if fr:
+                        finish_reason = fr
                 delta = choices[0].get("delta", {}) if choices else {}
                 # Accept reasoning_content (thinking tokens from Qwen3 etc.) as valid
                 # output — otherwise thinking can exhaust max_tokens with no delta.content.
@@ -585,62 +664,99 @@ def run_live_benchmark(
                     char_count += len(content)
                     content_buffer += content
 
+            # Skip truncated responses — they make TPS look artificially high
+            if finish_reason == "length":
+                raw_lines.append(
+                    f"Run {i+1}: skipped (finish_reason=length — response was truncated)"
+                )
+                if output_callback:
+                    output_callback(
+                        f"  → skipped: response truncated (hit max_tokens={max_tokens})\n"
+                    )
+                continue
+
             if first_token_time is not None and char_count > 0:
                 ttft = first_token_time - start
+                total_elapsed = (last_content_time or first_token_time) - start
                 # Use server's completion_tokens if available; else estimate
                 # at 4 chars/token (better than word-splitting).
                 actual_tokens = completion_tokens if completion_tokens else max(1, char_count // 4)
                 gen_time = (last_content_time - first_token_time) if last_content_time else 0.0
 
+                # e2e TPS = total tokens / total wall-clock (includes TTFT)
+                e2e_tps = actual_tokens / total_elapsed if total_elapsed > 0.01 else 0
+                # gen TPS = (tokens - 1) / post-first-token window
+                # (the first token is accounted for in TTFT, not generation throughput)
+                gen_tps = max(0, actual_tokens - 1) / gen_time if gen_time > 0.1 else 0
+
                 # Sanity check: if all tokens arrived in under 100 ms the
                 # server buffered the entire response before streaming it —
-                # gen_time is meaningless.  Keep TTFT but skip TPS.
+                # gen_time is meaningless.  Keep TTFT but skip gen TPS.
                 if gen_time < 0.1 and actual_tokens > 5:
-                    ttft_list.append(ttft)
+                    ttft_list.append(ttft * 1000)
                     raw_lines.append(
-                        f"Run {i+1}: TPS skipped (buffered stream), "
+                        f"Run {i+1}: gen TPS skipped (buffered stream), "
                         f"TTFT {ttft*1000:.0f}ms, {actual_tokens} tokens"
                     )
                     if output_callback:
                         output_callback(
-                            f"  → TPS skipped (server buffered response), "
+                            f"  → gen TPS skipped (server buffered response), "
                             f"TTFT {ttft*1000:.0f}ms\n"
                         )
                 else:
-                    tps = actual_tokens / gen_time if gen_time > 0.01 else 0
-                    ttft_list.append(ttft)
-                    tps_list.append(tps)
+                    ttft_list.append(ttft * 1000)
+                    e2e_tps_list.append(e2e_tps)
+                    gen_tps_list.append(gen_tps)
                     raw_lines.append(
-                        f"Run {i+1}: {tps:.1f} tok/s, TTFT {ttft*1000:.0f}ms, {actual_tokens} tokens"
+                        f"Run {i+1}: e2e {e2e_tps:.1f} tok/s, gen {gen_tps:.1f} tok/s, "
+                        f"TTFT {ttft*1000:.0f}ms, {actual_tokens} tokens"
                     )
                     if output_callback:
-                        output_callback(f"  → {tps:.1f} tok/s (TTFT {ttft*1000:.0f}ms)\n")
+                        output_callback(
+                            f"  → e2e {e2e_tps:.1f} tok/s | gen {gen_tps:.1f} tok/s "
+                            f"(TTFT {ttft*1000:.0f}ms)\n"
+                        )
         except Exception as e:
             raw_lines.append(f"Run {i+1} error: {e}")
             if output_callback:
                 output_callback(f"  Error: {e}\n")
 
-    success = len(tps_list) > 0
-    avg_tps = statistics.mean(tps_list) if tps_list else 0.0
-    median_tps = statistics.median(tps_list) if tps_list else 0.0
-    min_tps = min(tps_list) if tps_list else 0.0
-    max_tps = max(tps_list) if tps_list else 0.0
-    avg_ttft_ms = statistics.mean(ttft_list) * 1000 if ttft_list else 0.0
+    success = len(ttft_list) > 0
+    avg_e2e_tps = statistics.mean(e2e_tps_list) if e2e_tps_list else 0.0
+    avg_gen_tps = statistics.mean(gen_tps_list) if gen_tps_list else 0.0
+    # avg_tps kept for backward compatibility — equals avg_gen_tps (the more meaningful metric)
+    avg_tps = avg_gen_tps
+    median_tps = statistics.median(gen_tps_list) if gen_tps_list else 0.0
+    min_tps = min(gen_tps_list) if gen_tps_list else 0.0
+    max_tps = max(gen_tps_list) if gen_tps_list else 0.0
+    avg_ttft_ms = statistics.mean(ttft_list) if ttft_list else 0.0
 
     result = {
+        "schema_version": _SCHEMA_VERSION,
+        "result_type": "live",
         "model": model_id,
-        "timestamp": datetime.utcnow().isoformat(),
-        "prompts": prompts,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "prompts_requested": prompts,
+        "prompts_completed": len(ttft_list),
         "max_tokens": max_tokens,
         "success": success,
+        "label": label,
+        "server_settings": server_settings,
+        # Primary metrics
+        "avg_gen_tps": round(avg_gen_tps, 2),
+        "avg_e2e_tps": round(avg_e2e_tps, 2),
+        "avg_ttft_ms": round(avg_ttft_ms, 1),
+        # Legacy aliases (kept for backward compatibility with existing UI consumers)
         "avg_tps": round(avg_tps, 2),
         "median_tps": round(median_tps, 2),
         "min_tps": round(min_tps, 2),
         "max_tps": round(max_tps, 2),
-        "avg_ttft_ms": round(avg_ttft_ms, 1),
+        # Raw samples for statistical analysis
+        "ttft_samples_ms": [round(v, 1) for v in ttft_list],
+        "e2e_tps_samples": [round(v, 2) for v in e2e_tps_list],
+        "gen_tps_samples": [round(v, 2) for v in gen_tps_list],
         "raw_output": "\n".join(raw_lines),
-        "live": True,  # flag to distinguish from subprocess benchmark
-        "label": label,
+        "live": True,  # legacy flag — result_type: "live" is the canonical field
     }
     if not success:
         result["error"] = "No successful runs completed"
