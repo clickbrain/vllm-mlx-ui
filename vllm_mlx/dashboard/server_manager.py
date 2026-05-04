@@ -694,29 +694,6 @@ def get_server_status() -> dict[str, Any]:
     }
 
 
-# Model name patterns → reasoning parser name. Checked in order; first match wins.
-_REASONING_PARSER_PATTERNS: list[tuple[str, str]] = [
-    ("gemma-4", "gemma4"),
-    ("gemma4", "gemma4"),
-    ("qwen3", "qwen3"),
-    ("qwq", "qwen3"),
-    ("deepseek-r1", "deepseek_r1"),
-    ("deepseek_r1", "deepseek_r1"),
-    ("harmony", "harmony"),
-    ("glm-4", "glm4"),
-    ("glm4", "glm4"),
-]
-
-
-def _auto_detect_reasoning_parser(model_name: str) -> str:
-    """Return the reasoning parser name for *model_name*, or '' if none known."""
-    lower = model_name.lower()
-    for fragment, parser in _REASONING_PARSER_PATTERNS:
-        if fragment in lower:
-            return parser
-    return ""
-
-
 def _build_command(config: dict[str, Any]) -> list[str]:
     """Build the inference server launch command, delegating to the selected engine.
 
