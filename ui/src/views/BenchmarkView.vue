@@ -134,8 +134,11 @@ onUnmounted(() => {
 })
 
 watch(() => serverStore.isRunning, (running) => {
-  if (running) refreshCache()
-  else { cacheStats.value = null; cacheError.value = false }
+  if (running) {
+    refreshCache()
+    // Reset so perf settings are re-fetched from the (possibly restarted) server
+    perfSettingsLoaded.value = false
+  } else { cacheStats.value = null; cacheError.value = false }
 })
 
 // ── Live tab — chart data ──────────────────────────────────────────────────

@@ -188,10 +188,10 @@ async function loadMore() {
 }
 
 // Preload newest mlx-community models when Find tab is opened for the first time
-let trendingLoaded = false
+const trendingLoaded = ref(false)
 function onFindTabActivated() {
-  if (!trendingLoaded && modelsStore.searchResults.length === 0) {
-    trendingLoaded = true
+  if (!trendingLoaded.value && modelsStore.searchResults.length === 0) {
+    trendingLoaded.value = true
     sortCol.value = 'last_modified'
     sortDir.value = 'desc'
     modelsStore.searchHF('', true, 0, 'last_modified')
