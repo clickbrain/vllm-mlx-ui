@@ -367,24 +367,26 @@ watch(activeTab, (tab) => {
           <span class="lib-hdr-fit">Size · Fit <span class="lib-hdr-note">(based on available RAM)</span></span>
           <span class="lib-hdr-actions">Actions</span>
         </div>
-        <RecycleScroller
-          :items="filteredModels"
-          :item-size="120"
-          key-field="id"
-          class="virtual-scroller"
-          v-slot="{ item }"
-        >
-          <LibCard
-            :model-id="item.id"
-            :size-gb="item.size_gb"
-            :quantization="item.quantization"
-            :active="item.active"
-            :cached="item.cached"
-            @load="handleLoad(item.id)"
-            @delete="handleDelete(item.id)"
-            @download="handleDownload(item.id)"
-          />
-        </RecycleScroller>
+        <div class="virtual-scroller-wrapper">
+          <RecycleScroller
+            :items="filteredModels"
+            :item-size="120"
+            key-field="id"
+            class="virtual-scroller"
+            v-slot="{ item }"
+          >
+            <LibCard
+              :model-id="item.id"
+              :size-gb="item.size_gb"
+              :quantization="item.quantization"
+              :active="item.active"
+              :cached="item.cached"
+              @load="handleLoad(item.id)"
+              @delete="handleDelete(item.id)"
+              @download="handleDownload(item.id)"
+            />
+          </RecycleScroller>
+        </div>
       </div>
     </div>
 
@@ -1275,12 +1277,16 @@ watch(activeTab, (tab) => {
   flex-shrink: 0;
 }
 
-/* Virtual scroller — flex so it fills available space */
-.virtual-scroller {
+/* Virtual scroller wrapper fills remaining space */
+.virtual-scroller-wrapper {
   flex: 1 1 0;
-  overflow-y: auto;
   min-height: 200px;
-  width: 100%;
+  overflow: hidden;
+}
+
+.virtual-scroller {
+  height: 100%;
+  overflow-y: auto;
 }
 
 </style>
