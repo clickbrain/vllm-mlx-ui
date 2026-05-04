@@ -52,6 +52,7 @@ interface MemoryStats {
 
 export interface ServerConfig {
   model?: string
+  engine_id?: string
   port?: number
   host?: string
   max_tokens?: number
@@ -79,7 +80,13 @@ export const useServerStore = defineStore('server', () => {
   }>>([])
   const MAX_HISTORY = 120
 
-  const isRunning = computed(() => status.value?.running ?? false)
+  /**
+   * The active inference engine id (e.g. 'vllm-mlx' or 'rapid-mlx').
+   * Populated from the /poll runtime field or config fallback.
+   */
+  const engineId = computed(() => config.value?.engine_id ?? 'vllm-mlx')
+
+
   const memoryPercent = computed(() => memory.value?.percent ?? 0)
   const underPressure = computed(() => memoryPercent.value > 75)
 
@@ -231,6 +238,7 @@ export const useServerStore = defineStore('server', () => {
         metrics: Metrics | Record<string, never>;
         memory: MemoryStats;
         config: ServerConfig;
+        runtime?: { engine_id?: string; model?: string; started_at?: string };
       }>('/poll')
 
       // Status
@@ -260,8 +268,10 @@ export const useServerStore = defineStore('server', () => {
       // Memory
       memory.value = r.memory
 
-      // Config
-      config.value = r.config
+      // Config — merge runtime.engine_id into config so engineId computed stays fresh
+      config.value = r.runtime?.engine_id
+        ? { ...r.config, engine_id: r.runtime.engine_id }
+        : r.config
     } catch {
       // Fallback: if /poll doesn't exist (old server), do individual fetches
       await fetchStatus()
@@ -331,7 +341,7 @@ export const useServerStore = defineStore('server', () => {
 
   return {
     status, metrics, memory, config, loading, error, crashLog, metricsError, metricsHistory,
-    isRunning, memoryPercent, underPressure, isMultimodal,
+    isRunning, memoryPercent, underPressure, isMultimodal, engineId,
     modelId, uptimeSeconds, tps, baseUrl,
     numRunning, numWaiting, totalRequests, totalPromptTokens, totalCompletionTokens,
     metalMemoryGb, peakMemoryGb,

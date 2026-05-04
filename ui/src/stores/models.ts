@@ -94,6 +94,7 @@ export interface BenchmarkHistoryEntry {
   per_prompt?: PerPromptResult[]
   custom_prompts?: string[]
   dashboard_version?: string
+  engine_id?: string
 }
 
 export interface BenchmarkConfig {
@@ -446,6 +447,9 @@ export const useModelsStore = defineStore('models', () => {
         per_prompt: Array.isArray(r.per_prompt) ? r.per_prompt : undefined,
         custom_prompts: Array.isArray(r.custom_prompts) ? r.custom_prompts : undefined,
         dashboard_version: r.dashboard_version ? String(r.dashboard_version) : undefined,
+        engine_id: r.server_settings?.engine_id
+          ? String(r.server_settings.engine_id)
+          : r.engine_id ? String(r.engine_id) : undefined,
       }
       if (r.suites) {
         entry.overall_score = Number(r.overall_score ?? 0)

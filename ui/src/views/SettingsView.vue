@@ -11,7 +11,7 @@
   next server restart depending on the setting type.
 -->
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useMachinesStore } from '@/stores/machines'
 import type { Machine } from '@/stores/machines'
 import { useServerStore } from '@/stores/server'
@@ -30,6 +30,80 @@ const form = reactive({ name: '', host: '', port: 8502, type: 'remote' as 'remot
 const formError = ref('')
 const confirmRemove = ref<Machine | null>(null)
 const settingsError = ref('')
+
+// ── Inference engine management ────────────────────────────────────────────
+interface EngineInfo {
+  id: string
+  name: string
+  description: string
+  installed: boolean
+  install_method: 'bundled' | 'pip'
+  version?: string
+}
+const engines = ref<EngineInfo[]>([])
+const enginesLoading = ref(false)
+const enginesError = ref('')
+const selectedEngine = ref(serverStore.engineId)
+const installingEngine = ref<string | null>(null)
+const engineInstallLog = ref<Record<string, string>>({})
+
+async function loadEngines() {
+  enginesLoading.value = true
+  enginesError.value = ''
+  try {
+    const result = await api.get<EngineInfo[]>('/engines')
+    engines.value = result ?? []
+  } catch (e: any) {
+    enginesError.value = `Failed to load engines: ${e?.message ?? 'unknown error'}`
+  } finally {
+    enginesLoading.value = false
+  }
+}
+
+async function selectEngine(id: string) {
+  selectedEngine.value = id
+  try {
+    await api.post('/config', { engine_id: id })
+  } catch (e: any) {
+    settingsError.value = `Failed to save engine: ${e?.message ?? 'unknown error'}`
+  }
+}
+
+async function installEngine(id: string) {
+  installingEngine.value = id
+  engineInstallLog.value[id] = ''
+  try {
+    const resp = await fetch(`/api/engines/${id}/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    if (!resp.body) throw new Error('No response body')
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let done = false
+    while (!done) {
+      const { value, done: d } = await reader.read()
+      done = d
+      if (value) {
+        const chunk = decoder.decode(value)
+        // SSE lines: "data: <line>\n\n"
+        for (const line of chunk.split('\n')) {
+          if (line.startsWith('data: ')) {
+            engineInstallLog.value[id] = (engineInstallLog.value[id] ?? '') + line.slice(6) + '\n'
+          }
+        }
+      }
+    }
+    await loadEngines()
+  } catch (e: any) {
+    enginesError.value = `Install failed: ${e?.message ?? 'unknown error'}`
+  } finally {
+    installingEngine.value = null
+  }
+}
+
+// Keep selectedEngine in sync if the store updates after a poll
+watch(() => serverStore.engineId, (id) => { selectedEngine.value = id })
 
 // Fleet discovery
 interface DiscoveredMachine { ip: string; hostname: string; port: number; version: string; model_id: string }
@@ -174,6 +248,7 @@ onMounted(async () => {
     diskUsedGb.value = r.size_gb
   } catch { /* cache size is non-critical */ }
   updatesStore.checkUpdates().catch(() => { /* non-critical */ })
+  loadEngines().catch(() => { /* non-critical */ })
 })
 
 async function saveCachePath() {
@@ -356,6 +431,54 @@ async function doRestart() {
         >
           {{ updatesStore.installing ? 'Installing…' : '⬆ Install Updates & Restart' }}
         </AppButton>
+      </div>
+    </section>
+
+    <!-- Inference Engine -->
+    <section class="settings-section" aria-labelledby="engine-heading">
+      <div class="section-header">
+        <div>
+          <div class="section-title" id="engine-heading">Inference Engine</div>
+          <div class="section-desc">Choose which engine runs your models. Changing takes effect on next server start.</div>
+        </div>
+      </div>
+      <div v-if="enginesError" class="settings-error-banner">
+        ⚠ {{ enginesError }}
+        <button class="error-dismiss" @click="enginesError = ''">✕</button>
+      </div>
+      <div v-if="enginesLoading" class="pref-list">
+        <div class="pref-row"><span class="pref-label">Loading engines…</span></div>
+      </div>
+      <div v-else class="engine-cards">
+        <div
+          v-for="eng in engines"
+          :key="eng.id"
+          class="engine-card"
+          :class="{ active: selectedEngine === eng.id, unavailable: !eng.installed && eng.install_method === 'bundled' }"
+          @click="eng.installed || eng.install_method !== 'bundled' ? selectEngine(eng.id) : undefined"
+        >
+          <div class="engine-card-header">
+            <span class="engine-card-name">{{ eng.name }}</span>
+            <span class="engine-installed-badge" :class="eng.installed ? 'installed' : 'not-installed'">
+              {{ eng.installed ? '✓ Installed' : 'Not installed' }}
+            </span>
+          </div>
+          <div class="engine-card-desc">{{ eng.description }}</div>
+          <div class="engine-card-footer">
+            <span class="engine-method-chip">{{ eng.install_method }}</span>
+            <span v-if="eng.version" class="engine-version dim">v{{ eng.version }}</span>
+            <AppButton
+              v-if="!eng.installed && eng.install_method === 'pip'"
+              variant="primary"
+              size="sm"
+              :loading="installingEngine === eng.id"
+              @click.stop="installEngine(eng.id)"
+            >Install</AppButton>
+          </div>
+          <div v-if="engineInstallLog[eng.id]" class="engine-install-log">
+            <pre>{{ engineInstallLog[eng.id] }}</pre>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1009,6 +1132,28 @@ async function doRestart() {
 .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
 .status-dot.online  { background: var(--ph-500); box-shadow: 0 0 0 2px rgba(34,197,94,.2); }
 .status-dot.offline { background: var(--g-600); }
+
+/* Engine cards */
+.engine-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-4); padding: var(--space-4) var(--space-5); }
+.engine-card {
+  border: 1.5px solid var(--bd-default); border-radius: var(--r-lg); padding: var(--space-4);
+  cursor: pointer; transition: border-color .15s, background .15s;
+  background: var(--bg-elevated);
+}
+.engine-card:hover { border-color: var(--bd-hover); }
+.engine-card.active { border-color: var(--ac-400); background: var(--ac-bg); }
+.engine-card.unavailable { opacity: 0.55; cursor: default; }
+.engine-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
+.engine-card-name { font-weight: 600; font-size: var(--text-sm); color: var(--tx-primary); }
+.engine-installed-badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: var(--r-pill); }
+.engine-installed-badge.installed { color: #4ade80; background: rgba(74,222,128,.1); border: 1px solid rgba(74,222,128,.25); }
+.engine-installed-badge.not-installed { color: var(--tx-muted); background: var(--bg-inset); border: 1px solid var(--bd-subtle); }
+.engine-card-desc { font-size: 13px; color: var(--tx-muted); line-height: 1.4; margin-bottom: var(--space-3); }
+.engine-card-footer { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.engine-method-chip { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--tx-muted); padding: 1px 6px; border-radius: var(--r-pill); background: var(--bg-inset); border: 1px solid var(--bd-subtle); }
+.engine-version { font-size: 12px; font-family: var(--font-mono); }
+.engine-install-log { margin-top: var(--space-3); }
+.engine-install-log pre { font-size: 11px; font-family: var(--font-mono); color: var(--tx-muted); background: var(--bg-inset); border-radius: var(--r-sm); padding: var(--space-3); max-height: 160px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
 .pref-list { display: flex; flex-direction: column; }
 .pref-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--bd-subtle); }
 .pref-row:last-child { border-bottom: none; }

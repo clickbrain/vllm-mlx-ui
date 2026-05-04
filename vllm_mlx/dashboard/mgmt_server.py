@@ -598,6 +598,7 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
     )
     base_cfg = sm.load_config()
     server_settings_snapshot = {k: base_cfg.get(k) for k in _SETTINGS_KEYS if base_cfg.get(k) is not None}
+    server_settings_snapshot["engine_id"] = base_cfg.get("engine_id", "vllm-mlx")
 
     _stop = _benchmark_stop_event
 
@@ -1482,10 +1483,10 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
         )
         base_cfg = sm.load_config()
         server_settings_snapshot = {k: base_cfg.get(k) for k in _SETTINGS_KEYS if base_cfg.get(k) is not None}
+        server_settings_snapshot["engine_id"] = base_cfg.get("engine_id", "vllm-mlx")
 
         try:
             for mid in models_to_run:
-                if stop_event.is_set():
                     break
                 current_model = sm.load_config().get("model", "")
                 if current_model != mid:

@@ -269,6 +269,7 @@ async function doClearCache(type: string) {
       <div class="section-label">
         Live Metrics
         <span v-if="serverStore.metricsError && serverStore.isRunning" class="metrics-stale-badge">metrics unavailable</span>
+        <span v-if="serverStore.isRunning && serverStore.engineId !== 'vllm-mlx'" class="engine-running-badge">{{ serverStore.engineId }}</span>
         <button class="view-full-link" @click="router.push('/benchmarks')">View full metrics →</button>
       </div>
       <div class="metrics-grid">
@@ -501,6 +502,17 @@ async function doClearCache(type: string) {
   color: #f97316;
   background: rgba(249, 115, 22, 0.10);
   border: 1px solid rgba(249, 115, 22, 0.25);
+  border-radius: var(--r-pill);
+  padding: 1px 7px;
+}
+
+.engine-running-badge {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: #fb923c;
+  background: rgba(251, 146, 60, 0.10);
+  border: 1px solid rgba(251, 146, 60, 0.25);
   border-radius: var(--r-pill);
   padding: 1px 7px;
 }

@@ -1668,6 +1668,7 @@ watch(activeTab, (tab) => {
             <thead>
               <tr>
                 <th>Model</th>
+                <th>Engine</th>
                 <th>Type</th>
                 <th>Date</th>
                 <th class="num">Speed (t/s)</th>
@@ -1684,6 +1685,7 @@ watch(activeTab, (tab) => {
             <tbody>
               <tr v-for="run in compareRuns" :key="run.id">
                 <td class="mono">{{ (run.model_id || '').split('/').pop() || '—' }}</td>
+                <td><span class="engine-pill">{{ run.engine_id ?? 'vllm-mlx' }}</span></td>
                 <td><span class="type-pill" :class="run.benchmark_type">{{ run.benchmark_type || 'speed' }}</span></td>
                 <td class="dim">{{ formatRelTime(run.timestamp) }}</td>
                 <td class="num mono">
@@ -1816,6 +1818,10 @@ watch(activeTab, (tab) => {
                 <span class="detail-k">Dashboard ver</span>
                 <span class="detail-v mono">{{ selectedRun.dashboard_version }}</span>
               </div>
+              <div class="detail-kv" v-if="selectedRun.engine_id">
+                <span class="detail-k">Engine</span>
+                <span class="detail-v"><span class="engine-pill">{{ selectedRun.engine_id }}</span></span>
+              </div>
             </div>
           </div>
 
@@ -1889,6 +1895,7 @@ watch(activeTab, (tab) => {
               <span class="history-model mono">{{ (run.model_id || '').split('/').pop() || '—' }}</span>
               <span class="history-time dim">{{ formatRelTime(run.timestamp) }}</span>
               <span v-if="run.label" class="history-label">"{{ run.label }}"</span>
+              <span v-if="run.engine_id && run.engine_id !== 'vllm-mlx'" class="h-badge engine-badge">{{ run.engine_id }}</span>
             </div>
             <div class="history-badges">
               <span v-if="run.avg_tps > 0" class="h-badge speed-badge"
@@ -2669,6 +2676,15 @@ watch(activeTab, (tab) => {
 .dim-badge { color: var(--tx-muted); background: var(--bg-elevated); }
 .thinking-badge { color: #818cf8; background: rgba(129,140,248,.08); border-color: rgba(129,140,248,.25); }
 .kv-badge { color: #38bdf8; background: rgba(56,189,248,.08); border-color: rgba(56,189,248,.25); }
+.engine-badge { color: #fb923c; background: rgba(251,146,60,.08); border-color: rgba(251,146,60,.25); }
+
+/* Engine pill (inline, non-badge usage in tables) */
+.engine-pill {
+  display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: 600; font-family: var(--font-mono);
+  padding: 1px 6px; border-radius: var(--r-pill);
+  color: #fb923c; background: rgba(251,146,60,.08); border: 1px solid rgba(251,146,60,.25);
+}
 .stale-warn { color: #f59e0b; font-size: 11px; margin-left: 3px; cursor: help; }
 
 /* Type pill */
