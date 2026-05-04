@@ -1275,10 +1275,12 @@ watch(activeTab, (tab) => {
   flex-shrink: 0;
 }
 
-/* Virtual scroller */
+/* Virtual scroller — flex so it fills available space */
 .virtual-scroller {
-  height: calc(100vh - 350px);
+  flex: 1 1 0;
   overflow-y: auto;
+  min-height: 200px;
+  width: 100%;
 }
 
 </style>
