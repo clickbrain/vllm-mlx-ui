@@ -537,7 +537,7 @@ async function _doBenchmarkRun() {
             speedPhase.value = 'done'
             await modelsStore.fetchBenchmarkResults()
             const hist = modelsStore.benchmarkHistory
-            lastRunSpeed.value = hist.length ? hist[0] : null
+            lastRunSpeed.value = hist.length ? hist[hist.length - 1] : null
             speedDone = true
             checkDone()
           }

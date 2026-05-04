@@ -249,6 +249,7 @@ def run_benchmark(
         cmd += ["--video"]
 
     output_lines: list[str] = []
+    proc = None
     try:
         proc = subprocess.Popen(
             cmd,
@@ -263,15 +264,18 @@ def run_benchmark(
             output_lines.append(line)
             if output_callback:
                 output_callback(line)
+        proc.stdout.close()
         proc.wait()
         success = proc.returncode == 0
     except Exception as e:
         success = False
         output_lines.append(f"Error: {e}\n")
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait()
+            except Exception:
+                pass
 
     raw_output = "".join(output_lines)
 
@@ -451,7 +455,7 @@ def run_custom_benchmark(
             if first_token_time is not None and char_count > 0:
                 ttft_ms = round((first_token_time - start) * 1000, 1)
                 total_ms = round((last_content_time - start) * 1000, 1) if last_content_time else ttft_ms
-                actual_tokens = completion_tokens if completion_tokens else max(1, char_count // 4)
+                actual_tokens = completion_tokens if completion_tokens else max(1, round(char_count / 4))
                 # Use total wall-clock time (not just streaming window) so tok/s is
                 # accurate even when thinking tokens are buffered server-side before
                 # any streaming begins.
@@ -685,7 +689,7 @@ def run_live_benchmark(
                 total_elapsed = (last_content_time or first_token_time) - start
                 # Use server's completion_tokens if available; else estimate
                 # at 4 chars/token (better than word-splitting).
-                actual_tokens = completion_tokens if completion_tokens else max(1, char_count // 4)
+                actual_tokens = completion_tokens if completion_tokens else max(1, round(char_count / 4))
                 gen_time = (last_content_time - first_token_time) if last_content_time else 0.0
 
                 # e2e TPS = total tokens / total wall-clock (includes TTFT)

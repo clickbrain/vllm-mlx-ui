@@ -25,13 +25,16 @@ function handleGlobalKeydown(e: KeyboardEvent) {
   palette.onKeydown(e)
 }
 
+let stopPolling: (() => void) | null = null
+
 onMounted(() => {
-  serverStore.startPolling()
+  stopPolling = serverStore.startPolling()
   tour.checkFirstRun()
   document.addEventListener('keydown', handleGlobalKeydown)
 })
 
 onUnmounted(() => {
+  stopPolling?.()
   document.removeEventListener('keydown', handleGlobalKeydown)
 })
 </script>
