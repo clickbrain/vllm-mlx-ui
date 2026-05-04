@@ -148,6 +148,10 @@ const inferenceApiKey = ref('')
 const hfToken = ref(localStorage.getItem('vmui_hf_token') ?? '')
 const offlineMode = ref(false)
 const autoModelSwitch = ref(false)
+const mgmtApiKeyMasked = ref('')
+const mgmtApiKeyInput = ref('')
+const mgmtApiKeySaved = ref(false)
+const mgmtApiKeyError = ref('')
 
 // Advanced Inference Settings
 const trustRemoteCode = ref(false)
@@ -247,6 +251,10 @@ onMounted(async () => {
     const r = await api.get<{ size_gb: number }>('/models/cache_size')
     diskUsedGb.value = r.size_gb
   } catch { /* cache size is non-critical */ }
+  try {
+    const r = await api.get<{ key_set: boolean; masked: string }>('/config/mgmt-key')
+    mgmtApiKeyMasked.value = r.masked
+  } catch { /* mgmt key display is non-critical */ }
   updatesStore.checkUpdates().catch(() => { /* non-critical */ })
   loadEngines().catch(() => { /* non-critical */ })
 })
@@ -303,6 +311,20 @@ async function saveListenAddress(allInterfaces: boolean) {
 async function saveApiKey() {
   try { await api.post('/config', { api_key: inferenceApiKey.value }) } catch (e: any) {
     settingsError.value = `Failed to save API key: ${e?.message ?? 'unknown error'}`
+  }
+}
+
+async function saveMgmtApiKey() {
+  mgmtApiKeyError.value = ''
+  try {
+    await api.post('/config/mgmt-key', { key: mgmtApiKeyInput.value })
+    const r = await api.get<{ key_set: boolean; masked: string }>('/config/mgmt-key')
+    mgmtApiKeyMasked.value = r.masked
+    mgmtApiKeyInput.value = ''
+    mgmtApiKeySaved.value = true
+    setTimeout(() => { mgmtApiKeySaved.value = false }, 2500)
+  } catch (e: any) {
+    mgmtApiKeyError.value = `Failed to save management API key: ${e?.message ?? 'unknown error'}`
   }
 }
 
@@ -948,6 +970,29 @@ async function doRestart() {
         </div>
         <div class="pref-row">
           <div class="pref-info">
+            <span class="pref-label">Management API Key</span>
+            <span class="pref-desc">
+              Secret key protecting this dashboard's management API (port 8502).
+              <span v-if="mgmtApiKeyMasked" class="pref-badge-key">Active: {{ mgmtApiKeyMasked }}</span>
+              <span v-else class="pref-badge-key pref-badge-warn">⚠ No key set — dashboard is open to your network</span>
+            </span>
+          </div>
+          <div class="pref-actions pref-actions-row">
+            <input
+              v-model="mgmtApiKeyInput"
+              class="field-input field-inline"
+              type="password"
+              placeholder="New key… (leave blank to clear)"
+              @keydown.enter="saveMgmtApiKey"
+            />
+            <button class="btn-sm" @click="saveMgmtApiKey">
+              {{ mgmtApiKeySaved ? '✓ Saved' : 'Save' }}
+            </button>
+          </div>
+          <div v-if="mgmtApiKeyError" class="pref-error">{{ mgmtApiKeyError }}</div>
+        </div>
+        <div class="pref-row">
+          <div class="pref-info">
             <span class="pref-label">HuggingFace Access Token</span>
             <span class="pref-desc">Required for private or gated models. Get yours at huggingface.co/settings/tokens. Stored locally only — never sent to any server.</span>
           </div>
@@ -1172,6 +1217,12 @@ async function doRestart() {
 .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: white; transition: transform var(--transition-base); }
 .toggle input:checked ~ .toggle-track .toggle-thumb { transform: translateX(16px); }
 .pref-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
+.pref-actions-row { flex-direction: row; align-items: center; }
+.pref-badge-key { font-family: var(--font-mono); font-size: 11px; color: var(--tx-secondary); background: var(--bg-elevated); border: 1px solid var(--bd-default); border-radius: var(--r-pill); padding: 1px 6px; margin-left: 4px; white-space: nowrap; }
+.pref-badge-warn { color: #f59e0b; background: rgba(245,158,11,.08); border-color: rgba(245,158,11,.3); }
+.pref-error { font-size: 12px; color: var(--si-300, #f87171); margin-top: var(--space-1); padding: 0 var(--space-3); }
+.btn-sm { font-size: 12px; padding: 4px 10px; border-radius: var(--r-base); border: 1px solid var(--bd-default); background: var(--bg-elevated); color: var(--tx-primary); cursor: pointer; white-space: nowrap; }
+.btn-sm:hover { background: var(--bg-inset); }
 .cache-path-input { width: 280px; }
 .kilroy-placeholder { opacity: .55; }
 .coming-soon { font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--tx-muted); border: 1px solid var(--bd-default); border-radius: var(--r-pill); padding: 3px 10px; flex-shrink: 0; margin-top: 2px; }

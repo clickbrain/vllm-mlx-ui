@@ -210,6 +210,33 @@ def set_config(data: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
     return {"ok": True}
 
 
+@app.get("/config/mgmt-key")
+def get_mgmt_key(_: None = Depends(_check_auth)) -> dict:
+    """Return the management API key (masked) so the UI can display it.
+
+    Returns the first 8 characters followed by asterisks so the user can
+    verify which key is active without exposing the full secret.
+    """
+    key = sm.load_config().get("mgmt_api_key", "").strip()
+    if not key:
+        return {"key_set": False, "masked": ""}
+    visible = key[:8]
+    masked = visible + "*" * max(0, len(key) - 8)
+    return {"key_set": True, "masked": masked, "length": len(key)}
+
+
+@app.post("/config/mgmt-key")
+def set_mgmt_key(data: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
+    """Update the management API key."""
+    new_key = str(data.get("key", "")).strip()
+    cfg = sm.load_config()
+    cfg["mgmt_api_key"] = new_key
+    sm.save_config(cfg)
+    # Invalidate auth key cache so next request picks up the new key
+    _auth_key_cache["key"] = new_key
+    return {"ok": True}
+
+
 # ── Models ────────────────────────────────────────────────────────────────────
 
 @app.get("/models/cached")
