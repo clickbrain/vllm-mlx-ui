@@ -122,19 +122,30 @@ def start(_: None = Depends(_check_auth)) -> dict:
 
     Raises:
         HTTPException: 400 if no model is configured.
+        HTTPException: 409 if a lifecycle operation is already in progress.
     """
-    config = sm.load_config()
-    if not config.get("model"):
-        raise HTTPException(status_code=400, detail="No model selected. Set a model in config first.")
-    ok, msg = sm.start_server(config)
-    return {"ok": ok, "message": msg}
+    if not _lifecycle_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="A lifecycle operation is already in progress. Please wait.")
+    try:
+        config = sm.load_config()
+        if not config.get("model"):
+            raise HTTPException(status_code=400, detail="No model selected. Set a model in config first.")
+        ok, msg = sm.start_server(config)
+        return {"ok": ok, "message": msg}
+    finally:
+        _lifecycle_lock.release()
 
 
 @app.post("/stop")
 def stop(_: None = Depends(_check_auth)) -> dict:
     """Send SIGTERM to the inference server and return stop status."""
-    ok, msg = sm.stop_server()
-    return {"ok": ok, "message": msg}
+    if not _lifecycle_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="A lifecycle operation is already in progress. Please wait.")
+    try:
+        ok, msg = sm.stop_server()
+        return {"ok": ok, "message": msg}
+    finally:
+        _lifecycle_lock.release()
 
 
 @app.get("/logs")
@@ -490,16 +501,22 @@ def memory_stats(_: None = Depends(_check_auth)) -> dict:
 
 @app.get("/poll")
 def poll(_: None = Depends(_check_auth)) -> dict:
-    """Batch endpoint: returns status, metrics, memory, and config in one call.
+    """Batch endpoint: returns status, metrics, memory, config, and engine state in one call.
 
     Reduces 4 sequential API calls (every 3 s) into a single round-trip,
     cutting network overhead and CPU polling cost by ~75%.
     """
+    server_state = sm._read_server_state() or {}
     return {
         "status": sm.get_server_status(),
         "metrics": sm.get_metrics() or {},
         "memory": sm.get_memory_stats(),
         "config": sm.load_config(),
+        "runtime": {
+            "engine_id": server_state.get("engine_id", "vllm-mlx"),
+            "model": server_state.get("model", ""),
+            "started_at": server_state.get("started_at"),
+        },
     }
 
 
@@ -544,6 +561,10 @@ def clear_all_benchmarks(_: None = Depends(_check_auth)) -> dict:
 _benchmark_running = False
 _benchmark_lock = threading.Lock()
 _benchmark_stop_event: threading.Event | None = None
+
+# Global lifecycle lock shared by start/stop, hot-swap, and engine compare.
+# Prevents concurrent engine restarts from racing with each other.
+_lifecycle_lock = threading.Lock()
 
 
 @app.post("/benchmark/run")
@@ -624,6 +645,154 @@ def stop_benchmark_endpoint(_: None = Depends(_check_auth)) -> dict:
 def benchmark_status(_: None = Depends(_check_auth)) -> dict:
     """Return whether a benchmark run is currently in progress."""
     return {"running": _benchmark_running}
+
+
+# ── Engine comparison benchmark ───────────────────────────────────────────────
+
+_compare_running = False
+_compare_lock = threading.Lock()
+_compare_results: list[dict] = []
+_compare_stop_event: threading.Event | None = None
+
+
+@app.post("/benchmark/compare")
+def run_engine_compare(req: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
+    """Start an engine comparison benchmark (background job).
+
+    Sequentially tests the same model on multiple engines, each time:
+    1. Stop the current server (lifecycle-locked)
+    2. Update engine_id + apply engine-specific settings
+    3. Start the server
+    4. Run the benchmark
+    5. Collect results
+
+    Request body::
+
+        {
+          "model_id": "mlx-community/Qwen3-8B-4bit",
+          "engine_ids": ["vllm-mlx", "rapid-mlx"],
+          "runs": 10,
+          "max_tokens": 256
+        }
+
+    Raises:
+        409: if a lifecycle operation or compare is already running
+        409: if active proxied requests are in-flight (would be disrupted)
+    """
+    global _compare_running, _compare_stop_event, _compare_results
+    if not _lifecycle_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="A lifecycle operation is already in progress.")
+    _lifecycle_lock.release()  # released immediately — compare manages its own sub-lifecycle
+
+    with _compare_lock:
+        if _compare_running:
+            raise HTTPException(status_code=409, detail="An engine comparison is already running.")
+        _compare_running = True
+        _compare_results = []
+        _compare_stop_event = threading.Event()
+
+    model_id: str = req.get("model_id", "")
+    engine_ids: list[str] = req.get("engine_ids", [])
+    runs = int(req.get("runs", 10))
+    max_tokens = int(req.get("max_tokens", 256))
+
+    if not model_id:
+        with _compare_lock:
+            _compare_running = False
+        raise HTTPException(status_code=400, detail="model_id is required")
+    if len(engine_ids) < 2:
+        with _compare_lock:
+            _compare_running = False
+        raise HTTPException(status_code=400, detail="At least 2 engine_ids required for comparison")
+
+    _stop = _compare_stop_event
+
+    def _run_compare() -> None:
+        global _compare_running
+        try:
+            for eid in engine_ids:
+                if _stop.is_set():
+                    break
+                with _lifecycle_lock:
+                    # Stop running server if any
+                    status = sm.get_server_status()
+                    if status.get("running"):
+                        sm.stop_server()
+
+                    # Switch engine and start
+                    cfg = sm.load_config()
+                    cfg["engine_id"] = eid
+                    cfg["model"] = model_id
+                    sm.save_config(cfg)
+                    ok, msg = sm.start_server(cfg)
+                    if not ok:
+                        logger.warning("Compare: could not start engine %s: %s", eid, msg)
+                        _compare_results.append({
+                            "engine_id": eid, "model_id": model_id,
+                            "error": msg, "runs": 0,
+                        })
+                        continue
+
+                    # Wait for server to become healthy (up to 120 s)
+                    import urllib.request as _ur
+                    server_url = sm.get_server_url(cfg)
+                    for _ in range(120):
+                        if _stop.is_set():
+                            break
+                        try:
+                            _ur.urlopen(f"{server_url}/health", timeout=1).read()
+                            break
+                        except Exception:
+                            time.sleep(1)
+                    else:
+                        logger.warning("Compare: engine %s did not become healthy", eid)
+                        _compare_results.append({
+                            "engine_id": eid, "model_id": model_id,
+                            "error": "Engine did not become healthy within 120 s", "runs": 0,
+                        })
+                        continue
+
+                # Lifecycle lock released — run benchmark outside lock to allow stop
+                if not _stop.is_set():
+                    result = br.run_live_benchmark(
+                        model_id,
+                        server_url=sm.get_server_url(cfg),
+                        prompts=runs,
+                        max_tokens=max_tokens,
+                        label=f"compare:{eid}",
+                        stop_event=_stop,
+                        server_settings={"engine_id": eid},
+                    )
+                    if result:
+                        result["engine_id"] = eid
+                        _compare_results.append(result)
+        except Exception as e:
+            logger.warning("Engine compare failed: %s", e, exc_info=True)
+        finally:
+            with _compare_lock:
+                _compare_running = False
+
+    threading.Thread(target=_run_compare, daemon=True).start()
+    return {"ok": True, "message": f"Engine comparison started for {len(engine_ids)} engines"}
+
+
+@app.post("/benchmark/compare/stop")
+def stop_compare_endpoint(_: None = Depends(_check_auth)) -> dict:
+    """Stop the running engine comparison."""
+    global _compare_stop_event
+    with _compare_lock:
+        if _compare_stop_event:
+            _compare_stop_event.set()
+    return {"ok": True}
+
+
+@app.get("/benchmark/compare/status")
+def compare_status(_: None = Depends(_check_auth)) -> dict:
+    """Return engine comparison progress and partial results."""
+    return {
+        "running": _compare_running,
+        "results": list(_compare_results),
+    }
 
 
 # ── Cost analysis ─────────────────────────────────────────────────────────────
@@ -791,9 +960,14 @@ def _hot_swap_if_needed(requested_model: str) -> None:
             logger.warning("Operation failed", exc_info=True)
 
         cfg["model"] = requested_model
-        sm.stop_server()
-        time.sleep(2)
-        sm.start_server(cfg)
+        # Acquire lifecycle lock so manual start/stop/compare don't race the swap
+        _lifecycle_lock.acquire(blocking=True)
+        try:
+            sm.stop_server()
+            time.sleep(2)
+            sm.start_server(cfg)
+        finally:
+            _lifecycle_lock.release()
 
         # Wait up to 120 s for the server to become healthy
         for _ in range(60):
@@ -1421,6 +1595,61 @@ def _find_restart_cmd() -> list[str]:
         return [found]
     import sys as _sys2
     return [_sys2.executable, "-m", "vllm_mlx.dashboard.mgmt_server"]
+
+
+@app.get("/engines")
+def list_engines(_: None = Depends(_check_auth)) -> dict:
+    """Return all registered inference engines with install status and capabilities."""
+    from vllm_mlx.dashboard.engines.registry import list_engines as _list_engines
+    return {"engines": _list_engines()}
+
+
+@app.get("/engines/{engine_id}/config-schema")
+def get_engine_config_schema(engine_id: str, _: None = Depends(_check_auth)) -> dict:
+    """Return the engine-specific config schema for the dynamic settings panel."""
+    from vllm_mlx.dashboard.engines.registry import get_engine as _get_engine
+    try:
+        engine = _get_engine(engine_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown engine: {engine_id}")
+    return {
+        "engine_id": engine_id,
+        "name": engine.name,
+        "fields": engine.config_schema(),
+    }
+
+
+@app.post("/engines/{engine_id}/install")
+async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
+    """Install the specified engine via pip (SSE stream of install output)."""
+    import asyncio as _asyncio
+    import subprocess as _sp
+    from fastapi.responses import StreamingResponse
+    from vllm_mlx.dashboard.engines.registry import get_engine as _get_engine
+
+    try:
+        engine = _get_engine(engine_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown engine: {engine_id}")
+    if engine.install_method == "bundled":
+        raise HTTPException(status_code=400, detail=f"Engine {engine_id!r} is bundled and cannot be installed.")
+
+    cmd = engine.install_command()
+
+    async def _stream():
+        proc = await _asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=_asyncio.subprocess.PIPE,
+            stderr=_asyncio.subprocess.STDOUT,
+        )
+        if proc.stdout:
+            async for line in proc.stdout:
+                yield line
+        await proc.wait()
+        exit_msg = f"\n{'✅ Install complete.' if proc.returncode == 0 else f'❌ Install failed (exit {proc.returncode}).'}\n"
+        yield exit_msg.encode()
+
+    return StreamingResponse(_stream(), media_type="text/plain")
 
 
 @app.post("/shutdown")

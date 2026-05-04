@@ -25,7 +25,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 STATE_DIR = Path.home() / ".vllm_mlx_ui"
-PID_FILE = STATE_DIR / "server.pid"
+PID_FILE = STATE_DIR / "server.pid"          # legacy — superseded by SERVER_STATE_FILE
+SERVER_STATE_FILE = STATE_DIR / "server_state.json"  # current runtime state
 UI_PID_FILE = STATE_DIR / "ui.pid"
 STREAMLIT_PID_FILE = STATE_DIR / "streamlit.pid"
 CONFIG_FILE = STATE_DIR / "server_config.json"
@@ -119,6 +120,16 @@ TOOL_CALL_PARSERS = [
 REASONING_PARSERS = ["", "qwen3", "deepseek_r1", "gemma4", "harmony", "gpt_oss", "glm4"]
 
 _DEFAULT_CONFIG: dict[str, Any] = {
+    # ── Schema versioning ───────────────────────────────────────────────────
+    "config_version": 2,
+    # ── Engine selection ────────────────────────────────────────────────────
+    # engine_id: which inference engine to use ("vllm-mlx", "rapid-mlx", …)
+    "engine_id": "vllm-mlx",
+    # engine_settings: engine-specific config namespace.  Keyed by engine_id.
+    # config["model"] is ALWAYS the canonical HF repo ID regardless of engine.
+    # Engine-specific launch aliases go here (e.g. engine_settings["rapid-mlx"]["launch_model"]).
+    "engine_settings": {},
+    # ── Common settings ─────────────────────────────────────────────────────
     "model": "",
     "served_model_name": "",
     "host": "127.0.0.1",
@@ -277,6 +288,32 @@ def _ensure_state_dir() -> Path:
     return STATE_DIR
 
 
+def _migrate_config(saved: dict[str, Any]) -> dict[str, Any]:
+    """Migrate a saved config dict to the current schema version (idempotent).
+
+    v1 → v2:
+      - Add ``engine_id`` defaulting to "vllm-mlx"
+      - Add ``engine_settings`` with per-engine defaults populated from the registry
+      - Add ``config_version: 2``
+    """
+    version = saved.get("config_version", 1)
+    if version >= 2:
+        return saved
+    migrated = dict(saved)
+    migrated["config_version"] = 2
+    migrated.setdefault("engine_id", "vllm-mlx")
+    migrated.setdefault("engine_settings", {})
+    try:
+        from vllm_mlx.dashboard.engines.registry import ENGINES
+        for eid, engine in ENGINES.items():
+            if eid not in migrated["engine_settings"]:
+                migrated["engine_settings"][eid] = engine.default_engine_settings()
+    except Exception as e:
+        logger.warning("Config migration: could not populate engine defaults: %s", e)
+    logger.info("Migrated server config from v%d to v2", version)
+    return migrated
+
+
 def _load_local_config() -> dict[str, Any]:
     """Load config from disk only — no remote fetch. Used to read connectivity settings.
 
@@ -290,7 +327,14 @@ def _load_local_config() -> dict[str, Any]:
         try:
             with open(CONFIG_FILE) as f:
                 saved = json.load(f)
-            return {**DEFAULT_CONFIG, **saved}
+            saved = _migrate_config(saved)
+            merged = {**DEFAULT_CONFIG, **saved}
+            # Deep-merge engine_settings so missing engine namespaces are populated.
+            merged["engine_settings"] = {
+                **DEFAULT_CONFIG.get("engine_settings", {}),
+                **saved.get("engine_settings", {}),
+            }
+            return merged
         except Exception:
             logger.warning("Operation failed", exc_info=True)
     return DEFAULT_CONFIG.copy()
@@ -316,7 +360,12 @@ def load_config() -> dict[str, Any]:
         try:
             with open(CONFIG_FILE) as f:
                 saved = json.load(f)
+            saved = _migrate_config(saved)
             local = {**DEFAULT_CONFIG, **saved}
+            local["engine_settings"] = {
+                **DEFAULT_CONFIG.get("engine_settings", {}),
+                **saved.get("engine_settings", {}),
+            }
         except Exception:
             logger.warning("Operation failed", exc_info=True)
 
@@ -416,13 +465,58 @@ def save_config(config: dict[str, Any]) -> None:
             logger.warning("Operation failed", exc_info=True)  # Best effort; local save already succeeded
 
 
-def _get_pid() -> int | None:
+def _write_server_state(pid: int, config: dict[str, Any]) -> None:
+    """Write runtime state to SERVER_STATE_FILE (atomic rename)."""
+    state = {
+        "pid": pid,
+        "engine_id": config.get("engine_id", "vllm-mlx"),
+        "host": config.get("host", "127.0.0.1"),
+        "port": config.get("port", 8000),
+        "model": config.get("model", ""),
+        "started_at": time.time(),
+    }
+    _ensure_state_dir()
+    tmp = SERVER_STATE_FILE.with_suffix(".json.tmp")
+    with open(tmp, "w") as f:
+        json.dump(state, f)
+    tmp.replace(SERVER_STATE_FILE)
+
+
+def _read_server_state() -> dict[str, Any] | None:
+    """Read the runtime state file.  Returns None if not present or corrupted.
+
+    Backward compat: if only the legacy PID_FILE exists (plain integer), returns a
+    minimal state dict treating the engine as "vllm-mlx".
+    """
+    if SERVER_STATE_FILE.exists():
+        try:
+            with open(SERVER_STATE_FILE) as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning("Could not read server_state.json: %s", e)
+            return None
+    # Legacy: plain PID file from schema v1
     if PID_FILE.exists():
         try:
-            return int(PID_FILE.read_text().strip())
+            pid = int(PID_FILE.read_text().strip())
+            return {"pid": pid, "engine_id": "vllm-mlx"}
         except Exception as e:
-            logger.warning("Operation failed: %s", e, exc_info=True)
-            return None
+            logger.warning("Could not read legacy PID file: %s", e)
+    return None
+
+
+def _clear_server_state() -> None:
+    SERVER_STATE_FILE.unlink(missing_ok=True)
+    PID_FILE.unlink(missing_ok=True)  # also clear legacy file
+
+
+def _get_pid() -> int | None:
+    state = _read_server_state()
+    if state:
+        try:
+            return int(state["pid"])
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning("Malformed server state: %s", e)
     return None
 
 
@@ -434,9 +528,13 @@ def _is_process_alive(pid: int) -> bool:
         return False
 
 
-def _try_adopt_server(port: int, host: str) -> int | None:
+def _try_adopt_server(port: int, host: str, config: dict[str, Any] | None = None) -> int | None:
     """If our inference server is running on *port* but we've lost its PID file
     (e.g. after a management-server restart), find the process and re-adopt it.
+
+    Engine mismatch: if the running server was started with a different engine_id
+    than the current config, return None rather than silently adopting a process
+    the user can't control correctly.
 
     Returns the adopted PID if successful, None otherwise.
     """
@@ -448,6 +546,19 @@ def _try_adopt_server(port: int, host: str) -> int | None:
     except Exception as e:
         logger.warning("Operation failed: %s", e, exc_info=True)
         return None  # port not responding to our API — don't adopt
+
+    # Check for engine mismatch against existing state file (if any)
+    if config is not None:
+        existing_state = _read_server_state()
+        if existing_state:
+            running_engine = existing_state.get("engine_id", "vllm-mlx")
+            desired_engine = config.get("engine_id", "vllm-mlx")
+            if running_engine != desired_engine:
+                logger.warning(
+                    "Cannot adopt server: running engine=%r, desired engine=%r",
+                    running_engine, desired_engine,
+                )
+                return None
 
     # Find PID of the process holding the port via lsof.
     try:
@@ -462,7 +573,7 @@ def _try_adopt_server(port: int, host: str) -> int | None:
             except ValueError:
                 continue
             if _is_process_alive(pid):
-                PID_FILE.write_text(str(pid))
+                _write_server_state(pid, config or {"host": host, "port": port})
                 return pid
     except Exception:
         logger.warning("Operation failed", exc_info=True)
@@ -607,89 +718,19 @@ def _auto_detect_reasoning_parser(model_name: str) -> str:
 
 
 def _build_command(config: dict[str, Any]) -> list[str]:
-    """Build the vllm-mlx serve command from config.
+    """Build the inference server launch command, delegating to the selected engine.
 
-    Always use sys.executable so the inference server runs in the same Python
-    environment as the mgmt server (dev install or Homebrew, never mixed).
-    Using shutil.which("vllm-mlx") could find a Homebrew-frozen binary even
-    when the mgmt server is running from the dev install, causing version skew.
+    The engine is determined by ``config["engine_id"]``.  Falls back to
+    "vllm-mlx" if the configured engine is unknown.
     """
-    cmd = [sys.executable, "-m", "vllm_mlx.cli"]
-    cmd += ["serve", config["model"]]
-
-    cmd += ["--host", str(config.get("host", "127.0.0.1"))]
-    cmd += ["--port", str(config.get("port", 8000))]
-
-    if config.get("served_model_name"):
-        cmd += ["--served-model-name", config["served_model_name"]]
-    if config.get("api_key"):
-        cmd += ["--api-key", config["api_key"]]
-    if config.get("continuous_batching"):
-        cmd += ["--continuous-batching"]
-    # Only override token limits when the user explicitly changed them from defaults.
-    # max_tokens and max_request_tokens both default to 32768 in the engine.
-    # When both are passed, max_request_tokens must >= max_tokens — the engine
-    # enforces this invariant and will error if violated.
-    _max_tok = config.get("max_tokens", 32768)
-    _max_req = config.get("max_request_tokens", 32768)
-    if _max_req < _max_tok:
-        _max_req = _max_tok
-    if _max_tok != 32768 or _max_req != 32768:
-        cmd += ["--max-tokens", str(_max_tok), "--max-request-tokens", str(_max_req)]
-
-    # Reasoning parser: explicit config wins; otherwise auto-detect from model name.
-    _reasoning_parser = config.get("reasoning_parser") or _auto_detect_reasoning_parser(config.get("model", ""))
-    if _reasoning_parser:
-        cmd += ["--reasoning-parser", _reasoning_parser]
-    if config.get("tool_call_parser"):
-        cmd += ["--tool-call-parser", config["tool_call_parser"]]
-    if config.get("enable_auto_tool_choice") and config.get("tool_call_parser"):
-        cmd += ["--enable-auto-tool-choice"]
-    if config.get("gpu_memory_utilization", 0.90) != 0.90:
-        cmd += ["--gpu-memory-utilization", str(config["gpu_memory_utilization"])]
-    if not config.get("enable_prefix_cache", True):
-        cmd += ["--disable-prefix-cache"]
-    if config.get("cache_memory_mb", 0) > 0:
-        cmd += ["--cache-memory-mb", str(config["cache_memory_mb"])]
-    if config.get("kv_cache_quantization"):
-        cmd += ["--kv-cache-quantization"]
-        if config.get("kv_cache_quantization_bits", 8) != 8:
-            cmd += ["--kv-cache-quantization-bits", str(config["kv_cache_quantization_bits"])]
-    if config.get("use_paged_cache"):
-        cmd += ["--use-paged-cache"]
-    if config.get("enable_mtp"):
-        cmd += ["--enable-mtp"]
-        if config.get("mtp_num_draft_tokens", 1) != 1:
-            cmd += ["--mtp-num-draft-tokens", str(config["mtp_num_draft_tokens"])]
-    if config.get("rate_limit", 0) > 0:
-        cmd += ["--rate-limit", str(config["rate_limit"])]
-    if config.get("stream_interval", 1) != 1:
-        cmd += ["--stream-interval", str(config["stream_interval"])]
-    if config.get("mllm"):
-        cmd += ["--mllm"]
-    if config.get("trust_remote_code"):
-        cmd += ["--trust-remote-code"]
-    if config.get("embedding_model"):
-        cmd += ["--embedding-model", config["embedding_model"]]
-    if config.get("rerank_model"):
-        cmd += ["--rerank-model", config["rerank_model"]]
-    if config.get("enable_metrics"):
-        cmd += ["--enable-metrics"]
-    if config.get("offline"):
-        cmd += ["--offline"]
-    # v0.2.9 additions
-    if config.get("ssd_cache_dir"):
-        cmd += ["--ssd-cache-dir", config["ssd_cache_dir"]]
-        if config.get("ssd_cache_max_gb", 0) > 0:
-            cmd += ["--ssd-cache-max-gb", str(config["ssd_cache_max_gb"])]
-    if config.get("warm_prompts"):
-        cmd += ["--warm-prompts", config["warm_prompts"]]
-    if config.get("prefill_step_size", 0) > 0:
-        cmd += ["--prefill-step-size", str(config["prefill_step_size"])]
-    if config.get("auto_model_switch"):
-        cmd += ["--auto-model-switch"]
-
-    return cmd
+    from vllm_mlx.dashboard.engines.registry import get_engine
+    engine_id = config.get("engine_id", "vllm-mlx")
+    try:
+        engine = get_engine(engine_id)
+    except KeyError:
+        logger.warning("Unknown engine_id %r — falling back to vllm-mlx", engine_id)
+        engine = get_engine("vllm-mlx")
+    return engine.build_command(config)
 
 
 def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
@@ -713,7 +754,7 @@ def kill_stale_server(port: int, host: str = "127.0.0.1") -> tuple[bool, str]:
         )
         pids = [int(p) for p in result.stdout.strip().split() if p.strip().isdigit()]
         if not pids:
-            PID_FILE.unlink(missing_ok=True)
+            _clear_server_state()
             return True, f"Port {port} is no longer in use."
         for pid in pids:
             try:
@@ -726,7 +767,7 @@ def kill_stale_server(port: int, host: str = "127.0.0.1") -> tuple[bool, str]:
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        PID_FILE.unlink(missing_ok=True)
+        _clear_server_state()
         return True, f"Killed stale server process(es) {pids} on port {port}."
     except Exception as e:
         return False, f"Could not kill stale server: {e}"
@@ -771,7 +812,7 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
         else:
             # Port still in use — check if it's already our inference server
             # (e.g. after a management-server restart that lost the PID file).
-            adopted = _try_adopt_server(port, host)
+            adopted = _try_adopt_server(port, host, config)
             if adopted:
                 return False, "Server is already running."
             return False, (
@@ -795,20 +836,21 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
-    PID_FILE.write_text(str(proc.pid))
+    _write_server_state(proc.pid, config)
 
-    # Fail-fast check: if vllm exits immediately (bad model ID, port conflict,
+    # Fail-fast check: if the engine exits immediately (bad model ID, port conflict,
     # corrupted weights), detect it within 3s and return a useful error with logs.
     # If still alive after 3s, assume it is loading (can take 1-2 minutes for
     # large models) and return success — the UI polls health separately.
     for _ in range(6):
         time.sleep(0.5)
         if not _is_process_alive(proc.pid):
-            PID_FILE.unlink(missing_ok=True)
+            _clear_server_state()
             logs = "\n".join(get_logs(last_n_lines=20))
             return False, f"Server exited immediately. Check logs:\n{logs}"
 
-    return True, f"Server starting (PID {proc.pid}). Loading model — this may take a minute…"
+    engine_id = config.get("engine_id", "vllm-mlx")
+    return True, f"Server starting (PID {proc.pid}, engine={engine_id}). Loading model — this may take a minute…"
 
 
 def stop_server() -> tuple[bool, str]:
@@ -828,8 +870,8 @@ def stop_server() -> tuple[bool, str]:
     if pid is None:
         return False, "Server is not running."
     if not _is_process_alive(pid):
-        PID_FILE.unlink(missing_ok=True)
-        return False, "Server was not running (cleaned up stale PID file)."
+        _clear_server_state()
+        return False, "Server was not running (cleaned up stale state file)."
 
     try:
         with _server_state_lock:
@@ -847,7 +889,7 @@ def stop_server() -> tuple[bool, str]:
                 time.sleep(0.2)
                 if not _is_process_alive(pid):
                     break
-        PID_FILE.unlink(missing_ok=True)
+        _clear_server_state()
         return True, "Server stopped."
     except Exception as e:
         return False, f"Error stopping server: {e}"

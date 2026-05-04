@@ -1,0 +1,142 @@
+# SPDX-License-Identifier: Apache-2.0
+"""BaseEngine — abstract contract for all inference engine adapters."""
+from __future__ import annotations
+
+import shutil
+import sys
+from abc import ABC, abstractmethod
+from typing import Any, ClassVar
+
+
+class BaseEngine(ABC):
+    """Abstract base for inference engine adapters.
+
+    Each concrete engine encapsulates:
+    - how to build the launch command from dashboard config
+    - how to detect installation and read version
+    - which capabilities are supported (drives UI feature gating)
+    - engine-specific config schema (drives dynamic settings panel)
+    - how to validate and resolve model identifiers for this engine
+
+    Design contract:
+    - ``config["model"]`` is always the canonical HF repo ID (e.g. "mlx-community/Qwen3-8B-4bit").
+    - ``config["engine_settings"][engine_id]`` holds engine-specific overrides, including
+      ``launch_model`` if the engine uses an alias that differs from the HF repo ID.
+    - Engines must NEVER modify the config dict passed to ``build_command()``.
+    """
+
+    #: Stable machine identifier, used as the key in the engine registry.
+    id: ClassVar[str]
+
+    #: Human-readable display name.
+    name: ClassVar[str]
+
+    #: Set of capability strings this engine supports.  Used to gate UI features.
+    #: Well-known capabilities: "tool_calls", "vision", "audio", "continuous_batching",
+    #: "prefix_cache", "kv_quantization", "paged_cache", "reasoning", "metrics",
+    #: "embedding", "rerank", "mtp", "ssd_cache".
+    capabilities: ClassVar[frozenset[str]]
+
+    #: How the engine is installed.  Drives the Install button visibility.
+    #: One of: "pip" (installable via pip), "bundled" (always present, cannot install),
+    #: "external" (external binary, not pip-managed).
+    install_method: ClassVar[str] = "pip"
+
+    # ── Core abstract methods ──────────────────────────────────────────────────
+
+    @abstractmethod
+    def build_command(self, config: dict[str, Any]) -> list[str]:
+        """Return the complete argv list to launch this engine.
+
+        Args:
+            config: Full merged dashboard config dict.  Read-only.
+
+        Returns:
+            List of strings suitable for ``subprocess.Popen(cmd, ...)``.
+        """
+
+    @abstractmethod
+    def is_installed(self) -> bool:
+        """Return True if this engine is available in the current environment."""
+
+    @abstractmethod
+    def get_version(self) -> str | None:
+        """Return the installed version string, or None if not installed / indeterminate."""
+
+    # ── Optional overrides ─────────────────────────────────────────────────────
+
+    def config_schema(self) -> list[dict[str, Any]]:
+        """Return the engine-specific settings fields for the dynamic settings panel.
+
+        Each entry is a field descriptor dict with keys:
+            key (str): config key under engine_settings[engine_id]
+            label (str): display label
+            type (str): "bool" | "int" | "float" | "str" | "select"
+            default: default value
+            options (list, type=="select"): available options
+            min/max (number, type=="int"/"float"): range constraints
+            help (str): tooltip/description
+
+        Returns an empty list by default (engine has no extra settings).
+        """
+        return []
+
+    def validate_model_id(self, model_id: str) -> bool:  # noqa: ARG002
+        """Return True if *model_id* is a valid identifier for this engine.
+
+        Default implementation always returns True.  Override for engines that
+        only accept specific formats (e.g. short aliases).
+        """
+        return True
+
+    def resolve_launch_model(self, config: dict[str, Any]) -> str:
+        """Return the model token to pass on the command line.
+
+        By default returns ``config["model"]`` (the canonical HF repo ID).
+        Override if the engine uses a different alias scheme.  The dashboard
+        always stores the canonical ID; this method bridges the gap at launch.
+        """
+        engine_settings = config.get("engine_settings", {}).get(self.id, {})
+        return engine_settings.get("launch_model") or config.get("model", "")
+
+    def default_engine_settings(self) -> dict[str, Any]:
+        """Return the default values for this engine's engine_settings namespace.
+
+        Used during config migration to populate missing keys.
+        """
+        return {field["key"]: field["default"] for field in self.config_schema()}
+
+    def latest_version(self) -> str | None:
+        """Return the latest available version from PyPI, or None if unavailable.
+
+        Only meaningful for pip-installed engines.  Default tries PyPI.
+        """
+        if self.install_method != "pip":
+            return None
+        try:
+            import urllib.request
+            import json as _json
+            pkg = self.id  # assumes PyPI package name == engine id
+            with urllib.request.urlopen(
+                f"https://pypi.org/pypi/{pkg}/json", timeout=5
+            ) as resp:
+                data = _json.loads(resp.read())
+                return data["info"]["version"]
+        except Exception:
+            return None
+
+    def install_command(self) -> list[str]:
+        """Return the argv list to install this engine.
+
+        Uses sys.executable to guarantee the same Python environment as the
+        management server — never a globally resolved pip or python.
+        """
+        return [sys.executable, "-m", "pip", "install", "--upgrade", self.id]
+
+    def _which(self, cmd: str) -> str | None:
+        """Locate *cmd* on PATH; returns None if not found."""
+        return shutil.which(cmd)
+
+    def __repr__(self) -> str:
+        installed = "(installed)" if self.is_installed() else "(not installed)"
+        return f"<{self.__class__.__name__} id={self.id!r} {installed}>"
