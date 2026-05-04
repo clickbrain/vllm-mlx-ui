@@ -72,32 +72,33 @@ const bestBench = computed(() => modelsStore.bestBenchmarkPerModel.get(props.mod
 
 <template>
   <div class="lib-card" :class="{ 'is-active': active }">
-    <div class="card-main">
-      <div class="name-block">
-        <a :href="hfUrl" target="_blank" rel="noopener" class="model-link" :title="modelId">
-          <span class="org-prefix">{{ org }}/</span><span class="model-name">{{ shortName }}</span>
-        </a>
-        <AppBadge v-if="isRestarting" variant="warning" size="sm">Restarting…</AppBadge>
-        <AppBadge v-else-if="active" variant="success" size="sm">Serving</AppBadge>
-      </div>
-      <div class="meta-row">
-        <span class="meta-chip">{{ quantLabel }}</span>
-        <span class="meta-sep">·</span>
-        <span class="meta-chip">{{ sizeGb.toFixed(1) }} GB</span>
-        <template v-if="fitInfo && !active">
-          <span class="meta-sep">·</span>
-          <span class="fit-chip" :style="{ color: fitInfo.color }">● {{ fitInfo.label }}</span>
-        </template>
-        <template v-if="bestBench && cached">
-          <span class="meta-sep">·</span>
-          <button class="bench-badge" @click.stop="router.push('/benchmarks')" title="View in Benchmarks">
-            {{ bestBench.avg_tps.toFixed(1) }} t/s
-          </button>
-        </template>
-      </div>
+    <!-- Column 1: Model name + quantization + badges -->
+    <div class="card-col-model">
+      <a :href="hfUrl" target="_blank" rel="noopener" class="model-link" :title="modelId">
+        <span class="org-prefix">{{ org }}/</span><span class="model-name">{{ shortName }}</span>
+      </a>
+      <span class="meta-chip q-chip">{{ quantLabel }}</span>
+      <AppBadge v-if="isRestarting" variant="warning" size="sm">Restarting…</AppBadge>
+      <AppBadge v-else-if="active" variant="success" size="sm">Serving</AppBadge>
     </div>
 
-    <div class="card-actions">
+    <!-- Column 2: Size · Fit + benchmark -->
+    <div class="card-col-meta">
+      <span class="meta-chip">{{ sizeGb.toFixed(1) }} GB</span>
+      <template v-if="fitInfo && !active">
+        <span class="meta-sep">·</span>
+        <span class="fit-chip" :style="{ color: fitInfo.color }">● {{ fitInfo.label }}</span>
+      </template>
+      <template v-if="bestBench && cached">
+        <span class="meta-sep">·</span>
+        <button class="bench-badge" @click.stop="router.push('/benchmarks')" title="View in Benchmarks">
+          {{ bestBench.avg_tps.toFixed(1) }} t/s
+        </button>
+      </template>
+    </div>
+
+    <!-- Column 3: Actions -->
+    <div class="card-col-actions">
       <template v-if="active">
         <AppButton variant="secondary" size="sm" :loading="isLoading" @click="emit('load')">↺ Reload</AppButton>
       </template>
@@ -120,9 +121,9 @@ const bestBench = computed(() => modelsStore.bestBenchmarkPerModel.get(props.mod
 
 <style scoped>
 .lib-card {
-  display: flex;
+  display: grid;
+  grid-template-columns: 2fr 1.5fr auto;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--bd-subtle);
@@ -138,12 +139,28 @@ const bestBench = computed(() => modelsStore.bestBenchmarkPerModel.get(props.mod
   border-left-color: var(--si-500);
 }
 
-.card-main {
-  flex: 1;
-  min-width: 0;
+.card-col-model {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.card-col-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--tx-secondary);
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+.card-col-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 .name-block {
