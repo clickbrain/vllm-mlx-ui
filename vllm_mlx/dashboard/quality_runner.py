@@ -278,9 +278,9 @@ def _stream_completion(
     text = "".join(chunks)
     ttft_ms = (t_first - t_start) * 1000.0 if t_first is not None else None
     total_ms = (t_end - t_start) * 1000.0
-    # Prefer server-reported completion_tokens; fall back to SSE chunk count
-    # or char-count estimate (avg 4 chars/token) as a sanity floor.
-    completion_tokens = server_completion_tokens if server_completion_tokens else max(token_count, len(text) // 4)
+    # Prefer server-reported completion_tokens; fall back to char-count estimate
+    # at 4 chars/token (more accurate than SSE chunk count which counts deltas).
+    completion_tokens = server_completion_tokens if server_completion_tokens else max(1, round(len(text) / 4))
     elapsed_s = (t_end - t_start) or 1e-6
     tps = completion_tokens / elapsed_s
     return text, ttft_ms, total_ms, completion_tokens, tps

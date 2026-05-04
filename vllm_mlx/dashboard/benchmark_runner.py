@@ -405,6 +405,7 @@ def run_custom_benchmark(
         first_token_time: float | None = None
         last_content_time: float | None = None
         char_count = 0
+        content_char_count = 0  # excludes reasoning_content (thinking tokens)
         completion_tokens: int | None = None
         content_buffer = ""
 
@@ -441,21 +442,31 @@ def run_custom_benchmark(
                     completion_tokens = int(usage["completion_tokens"])
                 choices = data.get("choices") or []
                 delta = choices[0].get("delta", {}) if choices else {}
-                # Accept reasoning_content (thinking tokens from Qwen3 etc.) as valid
-                # output — otherwise thinking can exhaust max_tokens with no delta.content.
-                content = delta.get("content") or delta.get("reasoning_content") or ""
-                if content:
+                content_tok = delta.get("content") or ""
+                thinking_tok = delta.get("reasoning_content") or ""
+                # Use either content or reasoning to detect activity (drive TTFT/timing),
+                # but only count content tokens in char_count for TPS fallback so that
+                # thinking tokens don't inflate the token-per-second metric.
+                activity = content_tok or thinking_tok
+                if activity:
                     now = time.monotonic()
                     if first_token_time is None:
                         first_token_time = now
                     last_content_time = now
-                    char_count += len(content)
-                    content_buffer += content
+                    char_count += len(activity)
+                    content_char_count += len(content_tok)
+                    content_buffer += content_tok
 
             if first_token_time is not None and char_count > 0:
                 ttft_ms = round((first_token_time - start) * 1000, 1)
                 total_ms = round((last_content_time - start) * 1000, 1) if last_content_time else ttft_ms
-                actual_tokens = completion_tokens if completion_tokens else max(1, round(char_count / 4))
+                if completion_tokens:
+                    actual_tokens = completion_tokens
+                else:
+                    # Fallback: use only visible content chars (not thinking tokens) to
+                    # avoid inflating TPS when reasoning_content is streamed.
+                    fallback_chars = content_char_count if content_char_count else char_count
+                    actual_tokens = max(1, round(fallback_chars / 4))
                 # Use total wall-clock time (not just streaming window) so tok/s is
                 # accurate even when thinking tokens are buffered server-side before
                 # any streaming begins.
@@ -619,6 +630,7 @@ def run_live_benchmark(
         first_token_time: float | None = None
         last_content_time: float | None = None
         char_count = 0          # sum of content char lengths for token estimation
+        content_char_count = 0  # content only (excludes reasoning_content thinking tokens)
         completion_tokens: int | None = None   # from server usage field (preferred)
         finish_reason: str | None = None
         content_buffer = ""
@@ -662,16 +674,17 @@ def run_live_benchmark(
                     if fr:
                         finish_reason = fr
                 delta = choices[0].get("delta", {}) if choices else {}
-                # Accept reasoning_content (thinking tokens from Qwen3 etc.) as valid
-                # output — otherwise thinking can exhaust max_tokens with no delta.content.
-                content = delta.get("content") or delta.get("reasoning_content") or ""
-                if content:
+                content_tok = delta.get("content") or ""
+                thinking_tok = delta.get("reasoning_content") or ""
+                activity = content_tok or thinking_tok
+                if activity:
                     now = time.monotonic()
                     if first_token_time is None:
                         first_token_time = now
                     last_content_time = now
-                    char_count += len(content)
-                    content_buffer += content
+                    char_count += len(activity)
+                    content_char_count += len(content_tok)
+                    content_buffer += content_tok
 
             # Skip truncated responses — they make TPS look artificially high
             if finish_reason == "length":
@@ -687,9 +700,13 @@ def run_live_benchmark(
             if first_token_time is not None and char_count > 0:
                 ttft = first_token_time - start
                 total_elapsed = (last_content_time or first_token_time) - start
-                # Use server's completion_tokens if available; else estimate
-                # at 4 chars/token (better than word-splitting).
-                actual_tokens = completion_tokens if completion_tokens else max(1, round(char_count / 4))
+                # Use server's completion_tokens if available; else estimate from
+                # visible content chars only (not thinking tokens) at 4 chars/token.
+                if completion_tokens:
+                    actual_tokens = completion_tokens
+                else:
+                    fallback_chars = content_char_count if content_char_count else char_count
+                    actual_tokens = max(1, round(fallback_chars / 4))
                 gen_time = (last_content_time - first_token_time) if last_content_time else 0.0
 
                 # e2e TPS = total tokens / total wall-clock (includes TTFT)
