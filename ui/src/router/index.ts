@@ -1,10 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import ServeView from '@/views/ServeView.vue'
-import ModelsView from '@/views/ModelsView.vue'
-import SettingsView from '@/views/SettingsView.vue'
-import ChatView from '@/views/ChatView.vue'
-import BenchmarkView from '@/views/BenchmarkView.vue'
-import DocsView from '@/views/DocsView.vue'
 
 export default createRouter({
   history: createWebHistory(),

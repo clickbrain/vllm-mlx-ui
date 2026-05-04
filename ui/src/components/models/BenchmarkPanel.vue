@@ -113,10 +113,10 @@ const chartData = computed((): ChartData<'bar'> | null => {
         label: 'Avg tokens/sec',
         data: valid.map(r => r.avg_tps),
         backgroundColor: valid.map((_, idx) =>
-          idx === maxIdx ? 'rgba(245, 158, 11, 0.70)' : 'rgba(91, 106, 208, 0.70)'
+          idx === maxIdx ? 'rgba(245, 158, 11, 0.70)' : 'var(--si-500-alpha, rgba(91, 106, 208, 0.70))'
         ),
         borderColor: valid.map((_, idx) =>
-          idx === maxIdx ? '#F59E0B' : '#5B6AD0'
+          idx === maxIdx ? 'var(--cu-400, #F59E0B)' : 'var(--si-500, #5B6AD0)'
         ),
         borderWidth: 1,
         borderRadius: 4,
@@ -135,25 +135,25 @@ const chartOptions: ChartOptions<'bar'> = {
   plugins: {
     legend: { display: false },
     tooltip: {
-      backgroundColor: '#2C2C2E',
-      borderColor: 'rgba(255,255,255,.09)',
+      backgroundColor: 'var(--bg-elevated, #2C2C2E)',
+      borderColor: 'var(--bd-default, rgba(255,255,255,.09))',
       borderWidth: 1,
-      titleColor: '#E5E5EA',
-      bodyColor: '#AEAEB2',
+      titleColor: 'var(--tx-primary, #E5E5EA)',
+      bodyColor: 'var(--tx-secondary, #AEAEB2)',
     },
   },
   scales: {
     x: {
-      grid: { color: 'rgba(255,255,255,.05)' },
-      ticks: { color: '#AEAEB2' },
+      grid: { color: 'var(--bd-subtle, rgba(255,255,255,.05))' },
+      ticks: { color: 'var(--tx-secondary, #AEAEB2)' },
     },
     y: {
-      grid: { color: 'rgba(255,255,255,.05)' },
-      ticks: { color: '#AEAEB2' },
+      grid: { color: 'var(--bd-subtle, rgba(255,255,255,.05))' },
+      ticks: { color: 'var(--tx-secondary, #AEAEB2)' },
       title: {
         display: true,
         text: 'tokens/sec',
-        color: '#636366',
+        color: 'var(--tx-muted, #636366)',
       },
     },
   },

@@ -381,7 +381,7 @@ class DownloadManager:
                     with self._lock:
                         it["bytes_dl"] = partial
                         if it["total_bytes"] > 0 and partial > 0:
-                            it["pct"] = min(partial / it["total_bytes"], 0.98)
+                            it["pct"] = min(partial / it["total_bytes"], 0.99)
                     _t.sleep(2)
 
                 # Self-unregister when done

@@ -146,7 +146,7 @@ export const useServerStore = defineStore('server', () => {
         metricsError.value = false
         // Append to history ring buffer
         metricsHistory.value.push({
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          time: new Date().toISOString(),
           active: m.num_running ?? 0,
           queued: m.num_waiting ?? 0,
           total: m.total_requests_processed ?? 0,
@@ -247,7 +247,7 @@ export const useServerStore = defineStore('server', () => {
         metrics.value = r.metrics as Metrics
         metricsError.value = false
         metricsHistory.value.push({
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          time: new Date().toISOString(),
           active: (r.metrics as Metrics).num_running ?? 0,
           queued: (r.metrics as Metrics).num_waiting ?? 0,
           total: (r.metrics as Metrics).total_requests_processed ?? 0,
@@ -313,6 +313,14 @@ export const useServerStore = defineStore('server', () => {
     await api.post('/shutdown', {})
   }
 
+  async function toggleServer() {
+    if (isRunning.value) {
+      await stopServer()
+    } else {
+      await startServer()
+    }
+  }
+
   async function restart() {
     await api.post('/restart', {})
   }
@@ -328,7 +336,7 @@ export const useServerStore = defineStore('server', () => {
     numRunning, numWaiting, totalRequests, totalPromptTokens, totalCompletionTokens,
     metalMemoryGb, peakMemoryGb,
     fetchStatus, fetchMetrics, fetchConfig, fetchMemory, fetchCacheStats,
-    startServer, stopServer, fetchLogs, startPolling, releaseMemory, saveConfig,
+    startServer, stopServer, toggleServer, fetchLogs, startPolling, releaseMemory, saveConfig,
     shutdown, restart, clearCache,
   }
 })

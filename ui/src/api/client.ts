@@ -65,7 +65,7 @@ export const api = {
     request<T>(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
     }),
 
   /** DELETE a resource by path. */

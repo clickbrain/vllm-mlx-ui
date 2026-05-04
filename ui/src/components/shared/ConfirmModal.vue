@@ -29,7 +29,7 @@ defineProps<{
   destructive?: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   confirm: []
   cancel: []
 }>()

@@ -702,13 +702,18 @@ def cost_stats(_: None = Depends(_check_auth)) -> dict:
 
     by_model.sort(key=lambda x: x["estimated_cost_usd"], reverse=True)
 
-    # Estimate monthly savings assuming current usage repeats monthly.
-    # We treat the benchmark history as a proxy for production usage volume.
-    # Monthly savings = what you'd pay a cloud API for the same tokens.
-    estimated_monthly_savings = round(total_cost * 30, 2)
+    # Estimate monthly savings assuming current benchmark usage is representative
+    # of a typical daily workload. This is an approximation — the raw cloud cost
+    # is the more reliable figure for per-benchmark comparisons.
+    benchmarks_analyzed = len([r for r in results if r.get("success", True)])
+    if benchmarks_analyzed > 0:
+        avg_cost_per_run = total_cost / benchmarks_analyzed
+        estimated_monthly_savings = round(avg_cost_per_run * 30, 2)
+    else:
+        estimated_monthly_savings = 0.0
 
     return {
-        "benchmarks_analyzed": len([r for r in results if r.get("success", True)]),
+        "benchmarks_analyzed": benchmarks_analyzed,
         "total_input_tokens": total_input,
         "total_output_tokens": total_output,
         "estimated_cloud_cost_usd": round(total_cost, 4),
@@ -927,7 +932,8 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
                     )
                     return resp.json()
             except Exception as exc:
-                raise HTTPException(status_code=502, detail=str(exc))
+                logger.warning("Non-streaming request to inference server failed: %s", exc, exc_info=True)
+                raise HTTPException(status_code=502, detail="Inference server request failed")
 
     # ── Normal path (no model switch needed) ────────────────────────────────
     # If the inference server is currently starting up (model loading from a
@@ -1023,9 +1029,10 @@ def set_auto_switch(data: dict[str, Any], _: None = Depends(_check_auth)) -> dic
         data: Dict with key ``enabled`` (bool).
     """
     cfg = sm.load_config()
-    cfg["auto_model_switch"] = bool(data.get("enabled", True))
+    if "enabled" in data:
+        cfg["auto_model_switch"] = bool(data["enabled"])
     sm.save_config(cfg)
-    return {"ok": True, "enabled": cfg["auto_model_switch"]}
+    return {"ok": True, "enabled": cfg.get("auto_model_switch", False)}
 
 
 # ── OpenAI-compatible pass-through proxy ─────────────────────────────────────

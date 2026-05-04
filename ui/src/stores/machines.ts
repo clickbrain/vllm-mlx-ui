@@ -10,7 +10,7 @@
  * - scanNetwork delegates to the backend /network/scan endpoint (mDNS + ARP).
  */
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { api } from '@/api/client'
 
 export interface Machine {
@@ -47,7 +47,7 @@ export const useMachinesStore = defineStore('machines', () => {
   watch(machines, (v) => localStorage.setItem(LS_KEY, JSON.stringify(v)), { deep: true })
   watch(activeMachineId, (v) => localStorage.setItem(LS_ACTIVE_KEY, v))
 
-  const activeMachine = (): Machine => machines.value.find(m => m.id === activeMachineId.value) ?? machines.value[0]
+  const activeMachine = computed(() => machines.value.find(m => m.id === activeMachineId.value) ?? machines.value[0])
 
   function addMachine(m: Omit<Machine, 'id' | 'online'>) {
     machines.value.push({ ...m, id: crypto.randomUUID(), online: false })

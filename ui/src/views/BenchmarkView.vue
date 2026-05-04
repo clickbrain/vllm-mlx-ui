@@ -387,6 +387,7 @@ function stopBenchmarkPolls() {
 
 /** Re-attaches the quality poll after a component remount while a run is active. */
 function _reconnectQualityPoll(runId: string) {
+  _lineOffset = 0  // Reset offset — we re-fetch from the beginning to avoid stale cursor
   _qualityPollTimer = setInterval(async () => {
     try {
       const out = await api.get<{
@@ -536,7 +537,7 @@ async function _doBenchmarkRun() {
             speedPhase.value = 'done'
             await modelsStore.fetchBenchmarkResults()
             const hist = modelsStore.benchmarkHistory
-            lastRunSpeed.value = hist.length ? hist[hist.length - 1] : null
+            lastRunSpeed.value = hist.length ? hist[0] : null
             speedDone = true
             checkDone()
           }

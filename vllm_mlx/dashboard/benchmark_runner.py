@@ -193,7 +193,7 @@ def _clear_memory(callback: "Callable[[str], None] | None" = None) -> None:
         if "mlx.core" in sys.modules:
             sys.modules["mlx.core"].clear_cache()
     except Exception:
-        logger.warning("Operation failed", exc_info=True)
+        logger.warning("Failed to clear MLX cache", exc_info=True)
     if callback:
         callback("🧹 Clearing memory before benchmark…\n")
     time.sleep(1.5)
@@ -257,7 +257,8 @@ def run_benchmark(
             text=True,
             bufsize=1,
         )
-        assert proc.stdout is not None
+        if proc.stdout is None:
+            raise RuntimeError("Popen returned None stdout despite PIPE setting")
         for line in proc.stdout:
             output_lines.append(line)
             if output_callback:
@@ -267,6 +268,10 @@ def run_benchmark(
     except Exception as e:
         success = False
         output_lines.append(f"Error: {e}\n")
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
     raw_output = "".join(output_lines)
 

@@ -61,8 +61,8 @@ const fitInfo = computed(() => {
   if (!avail || !props.sizeGb) return null
   const ratio = props.sizeGb / avail
   if (ratio < 0.5)  return { label: 'Fits great', color: 'var(--ph-400)' }
-  if (ratio < 0.75) return { label: 'Fits well',  color: '#facc15' }
-  if (ratio < 0.90) return { label: 'Tight fit',  color: '#f97316' }
+  if (ratio < 0.75) return { label: 'Fits well',  color: 'var(--cu-300)' }
+  if (ratio < 0.90) return { label: 'Tight fit',  color: 'var(--cu-500)' }
   return { label: 'Too large', color: 'var(--cr-400)' }
 })
 

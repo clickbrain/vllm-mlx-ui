@@ -316,11 +316,12 @@ async function sendStreaming(body: Record<string, unknown>) {
     signal: abortCtrl.signal,
   })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.body) throw new Error('Response body is null — streaming not supported')
 
   chatStore.addMessage({ role: 'assistant', content: '', streaming: true })
   let completionTokens = 0
 
-  const reader  = resp.body!.getReader()
+  const reader  = resp.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
 
@@ -345,7 +346,7 @@ async function sendStreaming(body: Record<string, unknown>) {
         if (delta?.reasoning_content) chatStore.updateLastReasoning(delta.reasoning_content)
         if (delta?.content) {
           chatStore.updateLastMessage(delta.content)
-          completionTokens++
+          completionTokens++  // approximate chunk count (used only if server omits usage)
           await scrollToBottom()
         }
         if (chunk.usage) tokenUsage.value = chunk.usage

@@ -62,8 +62,8 @@ const sizeLabel = computed(() => {
 const fitInfo = computed(() => {
   const map: Record<string, { dot: string; label: string; color: string }> = {
     perfect:   { dot: '●', label: 'Fits great', color: 'var(--ph-400)' },
-    good:      { dot: '●', label: 'Fits well',  color: '#facc15' },
-    marginal:  { dot: '●', label: 'Tight fit',  color: '#f97316' },
+    good:      { dot: '●', label: 'Fits well',  color: 'var(--cu-300)' },
+    marginal:  { dot: '●', label: 'Tight fit',  color: 'var(--cu-500)' },
     too_tight: { dot: '●', label: 'Too large',  color: 'var(--cr-400)' },
   }
   return props.fit_level ? (map[props.fit_level] ?? null) : null

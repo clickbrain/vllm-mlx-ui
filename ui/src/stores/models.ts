@@ -415,15 +415,17 @@ export const useModelsStore = defineStore('models', () => {
       return undefined
     }
 
-    benchmarkResults.value = raw.map(r => {
-      const tps = parseTps(r)
-      return {
-        model_id: String(r.model ?? r.model_id ?? ''),
-        ...tps,
-        runs: Number(r.runs ?? r.num_runs ?? 1),
-        avg_ttft_ms: parseTtft(r),
-      }
-    })
+    benchmarkResults.value = raw
+      .filter(r => (r.model ?? r.model_id ?? '') !== '')
+      .map(r => {
+        const tps = parseTps(r)
+        return {
+          model_id: String(r.model ?? r.model_id ?? ''),
+          ...tps,
+          runs: Number(r.runs ?? r.num_runs ?? 1),
+          avg_ttft_ms: parseTtft(r),
+        }
+      })
 
     benchmarkHistory.value = raw.map((r, idx) => {
       const tps = parseTps(r)
@@ -464,6 +466,13 @@ export const useModelsStore = defineStore('models', () => {
     benchmarkHistory.value = []
   }
 
+  function clearAllDownloadPolls() {
+    for (const id of Object.keys(pollIntervals)) {
+      window.clearInterval(pollIntervals[id])
+      delete pollIntervals[id]
+    }
+  }
+
   /** Best (highest avg_tps) benchmark result per model_id, for display in library cards. */
   const bestBenchmarkPerModel = computed(() => {
     const map = new Map<string, BenchmarkHistoryEntry>()
@@ -482,7 +491,7 @@ export const useModelsStore = defineStore('models', () => {
     benchmarkResults, benchmarkHistory, benchmarking, benchmarkRunning,
     bestBenchmarkPerModel,
     loadingModelId, actionError, serverRestartingFor,
-    fetchModels, downloadModel, pollDownloadStatus, resumeActiveDownloadPolls,
+    fetchModels, downloadModel, pollDownloadStatus, resumeActiveDownloadPolls, clearAllDownloadPolls,
     loadModel, deleteModel,
     searchHF, searchHFMore,
     runBenchmark, fetchBenchmarkResults, deleteBenchmarkResult, clearAllBenchmarks,
