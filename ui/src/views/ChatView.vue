@@ -604,7 +604,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Messages -->
-        <div class="messages" ref="messagesEl" @scroll="onMessagesScroll">
+        <div class="messages" ref="messagesEl" @scroll="onMessagesScroll" role="log" aria-label="Chat messages" aria-live="polite">
           <!-- Empty state -->
           <div v-if="!messages.length" class="empty-state">
             <div v-if="!modelId" class="server-warning">
@@ -632,6 +632,8 @@ onUnmounted(() => {
             :key="i"
             class="message"
             :class="msg.role"
+            :role="msg.role === 'assistant' ? 'article' : undefined"
+            :aria-label="msg.role === 'assistant' ? 'Assistant message' : 'Your message'"
           >
             <div class="msg-content" :class="msg.role">
               <!-- Attached images (user messages with multimodal content) -->
