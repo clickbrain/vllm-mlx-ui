@@ -32,7 +32,15 @@ function loadSession(): Message[] {
 function saveSession(msgs: Message[]) {
   try {
     localStorage.setItem(LS_SESSION_KEY, JSON.stringify(msgs.filter(m => !m.streaming)))
-  } catch { /* quota exceeded — ignore */ }
+  } catch (e) {
+    // localStorage quota exceeded — trim to last 10 messages and retry once
+    try {
+      const trimmed = msgs.filter(m => !m.streaming).slice(-10)
+      localStorage.setItem(LS_SESSION_KEY, JSON.stringify(trimmed))
+    } catch {
+      console.warn('Chat session could not be saved: localStorage quota exceeded')
+    }
+  }
 }
 
 export const useChatStore = defineStore('chat', () => {
