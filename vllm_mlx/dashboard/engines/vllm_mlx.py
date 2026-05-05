@@ -19,6 +19,11 @@ class VllmMlxEngine(BaseEngine):
 
     id: ClassVar[str] = "vllm-mlx"
     name: ClassVar[str] = "vLLM-MLX"
+    description: ClassVar[str] = (
+        "The bundled vLLM-MLX engine — optimised MLX inference for Apple Silicon with "
+        "paged KV cache, continuous batching, tool calls, audio, and vision support. "
+        "This is the default recommended engine for Apple Silicon Macs."
+    )
     capabilities: ClassVar[frozenset[str]] = frozenset({
         "tool_calls",
         "vision",

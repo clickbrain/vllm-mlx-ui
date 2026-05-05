@@ -27,6 +27,10 @@ from typing import TYPE_CHECKING
 
 from .vllm_mlx import VllmMlxEngine
 from .rapid_mlx import RapidMlxEngine
+from .ollama import OllamaEngine
+from .lmstudio import LmStudioEngine
+from .llama_cpp import LlamaCppEngine
+from .vllm_metal import VllmMetalEngine
 
 if TYPE_CHECKING:
     from .base import BaseEngine
@@ -37,6 +41,10 @@ logger = logging.getLogger(__name__)
 _BUILTINS: list["BaseEngine"] = [
     VllmMlxEngine(),
     RapidMlxEngine(),
+    OllamaEngine(),
+    LmStudioEngine(),
+    LlamaCppEngine(),
+    VllmMetalEngine(),
 ]
 
 # ── Global registry state ─────────────────────────────────────────────────────
@@ -165,9 +173,11 @@ def list_engines() -> list[dict]:
         result.append({
             "id": engine.id,
             "name": engine.name,
+            "description": getattr(engine, "description", ""),
             "capabilities": sorted(engine.capabilities),
             "install_method": engine.install_method,
             "is_builtin": getattr(engine, "is_builtin", True),
+            "health_path": getattr(engine, "health_path", "/health"),
             "installed": installed,
             "version": version,
         })

@@ -623,14 +623,46 @@ def get_server_url(config: dict[str, Any] | None = None) -> str:
 
 
 def check_health(config: dict[str, Any] | None = None) -> tuple[bool, dict]:
-    """Returns (is_healthy, health_data). Never raises."""
+    """Returns (is_healthy, health_data). Never raises.
+
+    Tries the engine's declared ``health_path`` first (``/health`` for most
+    engines), then falls back to ``/v1/models`` for engines that only expose
+    the OpenAI-compatible endpoint (e.g. LM Studio, Ollama).
+    """
     try:
+        if config is None:
+            config = load_config()
         url = get_server_url(config)
-        r = _http.get(f"{url}/health", timeout=2)
-        if r.status_code == 200:
-            return True, r.json()
+
+        # Determine the primary health endpoint from the engine adapter.
+        from vllm_mlx.dashboard.engines.registry import get_engine
+        engine_id = config.get("engine_id", "vllm-mlx")
+        try:
+            health_path = getattr(get_engine(engine_id), "health_path", "/health")
+        except Exception:
+            health_path = "/health"
+
+        # Try primary endpoint.
+        try:
+            r = _http.get(f"{url}{health_path}", timeout=2)
+            if r.status_code == 200:
+                try:
+                    return True, r.json()
+                except Exception:
+                    return True, {}
+        except Exception:
+            pass
+
+        # Fallback: if the primary wasn't /v1/models, try that too.
+        if health_path != "/v1/models":
+            try:
+                r = _http.get(f"{url}/v1/models", timeout=2)
+                if r.status_code == 200:
+                    return True, {}
+            except Exception:
+                pass
     except Exception:
-        logger.warning("Operation failed", exc_info=True)
+        logger.warning("check_health failed", exc_info=True)
     return False, {}
 
 
@@ -708,6 +740,25 @@ def _build_command(config: dict[str, Any]) -> list[str]:
         logger.warning("Unknown engine_id %r — falling back to vllm-mlx", engine_id)
         engine = get_engine("vllm-mlx")
     return engine.build_command(config)
+
+
+def _build_env(config: dict[str, Any]) -> dict | None:
+    """Return the environment dict for the engine subprocess, or None to inherit parent env.
+
+    If the selected engine's ``build_env()`` returns a non-empty dict, merges
+    it on top of ``os.environ`` so the subprocess inherits all current vars
+    plus the engine-specific overrides.  Returns ``None`` if no overrides.
+    """
+    from vllm_mlx.dashboard.engines.registry import get_engine
+    engine_id = config.get("engine_id", "vllm-mlx")
+    try:
+        engine = get_engine(engine_id)
+    except KeyError:
+        return None
+    extra = engine.build_env(config)
+    if not extra:
+        return None
+    return {**os.environ, **{str(k): str(v) for k, v in extra.items()}}
 
 
 def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
@@ -805,6 +856,7 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
         _intentional_stop_in_progress = False  # we're starting fresh
 
     cmd = _build_command(config)
+    env = _build_env(config)
     with open(LOG_FILE, "w") as log_fh:
         proc = subprocess.Popen(
             cmd,
@@ -812,6 +864,7 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env=env,
         )
     _write_server_state(proc.pid, config)
 

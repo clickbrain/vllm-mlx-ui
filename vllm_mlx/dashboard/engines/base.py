@@ -42,9 +42,16 @@ class BaseEngine(ABC):
     #: "external" (external binary, not pip-managed).
     install_method: ClassVar[str] = "pip"
 
+    #: Human-readable description shown in the Settings engine card.
+    description: ClassVar[str] = ""
+
     #: True for engines shipped with the dashboard package (vllm-mlx, rapid-mlx).
     #: False for engines discovered via entry_points or user manifest files.
     is_builtin: ClassVar[bool] = True
+
+    #: Path to use for the readiness health probe.
+    #: Override to ``"/v1/models"`` for engines that don't expose ``/health``.
+    health_path: ClassVar[str] = "/health"
 
     # ── Core abstract methods ──────────────────────────────────────────────────
 
@@ -84,6 +91,19 @@ class BaseEngine(ABC):
         Returns an empty list by default (engine has no extra settings).
         """
         return []
+
+    def build_env(self, config: dict[str, Any]) -> dict[str, str] | None:  # noqa: ARG002
+        """Return extra environment variables to add when launching this engine.
+
+        Returns:
+            None to inherit the parent process environment unchanged.
+            A ``{name: value}`` dict to merge on top of ``os.environ`` before
+            spawning the engine subprocess.  All values must be strings.
+
+        Default implementation returns None (no overrides).
+        Override in subclasses that need env-based configuration (e.g. Ollama).
+        """
+        return None
 
     def validate_model_id(self, model_id: str) -> bool:  # noqa: ARG002
         """Return True if *model_id* is a valid identifier for this engine.

@@ -56,6 +56,11 @@ class RapidMlxEngine(BaseEngine):
 
     id: ClassVar[str] = "rapid-mlx"
     name: ClassVar[str] = "Rapid-MLX"
+    description: ClassVar[str] = (
+        "Rapid-MLX is a performance-focused MLX inference server for Apple Silicon with "
+        "TurboQuant V-cache compression, 17+ tool-call parsers, and smart cloud routing. "
+        "Install with `pip install rapid-mlx`."
+    )
     capabilities: ClassVar[frozenset[str]] = frozenset({
         "tool_calls",
         "vision",

@@ -1748,6 +1748,12 @@ async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
         raise HTTPException(status_code=404, detail=f"Unknown engine: {engine_id}")
     if engine.install_method == "bundled":
         raise HTTPException(status_code=400, detail=f"Engine {engine_id!r} is bundled and cannot be installed.")
+    if engine.install_method == "external":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Engine {engine_id!r} is an external binary — install it through its own installer "
+                   f"(see engine description for instructions).",
+        )
 
     cmd = engine.install_command()
 

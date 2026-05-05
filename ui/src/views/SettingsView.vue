@@ -37,9 +37,10 @@ interface EngineInfo {
   name: string
   description: string
   installed: boolean
-  install_method: 'bundled' | 'pip'
+  install_method: 'bundled' | 'pip' | 'external'
   version?: string
   is_builtin?: boolean
+  health_path?: string
 }
 const engines = ref<EngineInfo[]>([])
 const enginesLoading = ref(false)
@@ -521,6 +522,11 @@ async function doRestart() {
               :loading="installingEngine === eng.id"
               @click.stop="installEngine(eng.id)"
             >Install</AppButton>
+            <span
+              v-if="!eng.installed && eng.install_method === 'external'"
+              class="engine-external-hint dim"
+              title="See description for install instructions"
+            >Install separately</span>
           </div>
           <div v-if="engineInstallLog[eng.id]" class="engine-install-log">
             <pre>{{ engineInstallLog[eng.id] }}</pre>
@@ -1223,6 +1229,7 @@ async function doRestart() {
 .engine-card-footer { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .engine-method-chip { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--tx-muted); padding: 1px 6px; border-radius: var(--r-pill); background: var(--bg-inset); border: 1px solid var(--bd-subtle); }
 .engine-version { font-size: 12px; font-family: var(--font-mono); }
+.engine-external-hint { font-size: 12px; font-style: italic; }
 .engine-install-log { margin-top: var(--space-3); }
 .engine-install-log pre { font-size: 11px; font-family: var(--font-mono); color: var(--tx-muted); background: var(--bg-inset); border-radius: var(--r-sm); padding: var(--space-3); max-height: 160px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
 .pref-list { display: flex; flex-direction: column; }
