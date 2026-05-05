@@ -307,8 +307,36 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
 
     # Run all checks in parallel — total wait is max(individual timeouts) ≈ 3s
     checkers = [_check_ui, _check_vllm, _check_hfhub]
+
+    # Add pip-installed engine checks dynamically from the registry.
+    try:
+        from vllm_mlx.dashboard.engines.registry import ENGINES
+        for _engine in list(ENGINES.values()):
+            if _engine.install_method != "pip":
+                continue
+            _eid = _engine.id
+            _ename = _engine.name
+            _pkg = _engine.get_package_name()
+
+            def _make_engine_checker(_e_id=_eid, _e_name=_ename, _e_pkg=_pkg):
+                def _check_engine():
+                    inst = _installed_version(_e_pkg)
+                    latest = _pypi_latest(_e_pkg)
+                    return PackageInfo(
+                        name=f"{_e_name} (engine)",
+                        installed=inst,
+                        latest=latest if latest != "unknown" else inst,
+                        update_available=_version_gt(latest, inst),
+                        url=f"https://pypi.org/project/{_e_pkg}/#history",
+                    )
+                return _check_engine
+
+            checkers.append(_make_engine_checker())
+    except Exception as exc:
+        logger.warning("Could not load engine registry for update checks: %s", exc)
+
     results: list[PackageInfo] = [None] * len(checkers)  # type: ignore[list-item]
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=max(4, len(checkers))) as pool:
         futures = {pool.submit(fn): i for i, fn in enumerate(checkers)}
         for future in as_completed(futures):
             idx = futures[future]
@@ -321,6 +349,18 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
     with _cache_lock:
         _cache = {"ts": time.time(), "results": results}
     return results
+
+
+def get_cached_updates() -> list[PackageInfo] | None:
+    """Return cached update results without making any network calls.
+
+    Returns ``None`` if the cache is cold (never fetched or expired).
+    Callers that need up-to-date data should use ``check_updates()`` instead.
+    """
+    with _cache_lock:
+        if _cache.get("ts", 0) + _CACHE_TTL > time.time():
+            return list(_cache.get("results", []))
+    return None
 
 
 def bust_cache() -> None:

@@ -72,6 +72,50 @@ class _PermissiveHeadersMiddleware(BaseHTTPMiddleware):
 app.add_middleware(_PermissiveHeadersMiddleware)
 
 
+# ── Background update scheduler ───────────────────────────────────────────────
+# Warms the update cache once ~15 s after startup, then repeats hourly.
+# This ensures /poll can return cached update state without ever blocking.
+_update_scheduler_stop = threading.Event()
+_update_scheduler_thread: threading.Thread | None = None
+
+
+def _run_update_scheduler() -> None:
+    """Thread target: check for updates after startup delay, then every hour."""
+    # Brief startup delay so the server is fully ready before hitting the network.
+    if _update_scheduler_stop.wait(15):
+        return  # stop requested during startup delay
+    while not _update_scheduler_stop.is_set():
+        try:
+            from vllm_mlx.dashboard.update_checker import check_updates
+            check_updates(force=True)
+        except Exception as exc:
+            logger.warning("Background update check failed: %s", exc, exc_info=True)
+        # Wait 1 hour (checking every 10 s so we can respond to stop quickly)
+        for _ in range(360):
+            if _update_scheduler_stop.wait(10):
+                return
+
+
+@app.on_event("startup")
+def _start_background_scheduler() -> None:
+    global _update_scheduler_thread
+    _update_scheduler_stop.clear()
+    t = threading.Thread(
+        target=_run_update_scheduler,
+        daemon=True,
+        name="update-scheduler",
+    )
+    t.start()
+    _update_scheduler_thread = t
+
+
+@app.on_event("shutdown")
+def _stop_background_scheduler() -> None:
+    _update_scheduler_stop.set()
+    if _update_scheduler_thread is not None:
+        _update_scheduler_thread.join(timeout=2)
+
+
 # ── Auth ─────────────────────────────────────────────────────────────────────
 # Cache the API key with a short TTL to avoid a disk read on every request.
 # 30s TTL: short enough that disabling the key takes effect within half a
@@ -532,8 +576,33 @@ def poll(_: None = Depends(_check_auth)) -> dict:
 
     Reduces 4 sequential API calls (every 3 s) into a single round-trip,
     cutting network overhead and CPU polling cost by ~75%.
+
+    Also includes cached update state (``updates`` key) when the update cache
+    is warm.  Returns ``null`` for ``updates`` when the cache is cold so the
+    client knows no data is available yet — it should NOT make a blocking
+    network call here; the background scheduler will warm the cache shortly.
     """
     server_state = sm._read_server_state() or {}
+
+    # Include cached update state without any network calls.
+    updates_payload = None
+    try:
+        from vllm_mlx.dashboard.update_checker import get_cached_updates
+        cached = get_cached_updates()
+        if cached is not None:
+            updates_payload = [
+                {
+                    "name": r.name,
+                    "installed": r.installed,
+                    "latest": r.latest,
+                    "update_available": r.update_available,
+                    "url": r.url,
+                }
+                for r in cached
+            ]
+    except Exception as exc:
+        logger.warning("Failed to read cached updates in /poll: %s", exc)
+
     return {
         "status": sm.get_server_status(),
         "metrics": sm.get_metrics() or {},
@@ -544,6 +613,7 @@ def poll(_: None = Depends(_check_auth)) -> dict:
             "model": server_state.get("model", ""),
             "started_at": server_state.get("started_at"),
         },
+        "updates": updates_payload,
     }
 
 
@@ -1630,6 +1700,23 @@ def list_engines(_: None = Depends(_check_auth)) -> dict:
     """Return all registered inference engines with install status and capabilities."""
     from vllm_mlx.dashboard.engines.registry import list_engines as _list_engines
     return {"engines": _list_engines()}
+
+
+@app.post("/engines/reload")
+def reload_engines(_: None = Depends(_check_auth)) -> dict:
+    """Re-scan entry points and manifest files, then atomically update the engine registry.
+
+    Returns the updated engine list.  Use this after installing a new engine
+    plugin to surface it in the UI without restarting the server.
+    """
+    from vllm_mlx.dashboard.engines.registry import reload as _reload_registry, list_engines as _list_engines
+    try:
+        _reload_registry()
+        engines = _list_engines()
+        return {"ok": True, "engines": engines}
+    except Exception as exc:
+        logger.warning("Engine registry reload failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Registry reload failed: {exc}")
 
 
 @app.get("/engines/{engine_id}/config-schema")

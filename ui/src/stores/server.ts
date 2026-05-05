@@ -14,6 +14,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/api/client'
+import { useUpdatesStore } from '@/stores/updates'
+import { useToastStore } from '@/stores/toast'
 
 interface ServerStatus {
   running: boolean
@@ -239,6 +241,7 @@ export const useServerStore = defineStore('server', () => {
         memory: MemoryStats;
         config: ServerConfig;
         runtime?: { engine_id?: string; model?: string; started_at?: string };
+        updates?: Array<{ name: string; installed: string; latest: string; update_available: boolean; url: string }> | null;
       }>('/poll')
 
       // Status
@@ -272,6 +275,12 @@ export const useServerStore = defineStore('server', () => {
       config.value = r.runtime?.engine_id
         ? { ...r.config, engine_id: r.runtime.engine_id }
         : r.config
+
+      // Updates — piggyback cached update state from the background scheduler.
+      // Only process when updates is non-null (null = cache is cold, scheduler hasn't run yet).
+      if (r.updates != null) {
+        _handlePollUpdates(r.updates)
+      }
     } catch {
       // Fallback: if /poll doesn't exist (old server), do individual fetches
       await fetchStatus()
@@ -317,6 +326,34 @@ export const useServerStore = defineStore('server', () => {
   async function releaseMemory() {
     try { await api.post('/memory/release') }
     catch { /* silent */ }
+  }
+
+  /**
+   * Handle the ``updates`` field from /poll.
+   * Syncs the updates store and fires a toast on the first
+   * ``no-updates → updates-available`` transition per session.
+   */
+  function _handlePollUpdates(
+    updates: Array<{ name: string; installed: string; latest: string; update_available: boolean; url: string }>
+  ) {
+    try {
+      const updatesStore = useUpdatesStore()
+      const toastStore = useToastStore()
+
+      const hadUpdate = updatesStore.anyUpdate
+      const nowHasUpdate = updates.some(u => u.update_available)
+
+      // Sync the updates store data (avoids a separate /updates network call)
+      updatesStore.mergeFromPoll(updates)
+
+      // Fire toast only on the first transition from "no update" to "update available"
+      if (!hadUpdate && nowHasUpdate) {
+        const names = updates.filter(u => u.update_available).map(u => u.name).join(', ')
+        toastStore.info(`Update available: ${names}`)
+      }
+    } catch {
+      // Updates/toast store not yet initialised — safe to ignore
+    }
   }
 
   async function shutdown() {

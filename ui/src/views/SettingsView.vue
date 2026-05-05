@@ -39,6 +39,7 @@ interface EngineInfo {
   installed: boolean
   install_method: 'bundled' | 'pip'
   version?: string
+  is_builtin?: boolean
 }
 const engines = ref<EngineInfo[]>([])
 const enginesLoading = ref(false)
@@ -46,17 +47,32 @@ const enginesError = ref('')
 const selectedEngine = ref(serverStore.engineId)
 const installingEngine = ref<string | null>(null)
 const engineInstallLog = ref<Record<string, string>>({})
+const reloadingEngines = ref(false)
 
 async function loadEngines() {
   enginesLoading.value = true
   enginesError.value = ''
   try {
-    const result = await api.get<EngineInfo[]>('/engines')
-    engines.value = result ?? []
+    const result = await api.get<{ engines: EngineInfo[] } | EngineInfo[]>('/engines')
+    // Handle both {engines: [...]} and plain array responses
+    engines.value = Array.isArray(result) ? result : (result as any).engines ?? []
   } catch (e: any) {
     enginesError.value = `Failed to load engines: ${e?.message ?? 'unknown error'}`
   } finally {
     enginesLoading.value = false
+  }
+}
+
+async function reloadEngines() {
+  reloadingEngines.value = true
+  enginesError.value = ''
+  try {
+    const result = await api.post<{ ok: boolean; engines: EngineInfo[] }>('/engines/reload', {})
+    engines.value = result.engines ?? []
+  } catch (e: any) {
+    enginesError.value = `Reload failed: ${e?.message ?? 'unknown error'}`
+  } finally {
+    reloadingEngines.value = false
   }
 }
 
@@ -463,6 +479,14 @@ async function doRestart() {
           <div class="section-title" id="engine-heading">Inference Engine</div>
           <div class="section-desc">Choose which engine runs your models. Changing takes effect on next server start.</div>
         </div>
+        <AppButton
+          variant="secondary"
+          size="sm"
+          :loading="reloadingEngines"
+          aria-label="Reload engine plugins"
+          title="Re-scan for custom engine plugins"
+          @click="reloadEngines"
+        >↺ Reload Plugins</AppButton>
       </div>
       <div v-if="enginesError" class="settings-error-banner">
         ⚠ {{ enginesError }}
@@ -481,6 +505,7 @@ async function doRestart() {
         >
           <div class="engine-card-header">
             <span class="engine-card-name">{{ eng.name }}</span>
+            <span v-if="eng.is_builtin === false" class="engine-custom-badge" title="Loaded from a local plugin manifest">Custom</span>
             <span class="engine-installed-badge" :class="eng.installed ? 'installed' : 'not-installed'">
               {{ eng.installed ? '✓ Installed' : 'Not installed' }}
             </span>
@@ -1193,6 +1218,7 @@ async function doRestart() {
 .engine-installed-badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: var(--r-pill); }
 .engine-installed-badge.installed { color: #4ade80; background: rgba(74,222,128,.1); border: 1px solid rgba(74,222,128,.25); }
 .engine-installed-badge.not-installed { color: var(--tx-muted); background: var(--bg-inset); border: 1px solid var(--bd-subtle); }
+.engine-custom-badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: var(--r-pill); color: var(--tx-secondary); background: var(--bg-inset); border: 1px solid var(--bd-subtle); margin-right: 4px; }
 .engine-card-desc { font-size: 13px; color: var(--tx-muted); line-height: 1.4; margin-bottom: var(--space-3); }
 .engine-card-footer { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .engine-method-chip { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--tx-muted); padding: 1px 6px; border-radius: var(--r-pill); background: var(--bg-inset); border: 1px solid var(--bd-subtle); }

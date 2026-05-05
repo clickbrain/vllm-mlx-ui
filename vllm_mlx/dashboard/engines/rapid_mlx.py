@@ -2,12 +2,15 @@
 """RapidMlxEngine — adapter for the Rapid-MLX inference engine.
 
 Rapid-MLX (github.com/raullenchai/Rapid-MLX) is a performance-focused MLX
-inference server with proprietary features like TurboQuant, DeltaNet snapshots,
-and cloud routing.  It exposes an OpenAI-compatible API on the same port scheme
-as vllm-mlx, making hot-swapping straightforward.
+inference server with TurboQuant V-cache compression, DeltaNet state snapshots
+(automatic — no CLI flag), smart cloud routing, and 17+ tool-call parsers.
+It exposes an OpenAI-compatible API on the same port scheme as vllm-mlx.
 
 Install:  pip install rapid-mlx
 Launch:   rapid-mlx serve <model> --host <h> --port <p> [flags...]
+
+CLI flags verified against the Rapid-MLX README
+(github.com/raullenchai/Rapid-MLX) on 2026-04-30.
 
 Model identifiers:
   Rapid-MLX supports both full HF repo IDs (mlx-community/Qwen3-8B-4bit) and
@@ -56,17 +59,18 @@ class RapidMlxEngine(BaseEngine):
     capabilities: ClassVar[frozenset[str]] = frozenset({
         "tool_calls",
         "vision",
+        "audio",
         "prefix_cache",
         "kv_quantization",
         "reasoning",
-        "metrics",
+        "cloud_routing",
     })
     install_method: ClassVar[str] = "pip"
 
     # ── BaseEngine implementation ─────────────────────────────────────────────
 
     def build_command(self, config: dict[str, Any]) -> list[str]:
-        """Build the rapid-mlx serve command."""
+        """Build the rapid-mlx serve command with verified CLI flags."""
         model = self.resolve_launch_model(config)
 
         # rapid-mlx is a pip-installed package — use sys.executable to guarantee
@@ -80,21 +84,51 @@ class RapidMlxEngine(BaseEngine):
         if config.get("api_key"):
             cmd += ["--api-key", config["api_key"]]
 
-        # Rapid-MLX specific flags from engine_settings
-        if es.get("turboquant"):
-            cmd += ["--turboquant"]
-        if es.get("deltanet_snapshot"):
-            cmd += ["--deltanet-snapshot", str(es["deltanet_snapshot"])]
-        if es.get("cloud_routing"):
-            cmd += ["--cloud-routing"]
+        # --- Performance flags ---
+        if es.get("kv_turboquant"):
+            cmd += ["--kv-cache-turboquant"]
         if es.get("kv_quantization"):
             cmd += ["--kv-cache-quantization"]
+        if es.get("enable_prefix_cache"):
+            # Default is OFF in the engine; user opts in via settings.
+            cmd += ["--enable-prefix-cache"]
+        prefill = es.get("prefill_step_size", 0)
+        if prefill and prefill > 0:
+            cmd += ["--prefill-step-size", str(prefill)]
+        gpu_util = es.get("gpu_memory_utilization", 0.0)
+        if gpu_util and 0.0 < gpu_util < 1.0:
+            cmd += ["--gpu-memory-utilization", str(gpu_util)]
+        if es.get("enable_tool_logits_bias"):
+            cmd += ["--enable-tool-logits-bias"]
+
+        # --- Token limits ---
         if es.get("max_tokens", 0) > 0:
             cmd += ["--max-tokens", str(es["max_tokens"])]
-        if es.get("enable_metrics"):
-            cmd += ["--enable-metrics"]
-        if not es.get("enable_prefix_cache", True):
-            cmd += ["--disable-prefix-cache"]
+
+        # --- Cloud routing (--cloud-model is a litellm model string, not a bool) ---
+        cloud_model = es.get("cloud_model", "").strip()
+        if cloud_model:
+            cmd += ["--cloud-model", cloud_model]
+            cloud_threshold = es.get("cloud_threshold", 0)
+            if cloud_threshold and cloud_threshold > 0:
+                cmd += ["--cloud-threshold", str(cloud_threshold)]
+
+        # --- Parser overrides (auto-detected from model name by default) ---
+        tool_parser = es.get("tool_call_parser", "").strip()
+        if tool_parser:
+            cmd += ["--tool-call-parser", tool_parser]
+        reasoning_parser = es.get("reasoning_parser", "").strip()
+        if reasoning_parser:
+            cmd += ["--reasoning-parser", reasoning_parser]
+
+        # --- Rate limits ---
+        rate_limit = es.get("rate_limit", 0)
+        if rate_limit and rate_limit > 0:
+            cmd += ["--rate-limit", str(rate_limit)]
+
+        # --- Multimodal mode ---
+        if es.get("mllm"):
+            cmd += ["--mllm"]
 
         return cmd
 
@@ -145,34 +179,54 @@ class RapidMlxEngine(BaseEngine):
 
     def config_schema(self) -> list[dict[str, Any]]:
         return [
+            # --- Performance ---
             {
-                "key": "turboquant",
-                "label": "TurboQuant",
+                "key": "kv_turboquant",
+                "label": "TurboQuant V-Cache",
                 "type": "bool",
                 "default": False,
-                "help": "Enable Rapid-MLX TurboQuant dynamic quantization for faster inference.",
-            },
-            {
-                "key": "deltanet_snapshot",
-                "label": "DeltaNet Snapshot",
-                "type": "str",
-                "default": "",
-                "help": "Path to a DeltaNet KV snapshot file for ultra-fast cold starts.",
-            },
-            {
-                "key": "cloud_routing",
-                "label": "Cloud Routing",
-                "type": "bool",
-                "default": False,
-                "help": "Enable cloud routing for requests that exceed local capacity.",
+                "help": "Rotate + Lloyd-Max compress V cache (86% savings on dense models). Flag: --kv-cache-turboquant",
             },
             {
                 "key": "kv_quantization",
                 "label": "KV Cache Quantization",
                 "type": "bool",
                 "default": False,
-                "help": "Quantize KV cache to reduce memory usage.",
+                "help": "Quantize prefix cache entries to reduce memory usage. Flag: --kv-cache-quantization",
             },
+            {
+                "key": "enable_prefix_cache",
+                "label": "Prefix Cache",
+                "type": "bool",
+                "default": False,
+                "help": "Cache common prompt prefixes to reduce TTFT. Off by default in the engine. Flag: --enable-prefix-cache",
+            },
+            {
+                "key": "prefill_step_size",
+                "label": "Prefill Step Size",
+                "type": "int",
+                "default": 0,
+                "min": 0,
+                "max": 32768,
+                "help": "Tokens per prefill chunk. 0 = engine default (2048). Increase to 8192 for large models. Flag: --prefill-step-size",
+            },
+            {
+                "key": "gpu_memory_utilization",
+                "label": "GPU Memory Utilization",
+                "type": "float",
+                "default": 0.0,
+                "min": 0.0,
+                "max": 1.0,
+                "help": "Fraction of device memory to use (0.0–1.0). 0.0 = engine default (0.90). Flag: --gpu-memory-utilization",
+            },
+            {
+                "key": "enable_tool_logits_bias",
+                "label": "Tool Logits Bias",
+                "type": "bool",
+                "default": False,
+                "help": "Jump-forward decoding — bias logits toward structured tokens for faster tool calls. Flag: --enable-tool-logits-bias",
+            },
+            # --- Token limits ---
             {
                 "key": "max_tokens",
                 "label": "Max Tokens",
@@ -180,39 +234,82 @@ class RapidMlxEngine(BaseEngine):
                 "default": 0,
                 "min": 0,
                 "max": 131072,
-                "help": "Maximum tokens per request. 0 = engine default.",
+                "help": "Default max tokens for generation. 0 = engine default (32768). Flag: --max-tokens",
+            },
+            # --- Cloud routing ---
+            {
+                "key": "cloud_model",
+                "label": "Cloud Routing Model",
+                "type": "str",
+                "default": "",
+                "help": "litellm model string to route large-context requests to cloud (e.g. openai/gpt-4o). Leave blank to disable. Flag: --cloud-model",
             },
             {
-                "key": "enable_metrics",
-                "label": "Enable Metrics",
+                "key": "cloud_threshold",
+                "label": "Cloud Routing Threshold (tokens)",
+                "type": "int",
+                "default": 20000,
+                "min": 1000,
+                "max": 1000000,
+                "help": "New token count above which to trigger cloud routing. Only used when Cloud Routing Model is set. Flag: --cloud-threshold",
+            },
+            # --- Parser overrides ---
+            {
+                "key": "tool_call_parser",
+                "label": "Tool Call Parser",
+                "type": "str",
+                "default": "",
+                "help": "Override auto-detected parser (e.g. hermes, llama, deepseek). Leave blank for auto-detection. Flag: --tool-call-parser",
+            },
+            {
+                "key": "reasoning_parser",
+                "label": "Reasoning Parser",
+                "type": "str",
+                "default": "",
+                "help": "Override auto-detected reasoning parser (e.g. qwen3, deepseek_r1). Leave blank for auto-detection. Flag: --reasoning-parser",
+            },
+            # --- Rate limits ---
+            {
+                "key": "rate_limit",
+                "label": "Rate Limit (req/min)",
+                "type": "int",
+                "default": 0,
+                "min": 0,
+                "max": 10000,
+                "help": "Max requests per minute per client. 0 = unlimited. Flag: --rate-limit",
+            },
+            # --- Multimodal ---
+            {
+                "key": "mllm",
+                "label": "Force Multimodal Mode",
                 "type": "bool",
                 "default": False,
-                "help": "Expose /metrics endpoint for Prometheus scraping.",
+                "help": "Force vision/multimodal mode. Auto-detected by default for VLMs. Flag: --mllm",
             },
-            {
-                "key": "enable_prefix_cache",
-                "label": "Prefix Cache",
-                "type": "bool",
-                "default": True,
-                "help": "Cache common prompt prefixes to reduce TTFT for repeated prefixes.",
-            },
+            # --- Model override ---
             {
                 "key": "launch_model",
                 "label": "Launch Model Override",
                 "type": "str",
                 "default": "",
-                "help": "Optional Rapid-MLX alias (e.g. qwen3-8b). Overrides the canonical model ID at launch.",
+                "help": "Optional Rapid-MLX alias (e.g. qwen3.5-9b) or HF repo ID. Overrides the canonical model ID at launch.",
             },
         ]
 
     def default_engine_settings(self) -> dict[str, Any]:
         return {
-            "turboquant": False,
-            "deltanet_snapshot": "",
-            "cloud_routing": False,
+            "kv_turboquant": False,
             "kv_quantization": False,
+            "enable_prefix_cache": False,
+            "prefill_step_size": 0,
+            "gpu_memory_utilization": 0.0,
+            "enable_tool_logits_bias": False,
             "max_tokens": 0,
-            "enable_metrics": False,
-            "enable_prefix_cache": True,
+            "cloud_model": "",
+            "cloud_threshold": 20000,
+            "tool_call_parser": "",
+            "reasoning_parser": "",
+            "rate_limit": 0,
+            "mllm": False,
             "launch_model": "",
         }

@@ -42,6 +42,10 @@ class BaseEngine(ABC):
     #: "external" (external binary, not pip-managed).
     install_method: ClassVar[str] = "pip"
 
+    #: True for engines shipped with the dashboard package (vllm-mlx, rapid-mlx).
+    #: False for engines discovered via entry_points or user manifest files.
+    is_builtin: ClassVar[bool] = True
+
     # ── Core abstract methods ──────────────────────────────────────────────────
 
     @abstractmethod
@@ -109,14 +113,15 @@ class BaseEngine(ABC):
     def latest_version(self) -> str | None:
         """Return the latest available version from PyPI, or None if unavailable.
 
-        Only meaningful for pip-installed engines.  Default tries PyPI.
+        Only meaningful for pip-installed engines.  Default tries PyPI using
+        get_package_name() which defaults to the engine id.
         """
         if self.install_method != "pip":
             return None
         try:
             import urllib.request
             import json as _json
-            pkg = self.id  # assumes PyPI package name == engine id
+            pkg = self.get_package_name()
             with urllib.request.urlopen(
                 f"https://pypi.org/pypi/{pkg}/json", timeout=5
             ) as resp:
@@ -125,13 +130,21 @@ class BaseEngine(ABC):
         except Exception:
             return None
 
+    def get_package_name(self) -> str:
+        """Return the PyPI package name for this engine.
+
+        Defaults to engine.id. Override in subclasses when the PyPI name
+        differs from the engine id (e.g. "my-engine" vs "my_engine").
+        """
+        return self.id
+
     def install_command(self) -> list[str]:
         """Return the argv list to install this engine.
 
         Uses sys.executable to guarantee the same Python environment as the
         management server — never a globally resolved pip or python.
         """
-        return [sys.executable, "-m", "pip", "install", "--upgrade", self.id]
+        return [sys.executable, "-m", "pip", "install", "--upgrade", self.get_package_name()]
 
     def _which(self, cmd: str) -> str | None:
         """Locate *cmd* on PATH; returns None if not found."""

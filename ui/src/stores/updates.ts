@@ -132,5 +132,15 @@ export const useUpdatesStore = defineStore('updates', () => {
     }
   }
 
-  return { packages, anyUpdate, installMethod, checking, installing, installMessage, installPhase, error, checkUpdates, installUpdates }
+  /**
+   * Merge update data delivered via the /poll endpoint.
+   * Avoids a separate /updates network call when the cache is already warm.
+   */
+  function mergeFromPoll(pollUpdates: PackageInfo[]) {
+    if (!pollUpdates.length && !packages.value.length) return
+    packages.value = pollUpdates
+    anyUpdate.value = pollUpdates.some(p => p.update_available)
+  }
+
+  return { packages, anyUpdate, installMethod, checking, installing, installMessage, installPhase, error, checkUpdates, installUpdates, mergeFromPoll }
 })
