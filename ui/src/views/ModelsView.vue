@@ -405,17 +405,26 @@ watch(activeTab, (tab) => {
       </div>
 
       <div class="find-search-row">
-        <input
-          v-model="searchInput"
-          type="text"
-          class="search-input"
-          placeholder="Search models… (empty = newest MLX models)"
-          aria-label="Search HuggingFace models"
-          @keydown.enter="doSearch"
-        />
-        <AppButton variant="primary" size="sm" :loading="modelsStore.searching" @click="doSearch">
-          Search
-        </AppButton>
+        <div class="search-input-wrapper">
+          <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="8" cy="8" r="7" />
+            <path d="M15 15l5 5" />
+          </svg>
+          <input
+            v-model="searchInput"
+            type="text"
+            class="search-input"
+            placeholder="Search models… (e.g. 'Qwen', '7B', 'mistral')"
+            aria-label="Search HuggingFace models"
+            @keydown.enter="doSearch"
+          />
+          <AppButton variant="primary" size="sm" :loading="modelsStore.searching" @click="doSearch">
+            Search
+          </AppButton>
+        </div>
+        <p class="search-hint">
+          Try: "Qwen 7B 4bit", "mistral", or leave empty for trending models
+        </p>
       </div>
       
       <div class="mlx-note">
@@ -718,16 +727,41 @@ watch(activeTab, (tab) => {
   align-items: center;
 }
 
-.search-input {
-  flex: 1;
-  background: var(--bg-elevated);
-  border: 1px solid var(--bd-default);
+.search-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--bd);
   border-radius: var(--r-md);
+  background: var(--bg-input);
+  flex: 1;
+}
+.search-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--tx-muted);
+  flex-shrink: 0;
+}
+.search-input-wrapper .search-input {
+  border: none;
+  padding: 0;
+  background: transparent;
   color: var(--tx-primary);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  padding: 7px 12px;
-  transition: border-color var(--transition-fast);
+  font-size: var(--text-base);
+  flex: 1;
+  outline: none;
+}
+.search-hint {
+  font-size: 12px;
+  color: var(--tx-muted);
+  margin: 0;
+  padding: 0 var(--space-1);
+}
+.find-search-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .search-input::placeholder { color: var(--tx-muted); }

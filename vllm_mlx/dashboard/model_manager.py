@@ -869,7 +869,9 @@ def search_hf_models(
     hf_sort = hf_sort_map.get(sort, "lastModified")
 
     # Fetch enough results to support offset slicing
-    fetch_limit = min(offset + limit, 100)
+    # Always fetch at least 50 to avoid "just 1 model" problem
+    fetch_limit = max(offset + limit, 50)
+    fetch_limit = min(fetch_limit, 100)
 
     params: dict[str, Any] = {
         "sort": hf_sort,
@@ -898,7 +900,8 @@ def search_hf_models(
         resp = _requests.get(url, timeout=15)
         resp.raise_for_status()
         results = []
-        for m in resp.json():
+        raw_models = resp.json()
+        for m in raw_models:
             model_id = m.get("modelId") or m.get("id", "")
             if not model_id:
                 continue
@@ -920,7 +923,8 @@ def search_hf_models(
                     "trending_score": round(float(m.get("trendingScore") or 0.0), 2),
                 }
             )
-        return results[offset:offset + limit]
+        # Return ALL fetched results (the store will handle pagination)
+        return results
     except Exception as e:
         return [{"error": str(e)}]
 
