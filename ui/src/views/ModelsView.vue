@@ -370,7 +370,7 @@ watch(activeTab, (tab) => {
         <div class="virtual-scroller-wrapper">
           <RecycleScroller
             :items="filteredModels"
-            :item-size="120"
+            :item-size="80"
             key-field="id"
             class="virtual-scroller"
             v-slot="{ item }"

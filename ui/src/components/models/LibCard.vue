@@ -124,11 +124,12 @@ const bestBench = computed(() => modelsStore.bestBenchmarkPerModel.get(props.mod
   display: grid;
   grid-template-columns: 2fr 1.5fr auto;
   align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-5);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--bd-subtle);
   border-left: 3px solid transparent;
   transition: background var(--transition-fast), border-left-color var(--transition-fast);
+  min-height: 48px;
 }
 
 .lib-card:last-child { border-bottom: none; }
@@ -150,10 +151,11 @@ const bestBench = computed(() => modelsStore.bestBenchmarkPerModel.get(props.mod
 .card-col-meta {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
   color: var(--tx-secondary);
   font-size: 13px;
   font-family: var(--font-mono);
+  justify-content: flex-start;
 }
 
 .card-col-actions {
@@ -161,6 +163,7 @@ const bestBench = computed(() => modelsStore.bestBenchmarkPerModel.get(props.mod
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
+  justify-content: flex-end;
 }
 
 .name-block {
