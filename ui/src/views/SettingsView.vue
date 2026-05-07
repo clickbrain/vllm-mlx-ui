@@ -90,12 +90,9 @@ async function selectEngine(id: string) {
 
 async function installEngine(id: string) {
   installingEngine.value = id
-  engineInstallLog.value[id] = ''
+  engineInstallLog.value[id] = 'Starting install...\n'
   try {
-    const resp = await fetch(`/api/engines/${id}/install`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    })
+    const resp = await fetch(`/api/engines/${id}/install`)
     if (!resp.body) throw new Error('No response body')
     const reader = resp.body.getReader()
     const decoder = new TextDecoder()
@@ -105,12 +102,7 @@ async function installEngine(id: string) {
       done = d
       if (value) {
         const chunk = decoder.decode(value)
-        // SSE lines: "data: <line>\n\n"
-        for (const line of chunk.split('\n')) {
-          if (line.startsWith('data: ')) {
-            engineInstallLog.value[id] = (engineInstallLog.value[id] ?? '') + line.slice(6) + '\n'
-          }
-        }
+        engineInstallLog.value[id] = (engineInstallLog.value[id] ?? '') + chunk
       }
     }
     await loadEngines()
