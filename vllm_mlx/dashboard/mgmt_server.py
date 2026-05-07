@@ -1752,7 +1752,12 @@ def get_engine_config_schema(engine_id: str, _: None = Depends(_check_auth)) -> 
 
 @app.post("/engines/{engine_id}/install")
 async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
-    """Install the specified engine via pip (SSE stream of install output)."""
+    """Install the specified engine (SSE stream of install output).
+
+    pip-based engines: runs ``pip install``.
+    Homebrew-based engines (llama.cpp on macOS): runs ``brew install``.
+    External engines with no headless installer: raises 400 with instructions.
+    """
     import asyncio as _asyncio
     import subprocess as _sp
     from fastapi.responses import StreamingResponse
@@ -1764,14 +1769,15 @@ async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
         raise HTTPException(status_code=404, detail=f"Unknown engine: {engine_id}")
     if engine.install_method == "bundled":
         raise HTTPException(status_code=400, detail=f"Engine {engine_id!r} is bundled and cannot be installed.")
-    if engine.install_method == "external":
+
+    try:
+        cmd = engine.install_command()
+    except NotImplementedError as exc:
+        # Engine has no headless installer (e.g. LM Studio desktop app).
         raise HTTPException(
             status_code=400,
-            detail=f"Engine {engine_id!r} is an external binary — install it through its own installer "
-                   f"(see engine description for instructions).",
-        )
-
-    cmd = engine.install_command()
+            detail=str(exc) or f"Engine {engine_id!r} has no automated installer — see engine description.",
+        ) from None
 
     async def _stream():
         proc = await _asyncio.create_subprocess_exec(

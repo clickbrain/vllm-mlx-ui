@@ -50,6 +50,24 @@ class LlamaCppEngine(BaseEngine):
     is_builtin: ClassVar[bool] = True
     release_url: ClassVar[str] = "https://github.com/ggerganov/llama.cpp/releases"
 
+    # llama.cpp can be installed via Homebrew on macOS, or built from source.
+    # We provide an install_command so the UI "Install" button works on macOS.
+    def install_command(self) -> list[str]:
+        """Return the command to install llama.cpp.
+
+        On macOS: ``brew install llama.cpp``
+        On Linux: clone + cmake build (not automated here).
+        """
+        import shutil
+        import platform
+        if platform.system() == "Darwin" and shutil.which("brew"):
+            return ["brew", "install", "llama.cpp"]
+        # On Linux or without brew, user must build from source.
+        raise NotImplementedError(
+            "llama.cpp must be built from source on this platform. "
+            "See https://github.com/ggerganov/llama.cpp/blob/master/docs/install.md"
+        )
+
     # ── BaseEngine implementation ─────────────────────────────────────────────
 
     def build_command(self, config: dict[str, Any]) -> list[str]:

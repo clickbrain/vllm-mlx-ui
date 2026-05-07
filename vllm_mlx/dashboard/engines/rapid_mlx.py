@@ -79,9 +79,9 @@ class RapidMlxEngine(BaseEngine):
         """Build the rapid-mlx serve command with verified CLI flags."""
         model = self.resolve_launch_model(config)
 
-        # rapid-mlx is a pip-installed package — use sys.executable to guarantee
-        # the same Python environment as the management server.
-        cmd = [sys.executable, "-m", "rapid_mlx.cli", "serve", model]
+        # rapid-mlx ships a binary (rapid-mlx), not a Python module.
+        rapid_bin = self._which("rapid-mlx") or "rapid-mlx"
+        cmd = [rapid_bin, "serve", model]
         cmd += ["--host", str(config.get("host", "127.0.0.1"))]
         cmd += ["--port", str(config.get("port", 8000))]
 
@@ -153,14 +153,10 @@ class RapidMlxEngine(BaseEngine):
         return _HF_TO_ALIAS.get(canonical, canonical)
 
     def is_installed(self) -> bool:
-        try:
-            result = subprocess.run(
-                [sys.executable, "-m", "rapid_mlx.cli", "--version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
+        # rapid-mlx ships binaries (rapid-mlx, vllm-mlx), not a Python module.
+        # Check for the installed binary instead of trying to import a module.
+        import shutil
+        return shutil.which("rapid-mlx") is not None
 
     def build_env(self, config: dict[str, Any]) -> dict[str, str] | None:
         """Set HF_HUB_CACHE so the inference subprocess uses the configured models directory."""
@@ -174,7 +170,7 @@ class RapidMlxEngine(BaseEngine):
     def get_version(self) -> str | None:
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "rapid_mlx.cli", "--version"],
+                ["rapid-mlx", "--version"],
                 capture_output=True, text=True, timeout=5,
             )
             if result.returncode == 0:

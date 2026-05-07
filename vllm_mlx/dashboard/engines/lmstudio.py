@@ -51,6 +51,15 @@ class LmStudioEngine(BaseEngine):
     is_builtin: ClassVar[bool] = True
     release_url: ClassVar[str] = "https://lmstudio.ai/download"
 
+    # LM Studio is a desktop app — no headless installer.
+    # The install_command raises NotImplementedError so the UI shows a proper
+    # "Download from website" message instead of trying to run a command.
+    def install_command(self) -> list[str]:
+        raise NotImplementedError(
+            "LM Studio must be downloaded and installed from https://lmstudio.ai/download. "
+            "After installing, enable the CLI via LM Studio → Settings → CLI."
+        )
+
     #: LM Studio uses /v1/models instead of /health
     health_path: ClassVar[str] = "/v1/models"
 

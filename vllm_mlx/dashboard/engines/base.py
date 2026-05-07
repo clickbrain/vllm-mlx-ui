@@ -138,18 +138,78 @@ class BaseEngine(ABC):
 
         Only meaningful for pip-installed engines.  Default tries PyPI using
         get_package_name() which defaults to the engine id.
+
+        Filters out versions that have no compatible wheel for the current
+        platform (Python version + OS + architecture), mirroring the
+        same logic used in ``update_checker._pypi_latest()``.
         """
         if self.install_method != "pip":
             return None
         try:
-            import urllib.request
             import json as _json
+            import platform as _platform
+            import sys as _sys
+            import urllib.request as _urllib
             pkg = self.get_package_name()
-            with urllib.request.urlopen(
+            with _urllib.urlopen(
                 f"https://pypi.org/pypi/{pkg}/json", timeout=5
             ) as resp:
                 data = _json.loads(resp.read())
-                return data["info"]["version"]
+
+            py_major_minor = f"{_sys.version_info.major}{_sys.version_info.minor}"
+            machine = _platform.machine().lower()
+            system = _platform.system().lower()
+            py_tag_prefix = f"cp{py_major_minor}"
+            arch_tags: set[str] = set()
+            if system == "darwin":
+                arch_tags.add("macosx")
+                if machine in ("arm64", "aarch64"):
+                    arch_tags.add("arm64")
+                elif machine in ("x86_64", "amd64"):
+                    arch_tags.add("x86_64")
+            elif system == "linux":
+                arch_tags.add("linux")
+                if machine in ("arm64", "aarch64"):
+                    arch_tags.add("aarch64")
+                elif machine in ("x86_64", "amd64"):
+                    arch_tags.add("x86_64")
+
+            def _wheel_compatible(url_info: dict) -> bool:
+                fname = url_info.get("filename", "")
+                if not fname.endswith(".whl"):
+                    return False
+                parts = fname[:-len(".whl")].split("-")
+                if len(parts) < 5:
+                    return False
+                py_tag = parts[-3].lower()
+                abi_tag = parts[-2].lower()
+                platform_tag = parts[-1].lower()
+                if platform_tag == "any" and abi_tag == "none":
+                    pass
+                else:
+                    if system == "darwin" and "macosx" not in platform_tag:
+                        return False
+                    if system == "linux" and "linux" not in platform_tag and "manylinux" not in platform_tag:
+                        return False
+                    if arch_tags and not any(a in platform_tag for a in arch_tags):
+                        return False
+                if "abi3" in abi_tag:
+                    if not py_tag.startswith("cp") or int(py_tag[2:4]) < 38:
+                        return False
+                else:
+                    if py_tag == "py3":
+                        pass
+                    elif not py_tag.startswith(py_tag_prefix):
+                        return False
+                return True
+
+            for url_info in data.get("urls", []):
+                if url_info.get("packagetype") != "bdist_wheel":
+                    continue
+                if not _wheel_compatible(url_info):
+                    continue
+                return data.get("info", {}).get("version")
+            return None
         except Exception:
             return None
 
