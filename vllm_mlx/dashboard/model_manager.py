@@ -175,7 +175,7 @@ def get_cached_models() -> list[dict[str, Any]]:
         }
         MIN_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB — metadata stubs are always tiny
 
-        cache_info = scan_cache_dir()
+        cache_info = scan_cache_dir(cache_dir=get_hf_cache_dir())
         models = []
         for repo in cache_info.repos:
             if repo.repo_type != "model":
@@ -240,6 +240,7 @@ def download_model(
         local_dir = snapshot_download(
             repo_id=model_id,
             local_files_only=False,
+            cache_dir=get_hf_cache_dir(),
         )
         return True, f"Downloaded to {local_dir}"
     except Exception as e:
@@ -258,7 +259,7 @@ def download_model_local(
     try:
         from huggingface_hub import snapshot_download
 
-        local_dir = snapshot_download(repo_id=model_id, local_files_only=False)
+        local_dir = snapshot_download(repo_id=model_id, local_files_only=False, cache_dir=get_hf_cache_dir())
         return True, f"Downloaded to {local_dir}"
     except Exception as e:
         return False, str(e)
@@ -454,7 +455,7 @@ def delete_model(model_id: str) -> tuple[bool, str]:
     try:
         from huggingface_hub import scan_cache_dir
 
-        cache_info = scan_cache_dir()
+        cache_info = scan_cache_dir(cache_dir=get_hf_cache_dir())
         for repo in cache_info.repos:
             if repo.repo_id == model_id:
                 commit_hashes = [rev.commit_hash for rev in repo.revisions]
@@ -482,7 +483,7 @@ def get_cache_total_size() -> float:
     try:
         from huggingface_hub import scan_cache_dir
 
-        cache_info = scan_cache_dir()
+        cache_info = scan_cache_dir(cache_dir=get_hf_cache_dir())
         return round(cache_info.size_on_disk / (1024**3), 2)
     except Exception as e:
         logger.warning("Operation failed: %s", e, exc_info=True)
@@ -612,7 +613,30 @@ def get_model_presets(model_id: str, hf_token: str | None = None) -> dict[str, A
 
 
 def get_hf_cache_dir() -> str:
-    """Return the HuggingFace cache directory path."""
+    """Return the HuggingFace hub cache directory path.
+
+    Priority (highest first):
+    1. ``model_cache_dir`` saved in dashboard config (set via Settings → Models Directory)
+    2. ``HF_HUB_CACHE`` environment variable
+    3. ``HF_HOME`` environment variable (appends ``/hub``)
+    4. Default: ``~/.cache/huggingface/hub``
+
+    When a custom ``model_cache_dir`` is configured it is used directly as the
+    hub cache root (i.e. MLX models land in ``<models_dir>/models--{org}--{name}/``
+    and GGUF files can coexist as flat files alongside them).
+    """
+    try:
+        from . import server_manager as sm
+        cfg = sm._load_local_config()
+        custom = cfg.get("model_cache_dir", "").strip()
+        if custom:
+            return str(Path(custom).expanduser().resolve())
+    except Exception as e:
+        logger.warning("Could not read model_cache_dir from config: %s", e)
+
+    if "HF_HUB_CACHE" in os.environ:
+        return os.environ["HF_HUB_CACHE"]
+
     hf_home = os.environ.get("HF_HOME", str(Path.home() / ".cache" / "huggingface"))
     return os.path.join(hf_home, "hub")
 
@@ -899,3 +923,37 @@ def search_hf_models(
         return results[offset:offset + limit]
     except Exception as e:
         return [{"error": str(e)}]
+
+
+def scan_gguf_files(base_dir: str | None = None) -> list[dict[str, Any]]:
+    """Scan *base_dir* (or the configured models directory) for GGUF model files.
+
+    Searches one level deep: ``base_dir/*.gguf`` and ``base_dir/**/*.gguf``
+    (recurses one subdirectory level so users can organise GGUFs into folders).
+
+    Returns a list of dicts with keys ``path`` (str), ``name`` (str), and
+    ``size_gb`` (float).  Results are sorted by name.
+    """
+    search_root = Path(base_dir).expanduser().resolve() if base_dir else Path(get_hf_cache_dir())
+    if not search_root.exists():
+        return []
+
+    results: list[dict[str, Any]] = []
+    seen: set[Path] = set()
+    # Flat files in root + one level of subdirectories
+    for pattern in ("*.gguf", "*/*.gguf"):
+        for p in sorted(search_root.glob(pattern)):
+            if p in seen or not p.is_file():
+                continue
+            seen.add(p)
+            try:
+                size_gb = round(p.stat().st_size / (1024 ** 3), 2)
+            except OSError:
+                size_gb = 0.0
+            results.append({
+                "path": str(p),
+                "name": p.name,
+                "size_gb": size_gb,
+            })
+
+    return sorted(results, key=lambda r: r["name"].lower())

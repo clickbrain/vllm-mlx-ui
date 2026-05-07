@@ -55,6 +55,7 @@ class VllmMetalEngine(BaseEngine):
     })
     install_method: ClassVar[str] = "pip"
     is_builtin: ClassVar[bool] = True
+    release_url: ClassVar[str] = "https://pypi.org/project/vllm/#history"
 
     def get_package_name(self) -> str:
         return "vllm"

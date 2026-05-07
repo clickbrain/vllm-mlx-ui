@@ -23,7 +23,6 @@ Health endpoint:
 """
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 from typing import Any, ClassVar
@@ -49,6 +48,7 @@ class LlamaCppEngine(BaseEngine):
     })
     install_method: ClassVar[str] = "external"
     is_builtin: ClassVar[bool] = True
+    release_url: ClassVar[str] = "https://github.com/ggerganov/llama.cpp/releases"
 
     # ── BaseEngine implementation ─────────────────────────────────────────────
 
@@ -154,11 +154,13 @@ class LlamaCppEngine(BaseEngine):
         return [
             {
                 "key": "launch_model",
-                "label": "GGUF Model Path",
-                "type": "str",
+                "label": "GGUF Model File",
+                "type": "gguf_file",
                 "default": "",
                 "help": (
-                    "Absolute path (or ~-prefixed) to the GGUF model file. "
+                    "Select a GGUF file from your Models Directory, or enter an absolute "
+                    "path (~ is expanded). Set your Models Directory in Settings → Models Directory "
+                    "to populate this list automatically. "
                     "Example: ~/models/llama-3.2-8b-q4_k_m.gguf"
                 ),
             },

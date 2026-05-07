@@ -49,6 +49,7 @@ class LmStudioEngine(BaseEngine):
     })
     install_method: ClassVar[str] = "external"
     is_builtin: ClassVar[bool] = True
+    release_url: ClassVar[str] = "https://lmstudio.ai/download"
 
     #: LM Studio uses /v1/models instead of /health
     health_path: ClassVar[str] = "/v1/models"
@@ -106,6 +107,17 @@ class LmStudioEngine(BaseEngine):
                     "LM Studio model identifier to load before starting the server "
                     "(e.g. meta-llama/Meta-Llama-3.1-8B-Instruct). "
                     "Leave empty to use whichever model is already loaded in LM Studio."
+                ),
+            },
+            {
+                "key": "_models_dir_hint",
+                "label": "LM Studio Model Folder",
+                "type": "info",
+                "default": "",
+                "help": (
+                    "To share models with other engines, configure LM Studio's model "
+                    "directory to match your Models Directory (Settings → Models Directory). "
+                    "In LM Studio: My Models → ⋮ → Change models folder."
                 ),
             },
         ]

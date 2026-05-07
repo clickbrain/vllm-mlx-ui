@@ -53,6 +53,9 @@ class BaseEngine(ABC):
     #: Override to ``"/v1/models"`` for engines that don't expose ``/health``.
     health_path: ClassVar[str] = "/health"
 
+    #: URL shown in the update notification for this engine (download/release page).
+    release_url: ClassVar[str] = ""
+
     # ── Core abstract methods ──────────────────────────────────────────────────
 
     @abstractmethod

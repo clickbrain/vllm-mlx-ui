@@ -47,6 +47,7 @@ class OllamaEngine(BaseEngine):
     })
     install_method: ClassVar[str] = "external"
     is_builtin: ClassVar[bool] = True
+    release_url: ClassVar[str] = "https://ollama.com/download"
 
     # ── BaseEngine implementation ─────────────────────────────────────────────
 
@@ -71,6 +72,19 @@ class OllamaEngine(BaseEngine):
             # "ollama version 0.3.6" or "ollama version is 0.7.0"
             m = re.search(r"version(?:\s+is)?\s+(\S+)", result.stdout + result.stderr)
             return m.group(1) if m else None
+        except Exception:
+            return None
+
+    def latest_version(self) -> str | None:
+        try:
+            import urllib.request
+            import json as _json
+            with urllib.request.urlopen(
+                "https://api.github.com/repos/ollama/ollama/releases/latest",
+                timeout=5,
+            ) as resp:
+                tag = _json.loads(resp.read()).get("tag_name", "")
+                return tag.lstrip("v") or None
         except Exception:
             return None
 

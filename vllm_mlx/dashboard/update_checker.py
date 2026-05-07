@@ -308,27 +308,47 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
     # Run all checks in parallel — total wait is max(individual timeouts) ≈ 3s
     checkers = [_check_ui, _check_vllm, _check_hfhub]
 
-    # Add pip-installed engine checks dynamically from the registry.
+    # Add engine update checks dynamically from the registry.
+    # pip engines: check PyPI; external engines: call latest_version() if available.
     try:
         from vllm_mlx.dashboard.engines.registry import ENGINES
         for _engine in list(ENGINES.values()):
-            if _engine.install_method != "pip":
+            # vllm-mlx is bundled and already handled by _check_vllm above.
+            if _engine.install_method == "bundled":
                 continue
-            _eid = _engine.id
-            _ename = _engine.name
-            _pkg = _engine.get_package_name()
+            # Only report on engines the user has actually installed.
+            try:
+                if not _engine.is_installed():
+                    continue
+            except Exception:
+                continue
 
-            def _make_engine_checker(_e_id=_eid, _e_name=_ename, _e_pkg=_pkg):
+            _ename = _engine.name
+
+            def _make_engine_checker(_e=_engine, _e_name=_ename):
                 def _check_engine():
-                    inst = _installed_version(_e_pkg)
-                    latest = _pypi_latest(_e_pkg)
-                    return PackageInfo(
-                        name=f"{_e_name} (engine)",
-                        installed=inst,
-                        latest=latest if latest != "unknown" else inst,
-                        update_available=_version_gt(latest, inst),
-                        url=f"https://pypi.org/project/{_e_pkg}/#history",
-                    )
+                    try:
+                        if _e.install_method == "pip":
+                            pkg = _e.get_package_name()
+                            inst = _installed_version(pkg)
+                            latest = _pypi_latest(pkg)
+                            url = getattr(_e, "release_url", None) or f"https://pypi.org/project/{pkg}/#history"
+                        else:
+                            inst = _e.get_version() or "unknown"
+                            latest = _e.latest_version()
+                            if not latest:
+                                return None  # no update info available for this external engine
+                            url = getattr(_e, "release_url", "")
+                        return PackageInfo(
+                            name=f"{_e_name} (engine)",
+                            installed=inst,
+                            latest=latest if latest != "unknown" else inst,
+                            update_available=_version_gt(latest, inst),
+                            url=url,
+                        )
+                    except Exception as exc:
+                        logger.warning("Engine update check failed for %s: %s", _e_name, exc, exc_info=True)
+                        return None
                 return _check_engine
 
             checkers.append(_make_engine_checker())

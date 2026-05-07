@@ -132,6 +132,15 @@ class VllmMlxEngine(BaseEngine):
 
         return cmd
 
+    def build_env(self, config: dict[str, Any]) -> dict[str, str] | None:
+        """Set HF_HUB_CACHE so the inference subprocess uses the configured models directory."""
+        try:
+            from ..model_manager import get_hf_cache_dir
+            cache_dir = get_hf_cache_dir()
+            return {"HF_HUB_CACHE": cache_dir}
+        except Exception:
+            return None
+
     def is_installed(self) -> bool:
         try:
             import vllm_mlx  # noqa: F401

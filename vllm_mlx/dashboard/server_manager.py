@@ -181,6 +181,11 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     # Last used connection mode — "local" or "remote". Persisted so the UI
     # restores the correct target on browser refresh / app restart.
     "connection_mode": "local",
+    # Unified models directory — shared by all MLX and GGUF engines.
+    # When set, used as HF_HUB_CACHE (MLX models land in models--{org}--{name}/
+    # subdirs) and as the scan root for GGUF files.  Empty = use HF default
+    # (~/.cache/huggingface/hub).  Ollama uses its own ~/.ollama/models/ store.
+    "model_cache_dir": "",
 }
 
 # Immutable default config — prevents accidental mutation at module level.
