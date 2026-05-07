@@ -410,15 +410,28 @@ def upgrade_command() -> list[str]:
         # Force-update the tap's git repo so brew sees the new formula immediately.
         # brew upgrade alone may not detect new versions for hours due to
         # Homebrew's auto-update throttle or stale tap caches.
-        tap_dir = (
-            Path.home() / ".homebrew" / "Library" / "Taps"
-            / "clickbrain" / "homebrew-vllm-mlx-ui"
-        )
-        if not tap_dir.exists():
-            tap_dir = (
-                Path(shutil.which("brew") or "/opt/homebrew/bin/brew").parent.parent
-                / "Library" / "Taps" / "clickbrain" / "homebrew-vllm-mlx-ui"
+        tap_dir = None
+        # Try to find the tap using brew --repo
+        try:
+            result = subprocess.run(
+                ["brew", "--repo", "clickbrain/vllm-mlx-ui"],
+                capture_output=True, text=True, timeout=10,
             )
+            if result.returncode == 0:
+                tap_dir = _Path(result.stdout.strip())
+        except Exception:
+            pass
+        # Fallback: try common Homebrew locations
+        if not tap_dir or not tap_dir.exists():
+            for candidate in [
+                Path.home() / ".homebrew" / "Library" / "Taps",
+                Path("/opt/homebrew/Library/Taps"),
+                Path("/usr/local/Homebrew/Library/Taps"),
+            ]:
+                candidate = candidate / "clickbrain" / "homebrew-vllm-mlx-ui"
+                if candidate.exists():
+                    tap_dir = candidate
+                    break
         git_pull = f"cd {tap_dir} && git fetch origin && git checkout main && git pull origin main"
         return [
             "sh", "-c",
