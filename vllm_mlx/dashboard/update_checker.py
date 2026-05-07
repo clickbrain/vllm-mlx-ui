@@ -87,14 +87,105 @@ def _installed_version(package: str) -> str:
 
 
 def _pypi_latest(package: str) -> str:
-    """Return the latest version of a PyPI package."""
+    """Return the latest version of a PyPI package that has a wheel for the current platform.
+
+    Uses the PyPI JSON API to find the newest version that ships a bdist_wheel
+    compatible with the running Python version and machine architecture.  Falls
+    back to the simple index (version string only) when the detailed JSON is
+    unavailable, which may produce false positives on source-only releases.
+    """
+    import platform
+    import sys
+
     try:
         r = requests.get(f"https://pypi.org/pypi/{package}/json", timeout=6)
         r.raise_for_status()
-        return r.json()["info"]["version"]
+        data = r.json()
     except Exception as e:
         logger.warning("Operation failed: %s", e, exc_info=True)
         return "unknown"
+
+    py_major_minor = f"{sys.version_info.major}{sys.version_info.minor}"
+    machine = platform.machine().lower()
+    system = platform.system().lower()
+
+    # Build a set of PyPI platform tags that match this machine.
+    # We keep it simple: match on the interpreter tag (cpXY) and OS/arch.
+    # abi3 wheels (cp38-abi3) are accepted for any Python >= 3.8.
+    py_tag_prefix = f"cp{py_major_minor}"
+    arch_tags: set[str] = set()
+    if system == "darwin":
+        arch_tags.add("macosx")
+        if machine == "arm64" or machine == "aarch64":
+            arch_tags.add("arm64")
+            arch_tags.add("aarch64")
+        elif machine in ("x86_64", "amd64"):
+            arch_tags.add("x86_64")
+    elif system == "linux":
+        arch_tags.add("linux")
+        if machine in ("arm64", "aarch64"):
+            arch_tags.add("aarch64")
+        elif machine in ("x86_64", "amd64"):
+            arch_tags.add("x86_64")
+
+    def _wheel_compatible(url_info: dict) -> bool:
+        """Return True when the wheel matches this platform."""
+        fname = url_info.get("filename", "")
+        if not fname.endswith(".whl"):
+            return False
+        # filename pattern: {pkg}-{ver}-{py_tag}-{abi}-{platform}.whl
+        parts = fname[:-len(".whl")].split("-")
+        if len(parts) < 5:
+            return False
+        py_tag = parts[-3].lower()
+        abi_tag = parts[-2].lower()
+        platform_tag = parts[-1].lower()
+        # Accept pure-Python wheels (none-any) — they work everywhere.
+        if platform_tag == "any" and abi_tag == "none":
+            pass  # platform is fine, still check Python version below
+        else:
+            # Check OS/arch match
+            if system == "darwin" and "macosx" not in platform_tag:
+                return False
+            if system == "linux" and "linux" not in platform_tag and "manylinux" not in platform_tag:
+                return False
+            if arch_tags and not any(a in platform_tag for a in arch_tags):
+                return False
+        # Accept abi3 wheels built for cp38+ (they run on any Python >= 3.8)
+        if "abi3" in abi_tag:
+            if not py_tag.startswith("cp") or int(py_tag[2:4]) < 38:
+                return False
+        else:
+            # Accept 'py3' / 'py3-none' style tags — they mean "any Python 3.x"
+            if py_tag == "py3":
+                pass
+            elif not py_tag.startswith(py_tag_prefix):
+                return False
+        return True
+
+    # Walk versions newest-first (PyPI info["version"] is the latest by default,
+    # but we still scan all URLs to confirm wheel availability).
+    latest_compatible: str | None = None
+    for url_info in data.get("urls", []):
+        if url_info.get("packagetype") != "bdist_wheel":
+            continue
+        if not _wheel_compatible(url_info):
+            continue
+        ver = data.get("info", {}).get("version", "")
+        if ver:
+            latest_compatible = ver
+            break
+
+    if latest_compatible:
+        return latest_compatible
+
+    # No compatible wheel found for this platform.  Do NOT report an update —
+    # pip will fail to install it (it would try to build from source and die).
+    logger.info(
+        "No compatible wheel for %s on %s/%s — suppressing update notification",
+        package, system, machine,
+    )
+    return "unknown"
 
 
 def _github_latest_tag(owner: str, repo: str) -> str:
