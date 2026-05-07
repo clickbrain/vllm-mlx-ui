@@ -436,13 +436,13 @@ def upgrade_command() -> list[str]:
         return [
             "sh", "-c",
             f"{git_pull} && brew upgrade vllm-mlx-ui"
-            f" && {pip} install --upgrade vllm-mlx mlx-lm huggingface-hub",
+            f" && {pip} install --upgrade vllm-mlx mlx-lm huggingface-hub vllm",
         ]
     # dev / conda / pip install path — upgrade deps unconditionally first.
     # The UI itself is not on PyPI; users running from source pull via git.
     return [
         "sh", "-c",
-        f"{pip} install --upgrade vllm-mlx mlx-lm huggingface-hub",
+        f"{pip} install --upgrade vllm-mlx mlx-lm huggingface-hub vllm",
     ]
 
 
