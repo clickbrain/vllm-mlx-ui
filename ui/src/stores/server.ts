@@ -88,6 +88,7 @@ export const useServerStore = defineStore('server', () => {
    */
   const engineId = computed(() => config.value?.engine_id ?? 'vllm-mlx')
 
+  const isRunning = computed(() => status.value?.running ?? false)
 
   const memoryPercent = computed(() => memory.value?.percent ?? 0)
   const underPressure = computed(() => memoryPercent.value > 75)

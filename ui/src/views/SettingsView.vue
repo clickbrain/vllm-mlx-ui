@@ -39,6 +39,8 @@ interface EngineInfo {
   installed: boolean
   install_method: 'bundled' | 'pip' | 'external'
   version?: string
+  latest_version?: string
+  release_url?: string
   is_builtin?: boolean
   health_path?: string
 }
@@ -654,15 +656,20 @@ async function doRestart() {
       <div class="section-header">
         <div>
           <div class="section-title" id="storage-heading">Storage</div>
-          <div class="section-desc">Model cache location and disk usage.</div>
+          <div class="section-desc">Unified models directory and disk usage. All MLX and GGUF engines share one directory.</div>
         </div>
       </div>
       <div class="pref-list">
         <div class="pref-row">
           <div class="pref-info">
-            <span class="pref-label">Model cache path</span>
+            <span class="pref-label">Models Directory</span>
             <span v-if="!editCachePath" class="pref-desc mono">{{ savedCachePath }}</span>
-            <input v-else v-model="cachePathInput" class="field-input cache-path-input" type="text" />
+            <span v-if="!editCachePath" class="pref-desc">
+              Shared by all MLX and GGUF engines. MLX models download here via HuggingFace Hub
+              structure (<code>models--org--name/</code>). GGUF files can coexist as flat files
+              in the same directory. Ollama uses its own <code>~/.ollama/models/</code> store.
+            </span>
+            <input v-else v-model="cachePathInput" class="field-input cache-path-input" type="text" placeholder="~/.cache/huggingface/hub (default)" />
           </div>
           <div v-if="!editCachePath" class="pref-actions">
             <AppButton variant="ghost" size="sm" @click="editCachePath = true">Change…</AppButton>

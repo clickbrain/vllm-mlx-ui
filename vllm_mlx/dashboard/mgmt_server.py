@@ -289,6 +289,21 @@ def cached_models(_: None = Depends(_check_auth)) -> list:
     return mm.get_cached_models()
 
 
+@app.get("/models/gguf-files")
+def gguf_files(_: None = Depends(_check_auth)) -> list:
+    """Return all GGUF files found in the configured models directory.
+
+    Scans the models directory (Settings → Models Directory) one level deep for
+    ``*.gguf`` files.  Used by the llama.cpp engine settings panel to populate
+    the model picker dropdown.
+    """
+    try:
+        return mm.scan_gguf_files()
+    except Exception as e:
+        logger.warning("Operation failed: %s", e, exc_info=True)
+        return []
+
+
 @app.get("/models/cache_size")
 def cache_size(_: None = Depends(_check_auth)) -> dict:
     """Return the total size of the HuggingFace model cache in GB."""
@@ -1584,6 +1599,7 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
 
         try:
             for mid in models_to_run:
+                if stop_event.is_set():
                     break
                 current_model = sm.load_config().get("model", "")
                 if current_model != mid:

@@ -170,6 +170,12 @@ def list_engines() -> list[dict]:
                 version = engine.get_version()
         except Exception as e:
             logger.warning("Engine probe failed for %s: %s", engine.id, e)
+        # Get latest version (may be None if network unavailable)
+        latest = None
+        try:
+            latest = engine.latest_version()
+        except Exception:
+            pass
         result.append({
             "id": engine.id,
             "name": engine.name,
@@ -180,6 +186,8 @@ def list_engines() -> list[dict]:
             "health_path": getattr(engine, "health_path", "/health"),
             "installed": installed,
             "version": version,
+            "release_url": getattr(engine, "release_url", ""),
+            "latest_version": latest,
         })
     return result
 
