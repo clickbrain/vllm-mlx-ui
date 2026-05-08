@@ -482,7 +482,10 @@ def bust_cache() -> None:
 
 
 def _engine_upgrade_clauses(pip_bin: str) -> list[str]:
-    """Return shell-command clauses to upgrade installed engines.
+    """Return shell-command clauses to upgrade installed engines (best-effort).
+
+    Each clause has ``|| true`` appended so a single engine failure never
+    blocks the rest of the upgrade or causes the main upgrade to abort.
 
     Handles:
     - pip engines (install_method == "pip") — pip install --upgrade <pkg>
@@ -503,14 +506,14 @@ def _engine_upgrade_clauses(pip_bin: str) -> list[str]:
             if engine.install_method == "pip":
                 pkg = engine.get_package_name()
                 if pkg:
-                    clauses.append(f"{pip_bin} install --upgrade {pkg}")
+                    clauses.append(f"{pip_bin} install --upgrade {pkg} || true")
 
             try:
                 cmd = engine.upgrade_command()
             except Exception:
                 cmd = None
             if cmd:
-                clauses.append(" ".join(cmd))
+                clauses.append(" ".join(cmd) + " || true")
     except Exception:
         logger.warning("Failed to discover engine upgrades", exc_info=True)
     return clauses

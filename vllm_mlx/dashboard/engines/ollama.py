@@ -90,10 +90,21 @@ class OllamaEngine(BaseEngine):
             return None
 
     def upgrade_command(self) -> list[str] | None:
-        """Try Homebrew upgrade for Ollama, or None if brew is unavailable."""
-        if shutil.which("brew"):
-            return ["brew", "upgrade", "ollama"]
-        return None
+        """Try Homebrew upgrade for Ollama, or None if brew doesn't manage it."""
+        if not shutil.which("brew"):
+            return None
+        # Only run brew upgrade if ollama is actually managed by brew
+        # (brew list exits 0 if installed, non-zero if not a brew package)
+        try:
+            result = subprocess.run(
+                ["brew", "list", "ollama"],
+                capture_output=True, timeout=10,
+            )
+            if result.returncode != 0:
+                return None
+        except Exception:
+            return None
+        return ["brew", "upgrade", "ollama"]
 
     def resolve_launch_model(self, config: dict[str, Any]) -> str:
         """Return the Ollama model tag to pass to the API.
