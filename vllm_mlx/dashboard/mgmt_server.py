@@ -434,11 +434,12 @@ def search_models(
     """Search HuggingFace Hub for models. Pass tags=mlx for MLX-only results."""
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
     results = mm.search_hf_models(query=q, tags=tag_list, limit=limit, offset=offset, sort=sort)
+    sliced = results[:limit]
     return {
-        "results": results,
+        "results": sliced,
         "offset": offset,
         "limit": limit,
-        "has_more": len(results) == limit,
+        "has_more": len(results) > len(sliced),
     }
 
 

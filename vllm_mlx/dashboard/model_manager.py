@@ -883,17 +883,14 @@ def search_hf_models(
     if query.strip():
         params["search"] = query.strip()
     if tags:
-        # When searching with a query, use tag-level filter across ALL of HF
-        # instead of limiting to mlx-community org — catches models from
-        # any publisher who tags their models as MLX-compatible.
-        if "mlx" in tags and query.strip():
+        # Search ALL publishers for models matching the requested tags
+        # (not just mlx-community) — catches MLX models from any org.
+        if "mlx" in tags:
             non_mlx_tags = [t for t in tags if t != "mlx"]
             if non_mlx_tags:
                 params["filter"] = "mlx," + ",".join(non_mlx_tags)
             else:
                 params["filter"] = "mlx"
-        elif "mlx" in tags:
-            params["author"] = "mlx-community"
         else:
             params["filter"] = ",".join(tags)
     url = "https://huggingface.co/api/models?" + urllib.parse.urlencode(params)
