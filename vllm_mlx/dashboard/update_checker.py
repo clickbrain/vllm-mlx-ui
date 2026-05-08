@@ -489,8 +489,15 @@ def _engine_upgrade_clauses(pip_bin: str) -> list[str]:
 
     Handles:
     - pip engines (install_method == "pip") — pip install --upgrade <pkg>
-    - Any engine with upgrade_command() returning a non-None list
+    - Any engine with ``upgrade_command()`` returning a non-``None`` list
+
+    .. note::
+
+       Each non-pip command is shell-quoted via :func:`shlex.quote` before
+       being joined, so argument boundaries survive embedding in ``sh -c``.
     """
+    import shlex
+
     clauses: list[str] = []
     try:
         from vllm_mlx.dashboard.engines.registry import ENGINES, _registry_lock
@@ -513,7 +520,7 @@ def _engine_upgrade_clauses(pip_bin: str) -> list[str]:
             except Exception:
                 cmd = None
             if cmd:
-                clauses.append(" ".join(cmd) + " || true")
+                clauses.append(" ".join(shlex.quote(a) for a in cmd) + " || true")
     except Exception:
         logger.warning("Failed to discover engine upgrades", exc_info=True)
     return clauses
