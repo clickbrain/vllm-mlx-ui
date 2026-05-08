@@ -38,6 +38,8 @@ const dateFormatted = computed(() => {
   }
 })
 
+const hfUrl = computed(() => `https://huggingface.co/${props.id}`)
+
 const shortName = computed(() => {
   const parts = props.id.split('/')
   return parts.length > 1 ? parts.slice(1).join('/') : props.id
@@ -75,8 +77,11 @@ const fitPercent = computed(() => {
       <!-- Top row: model name + MLX badge + download button -->
       <div class="result-top">
         <div class="result-id-group">
-          <span v-if="orgName" class="result-org">{{ orgName }}/</span>
-          <span class="result-name">{{ shortName }}</span>
+          <a :href="hfUrl" target="_blank" rel="noopener" class="model-link" :title="`View ${props.id} on HuggingFace`">
+            <span v-if="orgName" class="result-org">{{ orgName }}/</span>
+            <span class="result-name">{{ shortName }}</span>
+            <svg class="external-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M12 8v5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5a1 1 0 0 0 0-2H3a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3V8a1 1 0 1 0-2 0zm3-6.5v.01L15 1a1 1 0 0 0-1-1H9.5a1 1 0 0 0 0 2h3.09L6.3 8.29a1 1 0 1 0 1.41 1.42L14 3.41V6.5a1 1 0 1 0 2 0V2a1 1 0 0 0-1-1z"/></svg>
+          </a>
           <AppBadge v-if="is_mlx" variant="info" size="sm">MLX</AppBadge>
         </div>
         <AppButton variant="secondary" size="sm" @click="emit('download')">Download</AppButton>
@@ -155,11 +160,34 @@ const fitPercent = computed(() => {
   min-width: 0;
   overflow: hidden;
 }
+.model-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  text-decoration: none;
+  min-width: 0;
+  overflow: hidden;
+}
+.model-link:hover .result-org,
+.model-link:hover .result-name {
+  color: var(--si-300);
+}
+.model-link:hover .external-icon {
+  opacity: 1;
+}
+.external-icon {
+  flex-shrink: 0;
+  opacity: 0.4;
+  transition: opacity var(--transition-fast);
+  position: relative;
+  top: 1px;
+}
 .result-org {
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--tx-tertiary);
   white-space: nowrap;
+  transition: color var(--transition-fast);
 }
 .result-name {
   font-family: var(--font-mono);
@@ -169,6 +197,7 @@ const fitPercent = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color var(--transition-fast);
 }
 
 /* Fit gauge */
