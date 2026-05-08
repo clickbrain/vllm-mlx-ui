@@ -88,11 +88,26 @@ async function selectEngine(id: string) {
   }
 }
 
+async function saveEngineAndRestart() {
+  if (!selectedEngine.value || selectedEngine.value === serverStore.engineId) return
+  try {
+    await api.post('/config', { engine_id: selectedEngine.value })
+    await serverStore.restart()
+  } catch (e: any) {
+    settingsError.value = `Failed to save engine: ${e?.message ?? 'unknown error'}`
+  }
+}
+
 async function installEngine(id: string) {
   installingEngine.value = id
   engineInstallLog.value[id] = 'Starting install...\n'
   try {
     const resp = await fetch(`/api/engines/${id}/install`)
+    if (resp.status === 400) {
+      const err = await resp.json().catch(() => ({}))
+      enginesError.value = err.detail || 'This engine cannot be installed automatically. See description for instructions.'
+      return
+    }
     if (!resp.body) throw new Error('No response body')
     const reader = resp.body.getReader()
     const decoder = new TextDecoder()
@@ -516,11 +531,19 @@ async function doRestart() {
               :loading="installingEngine === eng.id"
               @click.stop="installEngine(eng.id)"
             >Install</AppButton>
-            <span
-              v-if="!eng.installed && eng.install_method === 'external'"
-              class="engine-external-hint dim"
-              title="See description for install instructions"
-            >Install separately</span>
+            <AppButton
+              v-if="eng.installed && eng.id === selectedEngine && selectedEngine !== serverStore.engineId"
+              variant="primary"
+              size="sm"
+              @click.stop="saveEngineAndRestart()"
+            >Save & Restart</AppButton>
+            <AppButton
+              v-if="!eng.installed"
+              variant="primary"
+              size="sm"
+              :loading="installingEngine === eng.id"
+              @click.stop="installEngine(eng.id)"
+            >Install</AppButton>
           </div>
           <div v-if="engineInstallLog[eng.id]" class="engine-install-log">
             <pre>{{ engineInstallLog[eng.id] }}</pre>
