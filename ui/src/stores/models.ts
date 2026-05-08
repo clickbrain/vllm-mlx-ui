@@ -275,7 +275,7 @@ export const useModelsStore = defineStore('models', () => {
     models.value = models.value.filter(m => m.id !== modelId)
   }
 
-    async function searchHF(query: string, mlxOnlyFlag = false, offset = 0, sort = 'downloads', append = false) {
+    async function searchHF(query: string, mlxOnlyFlag = false, offset = 0, sort = 'downloads', append = false, limit = 25) {
     if (!append) {
       searchQuery.value = query
       searchOffset.value = 0
@@ -286,8 +286,7 @@ export const useModelsStore = defineStore('models', () => {
       const params = new URLSearchParams()
       if (query.trim()) params.set('q', query.trim())
       if (mlxOnlyFlag) params.set('tags', 'mlx')
-      // Fetch more results to avoid "just 1 model" problem
-      params.set('limit', '100')
+      params.set('limit', String(limit))
       params.set('offset', String(offset))
       params.set('sort', sort)
       const resp = await api.get<{ results: Array<HFModel & { error?: string }>; has_more: boolean }>(`/models/search?${params}`)

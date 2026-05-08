@@ -544,13 +544,19 @@ def _try_adopt_server(port: int, host: str, config: dict[str, Any] | None = None
     Returns the adopted PID if successful, None otherwise.
     """
     connect_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
-    # Quick HTTP probe — if nothing responds, bail out immediately.
-    try:
-        import urllib.request as _ur
-        _ur.urlopen(f"http://{connect_host}:{port}/v1/models", timeout=1).read()
-    except Exception as e:
-        logger.warning("Operation failed: %s", e, exc_info=True)
-        return None  # port not responding to our API — don't adopt
+    # Quick HTTP probe — try /health first (responds faster than /v1/models),
+    # then fall back to /v1/models for engines that only expose the OpenAI API.
+    probe_ok = False
+    for probe_path in ("/health", "/v1/models"):
+        try:
+            import urllib.request as _ur
+            _ur.urlopen(f"http://{connect_host}:{port}{probe_path}", timeout=2).read()
+            probe_ok = True
+            break
+        except Exception:
+            continue
+    if not probe_ok:
+        return None  # nothing responded — don't adopt
 
     # Check for engine mismatch against existing state file (if any)
     if config is not None:
@@ -709,6 +715,23 @@ def get_server_status() -> dict[str, Any]:
             with _server_state_lock:
                 _last_crash_log = None
             return {"running": False, "healthy": False, "pid": None, "health": {}}
+        # Defensive check: the PID may be stale but the server could still be
+        # running (e.g. process was restarted externally).  Do a direct health
+        # probe before declaring a crash — if the server responds, adopt it.
+        _port = int(cfg.get("port", 8000))
+        _host = cfg.get("host", "127.0.0.1")
+        adopted_pid = _try_adopt_server(_port, _host, cfg)
+        if adopted_pid is not None:
+            logger.info("Stale PID %s; adopted running server PID %s", pid, adopted_pid)
+            with _server_state_lock:
+                _last_crash_log = None
+            healthy, health_data = check_health(cfg)
+            return {
+                "running": True,
+                "healthy": healthy,
+                "pid": adopted_pid,
+                "health": health_data,
+            }
         crash_log = ""
         try:
             if LOG_FILE.exists():

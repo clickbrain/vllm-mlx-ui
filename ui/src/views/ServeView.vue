@@ -73,7 +73,7 @@ const tps = computed(() => {
 })
 
 const memPct = computed(() => serverStore.memoryPercent.toFixed(0))
-const memUsed = computed(() => serverStore.memory?.used_gb.toFixed(1) ?? '—')
+const memAvailable = computed(() => serverStore.memory?.available_gb.toFixed(1) ?? '—')
 const memTotal = computed(() => serverStore.memory?.total_gb.toFixed(0) ?? '—')
 
 const logs = ref<string[]>([])
@@ -274,7 +274,7 @@ async function doClearCache(type: string) {
       </div>
       <div class="metrics-grid">
         <MetricCard label="Tokens / sec" :value="tps" />
-        <MetricCard label="Memory Used" :value="memUsed" :unit="`/ ${memTotal} GB`" />
+        <MetricCard label="Available RAM" :value="memAvailable" :unit="`/ ${memTotal} GB`" />
         <MetricCard label="Memory %" :value="memPct" unit="%" :warnAbove="75" isPercent />
         <MetricCard label="Uptime" :value="uptime" />
       </div>

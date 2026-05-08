@@ -57,6 +57,7 @@ const filteredModels = computed(() => {
 // Find tab
 const searchInput = ref('')
 const hideDownloaded = ref(true)
+const showFilters = ref(false)
 
 // Column sort state: column key + direction
 // server-sort: downloads, likes, last_modified — re-fetches from HF
@@ -72,8 +73,6 @@ const filterSizeMin = ref<number>(0)
 const filterSizeMax = ref<number>(200)  // reasonable max for Apple Silicon
 const filterDownloadsMin = ref<number>(0)
 const filterDownloadsMax = ref<number>(1000000)
-const filterLikesMin = ref<number>(0)
-const filterLikesMax = ref<number>(10000)
 const filterFitOnly = ref(false)  // quick checkbox: only "perfect" and "good"
 
 // Quick-search by company/org
@@ -100,22 +99,18 @@ const isRestarting = computed(() => modelsStore.serverRestartingFor)
 // Server-side sort columns (require a new HF fetch)
 const SERVER_SORT_COLS = new Set<SortCol>(['downloads', 'likes', 'last_modified'])
 
-function toggleSort(col: SortCol) {
-  if (sortCol.value === col) {
-    sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc'
-  } else {
-    sortCol.value = col
-    sortDir.value = 'desc'
-  }
-  if (SERVER_SORT_COLS.has(col)) {
-    // Re-fetch with new server sort
-    modelsStore.searchHF(searchInput.value.trim(), true, 0, col)
+function toggleSortDir() {
+  sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc'
+  if (SERVER_SORT_COLS.has(sortCol.value as SortCol)) {
+    modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value as string)
   }
 }
 
-function sortArrow(col: SortCol) {
-  if (sortCol.value !== col) return '↕'
-  return sortDir.value === 'desc' ? '↓' : '↑'
+function onSortChange() {
+  sortDir.value = 'desc'
+  if (SERVER_SORT_COLS.has(sortCol.value as SortCol)) {
+    modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value as string)
+  }
 }
 
 // Fit level filter helpers
@@ -161,9 +156,6 @@ const displayedSearchResults = computed(() => {
 
   // Downloads range filter
   list = list.filter(r => r.downloads >= filterDownloadsMin.value && r.downloads <= filterDownloadsMax.value)
-
-  // Likes range filter
-  list = list.filter(r => r.likes >= filterLikesMin.value && r.likes <= filterLikesMax.value)
 
   // Client-side sort (model name or size)
   if (sortCol.value === 'model') {
@@ -392,18 +384,8 @@ watch(activeTab, (tab) => {
 
     <!-- Find tab -->
     <div v-else-if="activeTab === 'Find'" class="tab-content">
-      <!-- Company quick-search chips -->
-      <div class="company-filter-row" role="group" aria-label="Browse models by company">
-        <span class="company-row-label">Browse by:</span>
-        <button
-          v-for="c in COMPANY_FILTERS"
-          :key="c.query"
-          class="company-chip"
-          :class="{ active: searchInput === c.query }"
-          @click="searchCompany(c.query)"
-        >{{ c.label }}</button>
-      </div>
 
+      <!-- Search bar -->
       <div class="find-search-row">
         <div class="search-input-wrapper">
           <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
@@ -414,7 +396,7 @@ watch(activeTab, (tab) => {
             v-model="searchInput"
             type="text"
             class="search-input"
-            placeholder="Search models… (e.g. 'Qwen', '7B', 'mistral')"
+            placeholder="Search all of HuggingFace… (e.g. 'Qwen 7B', 'mistral', 'deepseek')"
             aria-label="Search HuggingFace models"
             @keydown.enter="doSearch"
           />
@@ -423,111 +405,108 @@ watch(activeTab, (tab) => {
           </AppButton>
         </div>
         <p class="search-hint">
-          Try: "Qwen 7B 4bit", "mistral", or leave empty for trending models
+          Searches MLX-compatible models across all of HuggingFace
         </p>
       </div>
-      
-      <div class="mlx-note">
-        ✓ Search results show only MLX-compatible models
+
+      <!-- Company quick-search chips -->
+      <div class="company-filter-row" role="group" aria-label="Browse models by company">
+        <span class="company-row-label">Browse:</span>
+        <button
+          v-for="c in COMPANY_FILTERS"
+          :key="c.query"
+          class="company-chip"
+          :class="{ active: searchInput === c.query }"
+          @click="searchCompany(c.query)"
+        >{{ c.label }}</button>
       </div>
 
-       <!-- Options row: filters and hide-downloaded -->
-      <div class="find-options-row">
-        <!-- Fit filter with quick checkbox -->
-        <div class="filter-group">
-          <span class="filter-label">Fit level:</span>
-          <label class="fit-quick-toggle">
-            <input type="checkbox" v-model="filterFitOnly" />
-            <span>Only models that fit</span>
-          </label>
-          <div v-if="!filterFitOnly" class="fit-checkboxes">
-            <label class="filter-checkbox">
-              <input type="checkbox" :checked="hasFitLevel('perfect')" @change="toggleFitLevel('perfect')" />
-              <span>🟢 Fits great (&lt;50%)</span>
-            </label>
-            <label class="filter-checkbox">
-              <input type="checkbox" :checked="hasFitLevel('good')" @change="toggleFitLevel('good')" />
-              <span>🟡 Fits well (50-75%)</span>
-            </label>
-            <label class="filter-checkbox">
-              <input type="checkbox" :checked="hasFitLevel('marginal')" @change="toggleFitLevel('marginal')" />
-              <span>🟠 Tight fit (75-90%)</span>
-            </label>
-            <label class="filter-checkbox">
-              <input type="checkbox" :checked="hasFitLevel('too_tight')" @change="toggleFitLevel('too_tight')" />
-              <span>🔴 Too large (&gt;90%)</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- Size range filter -->
-        <div class="filter-group">
-          <span class="filter-label">Size (GB):</span>
-          <div class="range-inputs">
-            <input type="number" v-model.number="filterSizeMin" min="0" max="200" class="range-input" placeholder="min" />
-            <span class="range-dash">–</span>
-            <input type="number" v-model.number="filterSizeMax" min="0" max="200" class="range-input" placeholder="max" />
-          </div>
-          <input type="range" v-model.number="filterSizeMin" min="0" max="200" class="range-slider" />
-          <input type="range" v-model.number="filterSizeMax" min="0" max="200" class="range-slider" />
-        </div>
-
-        <!-- Downloads range filter -->
-        <div class="filter-group">
-          <span class="filter-label">Downloads:</span>
-          <div class="range-inputs">
-            <input type="number" v-model.number="filterDownloadsMin" min="0" max="1000000" class="range-input range-input-small" placeholder="min" />
-            <span class="range-dash">–</span>
-            <input type="number" v-model.number="filterDownloadsMax" min="0" max="1000000" class="range-input range-input-small" placeholder="max" />
-          </div>
-        </div>
-
-        <!-- Likes range filter -->
-        <div class="filter-group">
-          <span class="filter-label">Likes:</span>
-          <div class="range-inputs">
-            <input type="number" v-model.number="filterLikesMin" min="0" max="10000" class="range-input range-input-small" placeholder="min" />
-            <span class="range-dash">–</span>
-            <input type="number" v-model.number="filterLikesMax" min="0" max="10000" class="range-input range-input-small" placeholder="max" />
-          </div>
-        </div>
-
+      <!-- Collapsible filters + sort toolbar -->
+      <div class="find-toolbar">
+        <button class="filter-toggle" @click="showFilters = !showFilters">
+          <svg :class="['filter-chevron', { open: showFilters }]" viewBox="0 0 12 12" width="12" height="12" fill="currentColor">
+            <path d="M4 2l4 4-4 4" />
+          </svg>
+          Filters
+        </button>
         <div class="toolbar-spacer" />
+        <div class="sort-select-group">
+          <span class="sort-label">Sort:</span>
+          <select v-model="sortCol" class="sort-select" @change="onSortChange">
+            <option value="last_modified">Last Modified</option>
+            <option value="downloads">Downloads</option>
+            <option value="likes">Likes</option>
+            <option value="model">Name</option>
+            <option value="size">Size</option>
+          </select>
+          <button class="sort-dir-btn" @click="toggleSortDir" :title="sortDir === 'desc' ? 'Descending' : 'Ascending'">
+            {{ sortDir === 'desc' ? '↓' : '↑' }}
+          </button>
+        </div>
         <label class="hide-downloaded-toggle">
           <input type="checkbox" v-model="hideDownloaded" />
           <span>Hide downloaded</span>
         </label>
       </div>
 
+      <!-- Expanded filter panel -->
+      <div v-if="showFilters" class="filter-panel">
+        <div class="filter-row">
+          <span class="filter-label">Fit:</span>
+          <label class="filter-chip-check">
+            <input type="checkbox" :checked="hasFitLevel('perfect')" @change="toggleFitLevel('perfect')" />
+            <span class="chip-dot perfect">●</span> Perfect
+          </label>
+          <label class="filter-chip-check">
+            <input type="checkbox" :checked="hasFitLevel('good')" @change="toggleFitLevel('good')" />
+            <span class="chip-dot good">●</span> Good
+          </label>
+          <label class="filter-chip-check">
+            <input type="checkbox" :checked="hasFitLevel('marginal')" @change="toggleFitLevel('marginal')" />
+            <span class="chip-dot marginal">●</span> Tight
+          </label>
+          <label class="filter-chip-check">
+            <input type="checkbox" :checked="hasFitLevel('too_tight')" @change="toggleFitLevel('too_tight')" />
+            <span class="chip-dot too-tight">●</span> Too large
+          </label>
+          <label class="filter-chip-check">
+            <input type="checkbox" v-model="filterFitOnly" />
+            <span>Only those that fit</span>
+          </label>
+        </div>
+        <div class="filter-row">
+          <span class="filter-label">Size:</span>
+          <div class="range-inputs">
+            <input type="number" v-model.number="filterSizeMin" min="0" max="200" class="range-input" placeholder="min" />
+            <span class="range-dash">–</span>
+            <input type="number" v-model.number="filterSizeMax" min="0" max="200" class="range-input" placeholder="max" />
+            <span class="range-unit">GB</span>
+          </div>
+        </div>
+        <div class="filter-row">
+          <span class="filter-label">Downloads:</span>
+          <div class="range-inputs">
+            <input type="number" v-model.number="filterDownloadsMin" min="0" max="1000000" class="range-input" placeholder="min" />
+            <span class="range-dash">–</span>
+            <input type="number" v-model.number="filterDownloadsMax" min="0" max="1000000" class="range-input" placeholder="max" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Error -->
       <div v-if="modelsStore.actionError" class="error-banner">
         ⚠ {{ modelsStore.actionError }}
         <button class="error-dismiss" @click="modelsStore.actionError = null">✕</button>
       </div>
 
+      <!-- Loading -->
       <div v-if="modelsStore.searching && !modelsStore.searchResults.length" class="empty-state">
         <div class="spinner" />
-        <span class="empty-label">Loading trending models…</span>
+        <span class="empty-label">Searching HuggingFace…</span>
       </div>
-      <div v-else-if="displayedSearchResults.length > 0" class="results-list">
-        <!-- Sortable column headers -->
-        <div class="results-header-row">
-          <button class="col-model col-sortable" :class="{ 'col-active': sortCol === 'model' }" @click="toggleSort('model')">
-            Model <span class="sort-arrow">{{ sortArrow('model') }}</span>
-          </button>
-          <button class="col-fit col-sortable" :class="{ 'col-active': sortCol === 'size' }" @click="toggleSort('size')">
-            Fit / Size <span class="sort-arrow">{{ sortArrow('size') }}</span>
-          </button>
-          <button class="col-date col-sortable" :class="{ 'col-active': sortCol === 'last_modified' }" @click="toggleSort('last_modified')">
-            Last Modified <span class="sort-arrow">{{ sortArrow('last_modified') }}</span>
-          </button>
-          <button class="col-downloads col-sortable" :class="{ 'col-active': sortCol === 'downloads' }" @click="toggleSort('downloads')">
-            Downloads <span class="sort-arrow">{{ sortArrow('downloads') }}</span>
-          </button>
-          <button class="col-likes col-sortable" :class="{ 'col-active': sortCol === 'likes' }" @click="toggleSort('likes')">
-            Likes <span class="sort-arrow">{{ sortArrow('likes') }}</span>
-          </button>
-          <span class="col-action" />
-        </div>
+
+      <!-- Results -->
+      <div v-else-if="displayedSearchResults.length > 0" class="find-results">
         <HFSearchResult
           v-for="r in displayedSearchResults"
           :key="r.id"
@@ -539,6 +518,7 @@ watch(activeTab, (tab) => {
           :size_gb="r.size_gb"
           :fit_level="r.fit_level"
           :last_modified="r.last_modified"
+          :total_ram_gb="serverStore.memory?.total_gb ?? 0"
           @download="handleDownload(r.id)"
         />
         <div v-if="modelsStore.searchHasMore" class="load-more-row">
@@ -547,8 +527,10 @@ watch(activeTab, (tab) => {
           </AppButton>
         </div>
       </div>
+
+      <!-- Empty -->
       <div v-else-if="!modelsStore.searching && !modelsStore.actionError" class="empty-state">
-        <span class="empty-label">No results found</span>
+        <span class="empty-label">No models found — try a different search</span>
       </div>
     </div>
 
@@ -720,11 +702,13 @@ watch(activeTab, (tab) => {
   line-height: 1.5;
 }
 
-/* Find tab */
+/* ── Find tab ─────────────────────────────────────────────── */
+
+/* Search bar */
 .find-search-row {
   display: flex;
+  flex-direction: column;
   gap: var(--space-2);
-  align-items: center;
 }
 
 .search-input-wrapper {
@@ -733,9 +717,14 @@ watch(activeTab, (tab) => {
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--bd);
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
   background: var(--bg-input);
   flex: 1;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.search-input-wrapper:focus-within {
+  border-color: var(--bd-focus);
+  box-shadow: 0 0 0 3px rgba(91, 106, 208, .12);
 }
 .search-icon {
   width: 18px;
@@ -752,135 +741,231 @@ watch(activeTab, (tab) => {
   flex: 1;
   outline: none;
 }
+.search-input::placeholder { color: var(--tx-tertiary); }
 .search-hint {
   font-size: 12px;
-  color: var(--tx-muted);
+  color: var(--tx-tertiary);
   margin: 0;
   padding: 0 var(--space-1);
 }
-.find-search-row {
+
+/* Company chips */
+.company-filter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.company-filter-row::-webkit-scrollbar { display: none; }
+.company-row-label {
+  font-size: 12px;
+  color: var(--tx-tertiary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  flex-shrink: 0;
+}
+.company-chip {
+  padding: 3px 11px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-subtle);
+  border-radius: var(--r-pill);
+  color: var(--tx-secondary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+.company-chip:hover:not(.active) {
+  border-color: var(--bd-emphasis);
+  color: var(--tx-primary);
+}
+.company-chip.active {
+  background: var(--ac-bg);
+  border-color: var(--ac-border);
+  color: var(--si-300);
+  font-weight: 600;
+}
+.company-chip:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 2px;
+}
+
+/* Toolbar: filter toggle + sort + hide downloaded */
+.find-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--tx-secondary);
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--r-md);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.filter-toggle:hover { background: var(--bg-elevated); color: var(--tx-primary); }
+.filter-toggle:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 2px;
+}
+.filter-chevron {
+  transition: transform var(--transition-fast);
+}
+.filter-chevron.open {
+  transform: rotate(90deg);
+}
+.sort-select-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.sort-label {
+  font-size: 12px;
+  color: var(--tx-tertiary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.sort-select {
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-subtle);
+  border-radius: var(--r-sm);
+  color: var(--tx-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 2px 24px 2px 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7280'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  cursor: pointer;
+}
+.sort-select:focus {
+  outline: none;
+  border-color: var(--bd-focus);
+}
+.sort-dir-btn {
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-subtle);
+  border-radius: var(--r-sm);
+  color: var(--tx-secondary);
+  font-size: 14px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.sort-dir-btn:hover { border-color: var(--bd-emphasis); }
+.sort-dir-btn:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 1px;
+}
+
+.hide-downloaded-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--tx-secondary);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.hide-downloaded-toggle input { accent-color: var(--si-500); cursor: pointer; }
+
+/* Expanded filter panel */
+.filter-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-lg);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.filter-label {
+  font-size: 12px;
+  color: var(--tx-tertiary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  min-width: 72px;
+  flex-shrink: 0;
+}
+.filter-chip-check {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 13px;
+  color: var(--tx-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.filter-chip-check input { accent-color: var(--si-500); cursor: pointer; }
+.chip-dot { font-size: 12px; }
+.chip-dot.perfect   { color: var(--ph-400); }
+.chip-dot.good      { color: var(--cu-300); }
+.chip-dot.marginal  { color: var(--cu-500); }
+.chip-dot.too-tight { color: var(--cr-400); }
+
+.range-inputs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.range-input {
+  width: 70px;
+  padding: 3px 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-subtle);
+  border-radius: var(--r-sm);
+  color: var(--tx-primary);
+  font-size: 13px;
+  font-family: var(--font-mono);
+  transition: border-color var(--transition-fast);
+}
+.range-input:focus {
+  outline: none;
+  border-color: var(--bd-focus);
+  box-shadow: 0 0 0 2px rgba(91, 106, 208, .12);
+}
+.range-dash { color: var(--tx-muted); font-size: 13px; }
+.range-unit { font-size: 12px; color: var(--tx-tertiary); }
+
+/* Results list */
+.find-results {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
 
-.search-input::placeholder { color: var(--tx-muted); }
-
-.search-input:focus {
-  outline: none;
-  border-color: var(--bd-focus);
-  box-shadow: 0 0 0 3px rgba(91, 106, 208, .12);
-}
-
-.scope-toggle {
+/* Load more row */
+.load-more-row {
   display: flex;
-  border: 1px solid var(--bd-default);
-  border-radius: var(--r-md);
-  overflow: hidden;
-  flex-shrink: 0;
+  justify-content: center;
+  padding: var(--space-3) 0;
 }
-
-.scope-btn {
-  padding: 6px 12px;
-  background: transparent;
-  border: none;
-  color: var(--tx-tertiary);
-  font-size: 14px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
-  white-space: nowrap;
-}
-
-.scope-btn:first-child { border-right: 1px solid var(--bd-default); }
-
-.scope-btn:hover:not(.active) {
-  background: var(--bg-elevated);
-  color: var(--tx-secondary);
-}
-
-.scope-btn.active {
-  background: var(--ac-bg);
-  color: var(--si-300);
-  font-weight: 500;
-}
-
-.results-list {
-  background: var(--bg-surface);
-  border: 1px solid var(--bd-default);
-  border-radius: var(--r-lg);
-  overflow: hidden;
-}
-
-.results-header-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--bd-default);
-  background: var(--bg-elevated);
-}
-
-.col-model {
-  flex: 1;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--tx-muted);
-}
-
-.col-fit {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--tx-muted);
-  min-width: 90px;
-  text-align: right;
-}
-
-.col-downloads,
-.col-likes,
-.col-trending {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--tx-muted);
-  min-width: 72px;
-  text-align: right;
-  flex-shrink: 0;
-}
-
-/* Sortable header buttons */
-.col-sortable {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-family: inherit;
-  padding: 2px 4px;
-  border-radius: var(--r-sm);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  transition: color var(--transition-fast), background var(--transition-fast);
-  user-select: none;
-}
-.col-sortable:hover { color: var(--tx-secondary); background: var(--bg-elevated); }
-.col-sortable.col-active { color: var(--si-300); }
-.col-sortable:focus-visible {
-  outline: 2px solid var(--si-500);
-  outline-offset: 1px;
-}
-
-.sort-arrow {
-  font-size: 12px;
-  opacity: 0.7;
-}
-.col-sortable.col-active .sort-arrow { opacity: 1; }
-
-.col-action { min-width: 80px; }
 
 /* Library column header row */
 .lib-col-header {
@@ -1040,136 +1125,6 @@ watch(activeTab, (tab) => {
   color: var(--si-300);
 }
 
-/* Hide-downloaded toggle */
-.hide-downloaded-toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: 14px;
-  color: var(--tx-secondary);
-  cursor: pointer;
-  user-select: none;
-}
-.hide-downloaded-toggle input { accent-color: var(--si-500); cursor: pointer; }
-
-/* Company quick-search chip row */
-.company-filter-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.company-row-label {
-  font-size: 13px;
-  color: var(--tx-muted);
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  font-weight: 600;
-  flex-shrink: 0;
-  margin-right: var(--space-1);
-}
-
-.company-chip {
-  padding: 3px 10px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--bd-default);
-  border-radius: var(--r-pill);
-  color: var(--tx-secondary);
-  font-size: 14px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
-  white-space: nowrap;
-}
-
-.company-chip:hover:not(.active) {
-  background: var(--bg-elevated);
-  border-color: var(--bd-emphasis);
-  color: var(--tx-primary);
-}
-.company-chip:focus-visible {
-  outline: 2px solid var(--si-500);
-  outline-offset: 2px;
-}
-.company-chip.active {
-  background: var(--ac-bg);
-  border-color: var(--ac-border);
-  color: var(--si-300);
-  font-weight: 600;
-}
-
-/* Filter row */
-.find-options-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-
-.filter-group {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.filter-label {
-  font-size: 13px;
-  color: var(--tx-muted);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: .05em;
-  margin-right: 2px;
-  white-space: nowrap;
-}
-
-.filter-btn {
-  padding: 2px 8px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--bd-subtle);
-  border-radius: var(--r-sm);
-  color: var(--tx-muted);
-  font-size: 13px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-  white-space: nowrap;
-}
-
-.filter-btn:hover:not(.active) {
-  background: var(--bg-elevated);
-  color: var(--tx-secondary);
-  border-color: var(--bd-default);
-}
-
-.filter-btn.active {
-  background: var(--ac-bg);
-  border-color: var(--ac-border);
-  color: var(--si-300);
-  font-weight: 600;
-}
-
-.filter-btn.fit-perfect.active  { background: rgba(74,222,128,.1); border-color: rgba(74,222,128,.3); color: var(--ph-400); }
-.filter-btn.fit-good.active     { background: rgba(250,204,21,.1); border-color: rgba(250,204,21,.3); color: #facc15; }
-.filter-btn.fit-marginal.active { background: rgba(249,115,22,.1); border-color: rgba(249,115,22,.3); color: #f97316; }
-.filter-btn.fit-too-tight.active{ background: rgba(239,68,68,.1);  border-color: rgba(239,68,68,.3);  color: var(--cr-400); }
-
-/* Fix col header button padding so widths match data cells */
-.col-downloads.col-sortable,
-.col-likes.col-sortable,
-.col-trending.col-sortable {
-  padding: 0 2px;
-  justify-content: flex-end;
-}
-
-/* Load more row */
-.load-more-row {
-  display: flex;
-  justify-content: center;
-  padding: var(--space-3);
-  border-top: 1px solid var(--bd-subtle);
-}
-
 /* Spinner */
 .spinner {
   width: 18px;
@@ -1178,137 +1133,6 @@ watch(activeTab, (tab) => {
   border-top-color: var(--si-500);
   border-radius: 50%;
   animation: spin .6s linear infinite;
-}
-
-/* MLX note */
-.mlx-note {
-  font-size: 13px;
-  color: var(--tx-muted);
-  padding: 0 var(--space-2);
-}
-
-/* Fit quick toggle */
-.fit-quick-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--tx-secondary);
-  user-select: none;
-}
-
-.fit-quick-toggle input {
-  cursor: pointer;
-}
-
-/* Fit level checkboxes */
-.fit-checkboxes {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin-top: var(--space-1);
-}
-
-.filter-checkbox {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--tx-secondary);
-  user-select: none;
-}
-
-.filter-checkbox input {
-  cursor: pointer;
-}
-
-/* Range slider inputs */
-.range-inputs {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  margin: var(--space-1) 0;
-}
-
-.range-input {
-  width: 70px;
-  padding: 4px 8px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--bd-default);
-  border-radius: var(--r-sm);
-  color: var(--tx-primary);
-  font-size: 13px;
-  font-family: var(--font-mono);
-  transition: border-color var(--transition-fast);
-}
-
-.range-input-small {
-  width: 60px;
-}
-
-.range-input:focus {
-  outline: none;
-  border-color: var(--bd-focus);
-  box-shadow: 0 0 0 2px rgba(91, 106, 208, .12);
-}
-
-.range-dash {
-  color: var(--tx-muted);
-  font-size: 13px;
-}
-
-.range-slider {
-  width: 100%;
-  height: 4px;
-  margin: var(--space-1) 0;
-  border-radius: 2px;
-  background: var(--bd-default);
-  -webkit-appearance: none;
-  appearance: none;
-  cursor: pointer;
-}
-
-.range-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--si-500);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.range-slider::-webkit-slider-thumb:hover {
-  background: var(--si-400);
-}
-
-.range-slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--si-500);
-  cursor: pointer;
-  border: none;
-  transition: background var(--transition-fast);
-}
-
-.range-slider::-moz-range-thumb:hover {
-  background: var(--si-400);
-}
-
-/* Date column */
-.col-date {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--tx-muted);
-  min-width: 100px;
-  text-align: right;
-  flex-shrink: 0;
 }
 
 /* Virtual scroller wrapper fills remaining space */

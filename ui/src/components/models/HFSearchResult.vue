@@ -1,19 +1,3 @@
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-<!--
-  HFSearchResult — one result card from a HuggingFace model search.
-
-  Props:
-  - id: HuggingFace model repo ID (e.g. "mlx-community/Qwen3-8B-4bit")
-  - downloads: total HF download count (abbreviated to k/M notation)
-  - likes: HF "like" count
-  - is_mlx: true when the model has the mlx tag (shows MLX badge)
-  - tags: array of HF topic tags
-  - size_gb: pre-download weight file size in GB (optional)
-  - fit_level: 'perfect' | 'good' | 'marginal' | 'too_tight' from check_model_fit
-  - last_modified: ISO 8601 timestamp (e.g. "2025-01-15T12:30:45Z")
-
-  Emits: download — user clicked the Download button
--->
 <script setup lang="ts">
 import { computed } from 'vue'
 import AppBadge from '@/components/shared/AppBadge.vue'
@@ -28,6 +12,7 @@ const props = defineProps<{
   size_gb?: number
   fit_level?: string
   last_modified?: string
+  total_ram_gb?: number
 }>()
 
 const emit = defineEmits<{
@@ -47,120 +32,206 @@ const dateFormatted = computed(() => {
   if (!props.last_modified) return null
   try {
     const date = new Date(props.last_modified)
-    // Format as "Jan 15, 2025"
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
   } catch {
     return null
   }
 })
 
+const shortName = computed(() => {
+  const parts = props.id.split('/')
+  return parts.length > 1 ? parts.slice(1).join('/') : props.id
+})
+
+const orgName = computed(() => {
+  const parts = props.id.split('/')
+  return parts.length > 1 ? parts[0] : null
+})
+
 const sizeLabel = computed(() => {
   if (!props.size_gb) return null
-  return `~${props.size_gb.toFixed(1)} GB`
+  return `${props.size_gb.toFixed(1)} GB`
 })
 
 const fitInfo = computed(() => {
-  const map: Record<string, { dot: string; label: string; color: string }> = {
-    perfect:   { dot: '●', label: 'Fits great', color: 'var(--ph-400)' },
-    good:      { dot: '●', label: 'Fits well',  color: 'var(--cu-300)' },
-    marginal:  { dot: '●', label: 'Tight fit',  color: 'var(--cu-500)' },
-    too_tight: { dot: '●', label: 'Too large',  color: 'var(--cr-400)' },
+  const map: Record<string, { label: string; color: string; barColor: string }> = {
+    perfect:   { label: 'Fits great', color: 'var(--ph-400)', barColor: 'var(--ph-400)' },
+    good:      { label: 'Fits well',  color: 'var(--cu-300)', barColor: 'var(--cu-300)' },
+    marginal:  { label: 'Tight fit',  color: 'var(--cu-500)', barColor: 'var(--cu-500)' },
+    too_tight: { label: 'Too large',  color: 'var(--cr-400)', barColor: 'var(--cr-400)' },
   }
   return props.fit_level ? (map[props.fit_level] ?? null) : null
+})
+
+const fitPercent = computed(() => {
+  if (!props.size_gb || !props.total_ram_gb || props.total_ram_gb <= 0) return 0
+  return Math.min(props.size_gb / props.total_ram_gb, 1)
 })
 </script>
 
 <template>
   <div class="hf-result">
-    <div class="result-id">
-      <span class="model-id">{{ id }}</span>
-      <AppBadge v-if="is_mlx" variant="info" size="sm">MLX</AppBadge>
+    <div class="result-body">
+      <!-- Top row: model name + MLX badge + download button -->
+      <div class="result-top">
+        <div class="result-id-group">
+          <span v-if="orgName" class="result-org">{{ orgName }}/</span>
+          <span class="result-name">{{ shortName }}</span>
+          <AppBadge v-if="is_mlx" variant="info" size="sm">MLX</AppBadge>
+        </div>
+        <AppButton variant="secondary" size="sm" @click="emit('download')">Download</AppButton>
+      </div>
+
+      <!-- Fit gauge: model size vs RAM bar -->
+      <div v-if="sizeLabel && fitInfo" class="fit-gauge-row">
+        <div class="fit-gauge-track">
+          <div
+            class="fit-gauge-fill"
+            :style="{ width: `${fitPercent * 100}%`, background: fitInfo.barColor }"
+          />
+        </div>
+        <div class="fit-gauge-labels">
+          <span class="fit-size">{{ sizeLabel }}</span>
+          <span class="fit-pct">{{ Math.round(fitPercent * 100) }}% of {{ total_ram_gb?.toFixed(0) }} GB</span>
+          <span class="fit-tag" :style="{ color: fitInfo.color }">{{ fitInfo.label }}</span>
+        </div>
+      </div>
+      <div v-else-if="sizeLabel" class="fit-gauge-row">
+        <div class="fit-gauge-track">
+          <div class="fit-gauge-fill fit-gauge-unknown" style="width: 30%" />
+        </div>
+        <div class="fit-gauge-labels">
+          <span class="fit-size">{{ sizeLabel }}</span>
+          <span class="fit-tag fit-unknown">Unknown fit</span>
+        </div>
+      </div>
+
+      <!-- Metadata row: downloads, likes, date -->
+      <div class="result-meta">
+        <span class="meta-stat">
+          <svg class="meta-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M8 1a6 6 0 100 12A6 6 0 008 1zM7 4h2v5H7V4zm0 6h2v2H7v-2z"/></svg>
+          {{ downloadsFormatted }} downloads
+        </span>
+        <span class="meta-stat">
+          <svg class="meta-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M8 1.5l1.76 3.57 3.94.57-2.85 2.78.67 3.93L8 10.46l-3.52 1.85.67-3.93L2.3 5.64l3.94-.57L8 1.5z"/></svg>
+          {{ likesFormatted }}
+        </span>
+        <span v-if="dateFormatted" class="meta-stat">{{ dateFormatted }}</span>
+      </div>
     </div>
-    <!-- Size / Fit column — aligns with col-fit header -->
-    <div class="result-fit">
-      <span v-if="sizeLabel" class="size-label">{{ sizeLabel }}</span>
-      <span v-if="fitInfo" class="fit-pill" :style="{ color: fitInfo.color }">
-        {{ fitInfo.dot }} {{ fitInfo.label }}
-      </span>
-      <span v-else-if="sizeLabel" class="fit-unknown">—</span>
-    </div>
-    <!-- Date column — aligns with col-date header -->
-    <span class="stat stat-date">{{ dateFormatted ?? '—' }}</span>
-    <!-- Individual stat columns — each is a direct flex child to align with header -->
-    <span class="stat stat-downloads">↓ {{ downloadsFormatted }}</span>
-    <span class="stat stat-likes">♥ {{ likesFormatted }}</span>
-    <AppButton variant="secondary" size="sm" @click="emit('download')">Download</AppButton>
   </div>
 </template>
 
 <style scoped>
 .hf-result {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
+  background: var(--bg-surface);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-lg);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.hf-result:hover {
+  border-color: var(--bd-emphasis);
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+.result-body {
   padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--bd-subtle);
-  transition: background var(--transition-fast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
-.hf-result:last-child { border-bottom: none; }
-.hf-result:hover { background: rgba(255, 255, 255, .012); }
-
-.result-id {
+/* Top row */
+.result-top {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  flex: 1;
-  min-width: 0;
+  justify-content: space-between;
+  gap: var(--space-3);
 }
-
-.model-id {
+.result-id-group {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+.result-org {
   font-family: var(--font-mono);
-  font-size: 14.5px;
+  font-size: 13px;
+  color: var(--tx-tertiary);
+  white-space: nowrap;
+}
+.result-name {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
   color: var(--tx-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Aligns with .col-fit header */
-.result-fit {
+/* Fit gauge */
+.fit-gauge-row {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  min-width: 90px;
-  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-3);
 }
-
-.size-label {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--tx-secondary);
+.fit-gauge-track {
+  flex: 1;
+  height: 6px;
+  background: var(--bd-subtle);
+  border-radius: 3px;
+  overflow: hidden;
+  max-width: 160px;
 }
-
-.fit-pill {
-  font-size: 13px;
-  font-weight: 500;
+.fit-gauge-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .2s ease;
+}
+.fit-gauge-unknown {
+  background: var(--tx-tertiary);
+  opacity: 0.4;
+}
+.fit-gauge-labels {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
   white-space: nowrap;
 }
-
-.fit-unknown {
-  font-size: 13px;
-  color: var(--tx-muted);
-}
-
-.stat {
+.fit-size {
   font-family: var(--font-mono);
-  font-size: 14px;
-  color: var(--tx-muted);
-  flex-shrink: 0;
-  min-width: 72px;
-  text-align: right;
+  color: var(--tx-primary);
+  font-weight: 600;
+}
+.fit-pct {
+  color: var(--tx-tertiary);
+  font-family: var(--font-mono);
+}
+.fit-tag {
+  font-weight: 600;
+}
+.fit-unknown {
+  color: var(--tx-tertiary);
 }
 
-.stat-date {
-  min-width: 100px;
+/* Meta row */
+.result-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.meta-stat {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--tx-tertiary);
+  font-family: var(--font-mono);
+}
+.meta-icon {
+  opacity: 0.6;
 }
 </style>
-
