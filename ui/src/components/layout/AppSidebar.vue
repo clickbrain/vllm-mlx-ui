@@ -36,17 +36,17 @@ const scanning = ref(false)
 const discoveredMachines = ref<import('@/stores/machines').Machine[]>([])
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 
-const memPct = computed(() => {
+const memAvailPct = computed(() => {
   const mem = serverStore.memory
   if (!mem || !mem.total_gb) return 0
-  return (mem.used_gb / mem.total_gb) * 100
+  return Math.max(0, (mem.available_gb / mem.total_gb) * 100)
 })
-const arcFillColor = computed(() => memPct.value > 75 ? 'var(--cu-500)' : 'var(--si-500)')
+const arcFillColor = computed(() => memAvailPct.value < 25 ? 'var(--cu-500)' : 'var(--si-500)')
 const arcDashOffset = computed(() => {
   const arc = 157
-  return arc - arc * (memPct.value / 100)
+  return arc - arc * (memAvailPct.value / 100)
 })
-const memUsedGb = computed(() => serverStore.memory?.used_gb.toFixed(1) ?? '—')
+const memAvailGb = computed(() => serverStore.memory?.available_gb.toFixed(1) ?? '—')
 const memTotalGb = computed(() => serverStore.memory?.total_gb.toFixed(0) ?? '—')
 const loadedModel = computed(() => serverStore.modelId)
 
@@ -197,11 +197,11 @@ async function doShutdown() {
 
     <!-- Memory Arc Gauge -->
     <div class="sidebar-section gauge-section">
-      <svg viewBox="0 0 120 72" xmlns="http://www.w3.org/2000/svg" class="arc-svg" aria-label="Memory usage gauge">
+      <svg viewBox="0 0 120 72" xmlns="http://www.w3.org/2000/svg" class="arc-svg" aria-label="Available RAM gauge">
         <path d="M 10 65 A 50 50 0 0 1 110 65" fill="none" stroke="var(--arc-track)" stroke-width="9" stroke-linecap="round" />
         <path d="M 10 65 A 50 50 0 0 1 110 65" fill="none" :stroke="arcFillColor" stroke-width="9" stroke-linecap="round" stroke-dasharray="157" :stroke-dashoffset="arcDashOffset" class="arc-fill" />
-        <text x="60" y="50" text-anchor="middle" font-family="var(--font-mono)" font-size="19" font-weight="700" fill="var(--tx-primary)">{{ memUsedGb }}</text>
-        <text x="60" y="62" text-anchor="middle" font-size="11.5" fill="var(--tx-muted)">of {{ memTotalGb }} GB</text>
+        <text x="60" y="50" text-anchor="middle" font-family="var(--font-mono)" font-size="19" font-weight="700" fill="var(--tx-primary)">{{ memAvailGb }}</text>
+        <text x="60" y="62" text-anchor="middle" font-size="11.5" fill="var(--tx-muted)">available</text>
       </svg>
       <div v-if="loadedModel" class="gauge-model-name">{{ loadedModel }}</div>
       <button class="release-mem-btn" title="Clears MLX model cache and runs OS-level memory compaction. Server stays up — model weights remain loaded. Use to reclaim inactive/cached RAM without restarting." @click="releaseMemory">
