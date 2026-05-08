@@ -22,7 +22,6 @@ Port handling:
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 import sys
 from typing import Any, ClassVar
@@ -79,8 +78,8 @@ class OllamaEngine(BaseEngine):
 
     def latest_version(self) -> str | None:
         try:
-            import urllib.request
             import json as _json
+            import urllib.request
             with urllib.request.urlopen(
                 "https://api.github.com/repos/ollama/ollama/releases/latest",
                 timeout=5,
@@ -91,52 +90,45 @@ class OllamaEngine(BaseEngine):
             return None
 
     def upgrade_command(self) -> list[str] | None:
-        """Return a Python script that downloads and installs the latest Ollama release.
+        """Return a Python command to download and install the latest Ollama release.
 
-        Downloads the macOS binary zip from GitHub releases and replaces the
-        current ollama binary in-place.  Falls back to brew upgrade if the
-        binary download fails.
+        Base64-encodes the script so it's a single shell-safe argument
+        (multi-line scripts break inside ``sh -c`` strings).
         """
+        import base64 as _base64
         version = self.latest_version()
         if not version:
             return None
         url = f"https://github.com/ollama/ollama/releases/download/v{version}/ollama-darwin.zip"
-        return [
-            sys.executable, "-c", f"""
-import os, sys, shutil, stat, subprocess, tempfile, urllib.request, zipfile
+        script = f"""
+import os, shutil, stat, subprocess, tempfile, urllib.request, zipfile
 
-# Try direct download first
 url = "{url}"
 tmp_zip = tempfile.mktemp(suffix='.ollama.zip')
 try:
     urllib.request.urlretrieve(url, tmp_zip)
 except Exception:
     os.unlink(tmp_zip)
-    # Fallback: try brew upgrade
     if shutil.which('brew'):
         r = subprocess.run(["brew", "list", "ollama"], capture_output=True, timeout=10)
         if r.returncode == 0:
             subprocess.run(["brew", "upgrade", "ollama"], timeout=120)
-    sys.exit(0)
+    raise SystemExit(0)
 
-# Extract binary
 tmp_dir = tempfile.mktemp(suffix='.ollama')
 with zipfile.ZipFile(tmp_zip, 'r') as zf:
     zf.extractall(tmp_dir)
 
-# Find the ollama binary in the extracted files
 binary = os.path.join(tmp_dir, "ollama")
 if not os.path.isfile(binary):
-    sys.exit(0)
+    raise SystemExit(0)
 
-# Determine target path (same location as current ollama binary, or /usr/local/bin)
 target = shutil.which("ollama") or "/usr/local/bin/ollama"
 target_dir = os.path.dirname(target)
 if not os.path.isdir(target_dir):
     target = os.path.expanduser("~/.local/bin/ollama")
     os.makedirs(os.path.dirname(target), exist_ok=True)
 
-# Try to install — fall back to sudo if needed
 try:
     shutil.copy2(binary, target)
     os.chmod(target, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
@@ -144,10 +136,13 @@ except PermissionError:
     subprocess.run(["sudo", "cp", binary, target], timeout=30)
     subprocess.run(["sudo", "chmod", "755", target], timeout=10)
 
-# Cleanup
 os.unlink(tmp_zip)
 shutil.rmtree(tmp_dir, ignore_errors=True)
-""",
+"""
+        encoded = _base64.b64encode(script.encode()).decode()
+        return [
+            sys.executable, "-c",
+            f"import base64; exec(base64.b64decode({encoded!r}).decode())",
         ]
 
     def resolve_launch_model(self, config: dict[str, Any]) -> str:
