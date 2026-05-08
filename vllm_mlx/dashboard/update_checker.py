@@ -481,6 +481,29 @@ def bust_cache() -> None:
         _cache = {}
 
 
+def _pip_engine_upgrades(pip_bin: str) -> list[str]:
+    """Return pip upgrade clauses for installed pip-managed engines."""
+    clauses: list[str] = []
+    try:
+        from vllm_mlx.dashboard.engines.registry import ENGINES, _registry_lock
+        with _registry_lock:
+            engines_snapshot = dict(ENGINES)
+        for engine in engines_snapshot.values():
+            if engine.install_method != "pip":
+                continue
+            try:
+                if not engine.is_installed():
+                    continue
+            except Exception:
+                continue
+            pkg = engine.get_package_name()
+            if pkg:
+                clauses.append(f"{pip_bin} install --upgrade {pkg}")
+    except Exception:
+        logger.warning("Failed to discover pip engine upgrades", exc_info=True)
+    return clauses
+
+
 def upgrade_command() -> list[str]:
     """Return the shell command to upgrade the installation."""
     import sys
@@ -496,6 +519,10 @@ def upgrade_command() -> list[str]:
         pip = str(venv_bin / "pip3")
     if not _Path(pip).exists():
         pip = shutil.which("pip3") or "pip3"
+
+    # Collect pip upgrade clauses for installed pip-managed engines
+    engine_clauses = _pip_engine_upgrades(pip)
+    engine_upgrade = " && ".join(engine_clauses)
 
     if method == "homebrew":
         # Force-update the tap's git repo so brew sees the new formula immediately.
@@ -524,17 +551,19 @@ def upgrade_command() -> list[str]:
                     tap_dir = candidate
                     break
         git_pull = f"cd {tap_dir} && git fetch origin && git checkout main && git pull origin main"
-        return [
-            "sh", "-c",
+        base = (
             f"{git_pull} && brew upgrade vllm-mlx-ui"
-            f" && {pip} install --upgrade vllm-mlx mlx-lm huggingface-hub vllm",
-        ]
+            f" && {pip} install --upgrade vllm-mlx mlx-lm huggingface-hub vllm"
+        )
+        if engine_upgrade:
+            base += f" && {engine_upgrade}"
+        return ["sh", "-c", base]
     # dev / conda / pip install path — upgrade deps unconditionally first.
     # The UI itself is not on PyPI; users running from source pull via git.
-    return [
-        "sh", "-c",
-        f"{pip} install --upgrade vllm-mlx mlx-lm huggingface-hub vllm",
-    ]
+    base = f"{pip} install --upgrade vllm-mlx mlx-lm huggingface-hub vllm"
+    if engine_upgrade:
+        base += f" && {engine_upgrade}"
+    return ["sh", "-c", base]
 
 
 def relaunch() -> None:
