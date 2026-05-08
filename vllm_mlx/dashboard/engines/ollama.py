@@ -22,6 +22,7 @@ Port handling:
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from typing import Any, ClassVar
 
@@ -87,6 +88,12 @@ class OllamaEngine(BaseEngine):
                 return tag.lstrip("v") or None
         except Exception:
             return None
+
+    def upgrade_command(self) -> list[str] | None:
+        """Try Homebrew upgrade for Ollama, or None if brew is unavailable."""
+        if shutil.which("brew"):
+            return ["brew", "upgrade", "ollama"]
+        return None
 
     def resolve_launch_model(self, config: dict[str, Any]) -> str:
         """Return the Ollama model tag to pass to the API.

@@ -481,26 +481,38 @@ def bust_cache() -> None:
         _cache = {}
 
 
-def _pip_engine_upgrades(pip_bin: str) -> list[str]:
-    """Return pip upgrade clauses for installed pip-managed engines."""
+def _engine_upgrade_clauses(pip_bin: str) -> list[str]:
+    """Return shell-command clauses to upgrade installed engines.
+
+    Handles:
+    - pip engines (install_method == "pip") — pip install --upgrade <pkg>
+    - Any engine with upgrade_command() returning a non-None list
+    """
     clauses: list[str] = []
     try:
         from vllm_mlx.dashboard.engines.registry import ENGINES, _registry_lock
         with _registry_lock:
             engines_snapshot = dict(ENGINES)
         for engine in engines_snapshot.values():
-            if engine.install_method != "pip":
-                continue
             try:
                 if not engine.is_installed():
                     continue
             except Exception:
                 continue
-            pkg = engine.get_package_name()
-            if pkg:
-                clauses.append(f"{pip_bin} install --upgrade {pkg}")
+
+            if engine.install_method == "pip":
+                pkg = engine.get_package_name()
+                if pkg:
+                    clauses.append(f"{pip_bin} install --upgrade {pkg}")
+
+            try:
+                cmd = engine.upgrade_command()
+            except Exception:
+                cmd = None
+            if cmd:
+                clauses.append(" ".join(cmd))
     except Exception:
-        logger.warning("Failed to discover pip engine upgrades", exc_info=True)
+        logger.warning("Failed to discover engine upgrades", exc_info=True)
     return clauses
 
 
@@ -520,8 +532,8 @@ def upgrade_command() -> list[str]:
     if not _Path(pip).exists():
         pip = shutil.which("pip3") or "pip3"
 
-    # Collect pip upgrade clauses for installed pip-managed engines
-    engine_clauses = _pip_engine_upgrades(pip)
+    # Collect upgrade clauses for installed engines
+    engine_clauses = _engine_upgrade_clauses(pip)
     engine_upgrade = " && ".join(engine_clauses)
 
     if method == "homebrew":

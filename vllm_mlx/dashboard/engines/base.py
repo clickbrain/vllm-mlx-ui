@@ -229,6 +229,14 @@ class BaseEngine(ABC):
         """
         return [sys.executable, "-m", "pip", "install", "--upgrade", self.get_package_name()]
 
+    def upgrade_command(self) -> list[str] | None:
+        """Return a shell command to upgrade this engine, or None if not supported.
+
+        Override in subclasses that support automated upgrades via system
+        package managers (e.g. Homebrew).  Only called for installed engines.
+        """
+        return None
+
     def _which(self, cmd: str) -> str | None:
         """Locate *cmd* on PATH; returns None if not found."""
         return shutil.which(cmd)
