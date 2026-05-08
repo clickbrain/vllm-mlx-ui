@@ -481,24 +481,15 @@ def bust_cache() -> None:
         _cache = {}
 
 
-def _engine_upgrade_clauses(pip_bin: str) -> list[str]:
-    """Return shell-command clauses to upgrade installed engines (best-effort).
+def engine_upgrade_commands(pip_bin: str) -> list[list[str]]:
+    """Return argv lists to upgrade each installed engine (best-effort).
 
-    Each clause has ``|| true`` appended so a single engine failure never
-    blocks the rest of the upgrade or causes the main upgrade to abort.
-
-    Handles:
-    - pip engines (install_method == "pip") — pip install --upgrade <pkg>
-    - Any engine with ``upgrade_command()`` returning a non-``None`` list
-
-    .. note::
-
-       Each non-pip command is shell-quoted via :func:`shlex.quote` before
-       being joined, so argument boundaries survive embedding in ``sh -c``.
+    Each command is an argv list suitable for ``subprocess.run()`` — no shell
+    quoting, no ``&&`` chains, no ambiguity.  Pip engines are upgraded via
+    ``pip install --upgrade <pkg>``; other engines use their
+    ``upgrade_command()`` method directly.
     """
-    import shlex
-
-    clauses: list[str] = []
+    cmds: list[list[str]] = []
     try:
         from vllm_mlx.dashboard.engines.registry import ENGINES, _registry_lock
         with _registry_lock:
@@ -513,17 +504,29 @@ def _engine_upgrade_clauses(pip_bin: str) -> list[str]:
             if engine.install_method == "pip":
                 pkg = engine.get_package_name()
                 if pkg:
-                    clauses.append(f"{pip_bin} install --upgrade {pkg} || true")
+                    cmds.append([pip_bin, "install", "--upgrade", pkg])
 
             try:
                 cmd = engine.upgrade_command()
             except Exception:
                 cmd = None
             if cmd:
-                clauses.append(" ".join(shlex.quote(a) for a in cmd) + " || true")
+                cmds.append(cmd)
     except Exception:
         logger.warning("Failed to discover engine upgrades", exc_info=True)
-    return clauses
+    return cmds
+
+
+def _resolve_pip_bin(python_exe: str) -> str:
+    """Resolve the pip binary for the same Python environment."""
+    from pathlib import Path as _Path
+    venv_bin = _Path(python_exe).parent
+    pip = str(venv_bin / "pip")
+    if not _Path(pip).exists():
+        pip = str(venv_bin / "pip3")
+    if not _Path(pip).exists():
+        pip = shutil.which("pip3") or "pip3"
+    return pip
 
 
 def upgrade_command() -> list[str]:
@@ -535,16 +538,7 @@ def upgrade_command() -> list[str]:
 
     # Resolve pip from the *running* Python — guarantees we upgrade packages
     # inside the correct venv (brew cellar or dev) rather than a system pip.
-    venv_bin = _Path(sys.executable).parent
-    pip = str(venv_bin / "pip")
-    if not _Path(pip).exists():
-        pip = str(venv_bin / "pip3")
-    if not _Path(pip).exists():
-        pip = shutil.which("pip3") or "pip3"
-
-    # Collect upgrade clauses for installed engines
-    engine_clauses = _engine_upgrade_clauses(pip)
-    engine_upgrade = " && ".join(engine_clauses)
+    pip = _resolve_pip_bin(sys.executable)
 
     if method == "homebrew":
         # Force-update the tap's git repo so brew sees the new formula immediately.
@@ -577,15 +571,10 @@ def upgrade_command() -> list[str]:
             f"{git_pull} && brew upgrade vllm-mlx-ui"
             f" && {pip} install --upgrade vllm-mlx mlx-lm huggingface-hub vllm"
         )
-        if engine_upgrade:
-            base += f" && {engine_upgrade}"
         return ["sh", "-c", base]
     # dev / conda / pip install path — upgrade deps unconditionally first.
     # The UI itself is not on PyPI; users running from source pull via git.
-    base = f"{pip} install --upgrade vllm-mlx mlx-lm huggingface-hub vllm"
-    if engine_upgrade:
-        base += f" && {engine_upgrade}"
-    return ["sh", "-c", base]
+    return ["sh", "-c", f"{pip} install --upgrade vllm-mlx mlx-lm huggingface-hub vllm"]
 
 
 def relaunch() -> None:

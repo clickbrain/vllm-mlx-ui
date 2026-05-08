@@ -1866,16 +1866,24 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
     import subprocess as _sp
     from vllm_mlx.dashboard import update_checker as _uc
     cmd = _uc.upgrade_command()
+    engine_cmds = _uc.engine_upgrade_commands(_uc._resolve_pip_bin(_sys.executable))
 
     def _do_upgrade():
         import time as _t
         _uc.upgrade_status = "upgrading"
         try:
+            # Main upgrade (brew + pip) — simple sh -c, no engine clauses
             _sp.run(cmd, timeout=300, check=False)
         except Exception as e:
-            logger.warning("Operation failed: %s", e, exc_info=True)
+            logger.warning("Main upgrade failed: %s", e, exc_info=True)
             _uc.upgrade_status = "error:upgrade command failed"
             return
+        # Engine upgrades — run as argv lists, no shell quoting issues
+        for ec in engine_cmds:
+            try:
+                _sp.run(ec, timeout=300, check=False)
+            except Exception:
+                logger.warning("Engine upgrade failed: %s", ec, exc_info=True)
         # Bust cache so the next /updates check reflects newly installed versions
         _uc.bust_cache()
         _uc.upgrade_status = "restarting"
