@@ -63,17 +63,11 @@ class OllamaEngine(BaseEngine):
         return [ollama_bin, "serve"]
 
     def _which(self, cmd: str) -> str | None:
-        found = super()._which(cmd)
-        if found is not None:
-            return found
         if cmd == "ollama":
-            for p in [
-                "/usr/local/bin/ollama",
-                os.path.expanduser("~/.local/bin/ollama"),
-            ]:
-                if os.path.isfile(p) and os.access(p, os.X_OK):
-                    return p
-        return None
+            upgraded = os.path.expanduser("~/.local/bin/ollama")
+            if os.path.isfile(upgraded) and os.access(upgraded, os.X_OK):
+                return upgraded
+        return super()._which(cmd)
 
     def is_installed(self) -> bool:
         return self._which("ollama") is not None
