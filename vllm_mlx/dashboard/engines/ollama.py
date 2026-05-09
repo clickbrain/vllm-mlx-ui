@@ -163,7 +163,9 @@ if not os.path.isfile(binary):
 
 target = shutil.which("ollama") or "/usr/local/bin/ollama"
 target_dir = os.path.dirname(target)
-if not os.path.isdir(target_dir):
+
+# If target dir is not writable, fall back to user-local bin
+if not os.access(target_dir, os.W_OK):
     target = os.path.expanduser("~/.local/bin/ollama")
     os.makedirs(os.path.dirname(target), exist_ok=True)
 
@@ -171,8 +173,8 @@ try:
     shutil.copy2(binary, target)
     os.chmod(target, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
 except PermissionError:
-    subprocess.run(["sudo", "cp", binary, target], timeout=30)
-    subprocess.run(["sudo", "chmod", "755", target], timeout=10)
+    # If the fallback also fails, give up — sudo won't work in a bg process
+    raise SystemExit(0)
 
 shutil.rmtree(tmp_dir, ignore_errors=True)
 """

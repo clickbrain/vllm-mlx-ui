@@ -304,4 +304,16 @@ Three failed attempts before the correct fix:
 
 **Releases:** v0.5.11–v0.5.14
 
+### 2026-05-09 — v0.5.15: Ollama asset URL, engine save-and-restart, partial config fix
+
+**Ollama upgrade** — The CLI binary is now distributed as `ollama-darwin.tgz` instead of `.zip`.  Rewrote the upgrade script to query the GitHub releases API for the dynamic asset URL (match prefix `ollama-darwin`) instead of hardcoding the filename.  Future asset renames or format changes will not break the upgrade.
+
+**Engine selection not persisting** — Two bugs:
+1. `SettingsView.vue:92` — `saveEngineAndRestart()` had an early return `if (selectedEngine.value === serverStore.engineId) return`.  When polling updated the store before the user clicked Save & Restart, the function silently returned without restarting.  **Fix:** Always attempt restart when explicitly clicked.
+2. `mgmt_server.py:236` — `set_config()` saved partial dicts (`{"engine_id": "rapid-mlx"}`) directly, overwriting the entire config file and losing all other settings.  **Fix:** Merge incoming data with the existing config before saving.
+
+**Serve page engine badge** — Always shows `Engine: <id>` when the server is running (previously hidden for the default engine).
+
+**Release:** v0.5.15
+
 <!-- Add new entries here when agents make changes -->
