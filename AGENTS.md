@@ -316,4 +316,28 @@ Three failed attempts before the correct fix:
 
 **Release:** v0.5.15
 
+### 2026-05-09 — v0.5.16: Remove hanging sudo, ~/.local/bin fallback, verified end-to-end
+
+**Ollama upgrade** — Two more bugs fixed:
+1. `sudo cp` + `sudo chmod` removed from upgrade script — these hung for 30s waiting for a password in the non-interactive background subprocess, causing a silent timeout failure
+2. When target dir (`/usr/local/bin/`) is not writable, falls back to `~/.local/bin/ollama` instead of failing
+
+**Verified end-to-end:** Ran the actual subprocess command — downloaded 134MB, extracted 79MB binary, installed to `~/.local/bin/ollama`, exit code 0.
+
+**Release:** v0.5.16
+
+### 2026-05-09 — v0.5.17: Auto-add ~/.local/bin to PATH when falling back
+
+**PATH setup** — When the upgrade script falls back to `~/.local/bin/ollama`, it now:
+1. Detects the user's shell from `$SHELL` (zsh/bash/fish)
+2. Finds the appropriate rc file (`.zshenv`/`.zshrc`, `.bash_profile`/`.bashrc`, `config.fish`)
+3. Checks if `$HOME/.local/bin` is already configured in the rc file
+4. If not, appends `if [ -d "$HOME/.local/bin" ]; then export PATH="$HOME/.local/bin:$PATH"; fi`
+5. Prints a message telling the user to restart their shell
+
+This ensures `which ollama` resolves to the new version even for desktop app users.
+
+**Files changed:**
+- `vllm_mlx/dashboard/engines/ollama.py:179-211` — PATH setup logic after install
+
 <!-- Add new entries here when agents make changes -->

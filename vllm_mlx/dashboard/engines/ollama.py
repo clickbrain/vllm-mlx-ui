@@ -176,6 +176,40 @@ except PermissionError:
     # If the fallback also fails, give up — sudo won't work in a bg process
     raise SystemExit(0)
 
+# Ensure ~/.local/bin is in PATH when falling back to it
+if target.startswith(os.path.expanduser("~/.local/bin/ollama")):
+    _bin = os.path.dirname(target)
+    if _bin not in os.environ.get("PATH", "").split(":"):
+        _shell = os.environ.get("SHELL", "")
+        _home = os.path.expanduser("~")
+        _rc_files = []
+        if "zsh" in _shell:
+            _rc_files = [os.path.join(_home, ".zshenv"), os.path.join(_home, ".zshrc")]
+        elif "bash" in _shell:
+            _rc_files = [os.path.join(_home, ".bash_profile"), os.path.join(_home, ".bashrc")]
+        elif "fish" in _shell:
+            _rc_files = [os.path.join(_home, ".config", "fish", "config.fish")]
+        for _rc in _rc_files:
+            if os.path.isfile(_rc):
+                with open(_rc) as _f:
+                    _existing = _f.read()
+                if "$HOME/.local/bin" not in _existing and "~/.local/bin" not in _existing:
+                    with open(_rc, "a") as _f:
+                        _f.write("\\n# Added by vllm-mlx-ui upgrade")
+                        _f.write('\\nif [ -d "$HOME/.local/bin" ]; then')
+                        _f.write('\\n    export PATH="$HOME/.local/bin:$PATH"')
+                        _f.write("\\nfi\\n")
+                    print(f'Added $HOME/.local/bin to PATH in {{_rc}} — restart shell or run: export PATH="$HOME/.local/bin:$PATH"')
+                else:
+                    print(f'Ollama installed to {{target}} but $HOME/.local/bin is not in PATH. Restart your shell or run: export PATH="$HOME/.local/bin:$PATH"')
+                break
+        else:
+            print(f"Ollama installed to {{target}} but no shell rc file found. Add ~/.local/bin to your PATH manually.")
+    else:
+        print(f"Ollama upgraded to {{target}}")
+else:
+    print(f"Ollama upgraded to {{target}}")
+
 shutil.rmtree(tmp_dir, ignore_errors=True)
 """
         encoded = _base64.b64encode(script.encode()).decode()
