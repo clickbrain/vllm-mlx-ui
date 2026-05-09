@@ -1873,26 +1873,43 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
         import time as _t
         _uc.upgrade_status = "upgrading"
         try:
-            # Main upgrade (brew + pip) — simple sh -c, no engine clauses
-            _sp.run(cmd, timeout=300, check=False)
+            main_result = _sp.run(cmd, timeout=300, check=False)
+            if main_result.returncode != 0:
+                logger.warning("Main upgrade exited with code %d", main_result.returncode)
         except Exception as e:
             logger.warning("Main upgrade failed: %s", e, exc_info=True)
             _uc.upgrade_status = "error:upgrade command failed"
             return
         # Engine upgrades — run as argv lists, no shell quoting issues
+        engine_errors = 0
         for ec in engine_cmds:
             try:
-                _sp.run(ec, timeout=300, check=False)
+                result = _sp.run(ec, timeout=300, check=False)
+                if result.returncode != 0:
+                    engine_errors += 1
+                    logger.warning("Engine upgrade exited with code %d: %s", result.returncode, ec)
             except Exception:
+                engine_errors += 1
                 logger.warning("Engine upgrade failed: %s", ec, exc_info=True)
+        # Stop inference server so new engine binary takes effect on restart
+        try:
+            from vllm_mlx.dashboard.server_manager import get_server_status, stop_server
+            if get_server_status().get("running"):
+                logger.info("Stopping inference server after engine upgrades...")
+                stop_server()
+        except Exception:
+            logger.warning("Failed to stop inference server after upgrade", exc_info=True)
         # Bust cache so the next /updates check reflects newly installed versions
         _uc.bust_cache()
         _uc.upgrade_status = "restarting"
         _t.sleep(2)
         try:
-            from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG, STATE_DIR as _sd
+            from vllm_mlx.dashboard.server_manager import (
+                RELAUNCH_FLAG, STATE_DIR as _sd, AUTO_START_FLAG,
+            )
             _sd.mkdir(parents=True, exist_ok=True)
             RELAUNCH_FLAG.write_text("1")
+            AUTO_START_FLAG.write_text("1")
         except Exception:
             logger.warning("Operation failed", exc_info=True)
         _os_mod.kill(_os_mod.getpid(), _signal_mod.SIGTERM)

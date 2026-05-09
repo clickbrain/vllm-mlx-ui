@@ -199,8 +199,12 @@ def main() -> None:
             from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG
             if RELAUNCH_FLAG.exists():
                 RELAUNCH_FLAG.unlink(missing_ok=True)
+                binary_parts = _find_binary()
+                cmd_str = " ".join(
+                    f'"{p}"' if " " in p else p for p in binary_parts
+                )
                 subprocess.Popen(
-                    _find_binary(),
+                    ["sh", "-c", f"sleep 2 && {cmd_str}"],
                     start_new_session=True,
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,

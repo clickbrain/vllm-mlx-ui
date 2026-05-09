@@ -21,6 +21,7 @@ Port handling:
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -61,13 +62,27 @@ class OllamaEngine(BaseEngine):
         ollama_bin = self._which("ollama") or "ollama"
         return [ollama_bin, "serve"]
 
+    def _which(self, cmd: str) -> str | None:
+        found = super()._which(cmd)
+        if found is not None:
+            return found
+        if cmd == "ollama":
+            for p in [
+                "/usr/local/bin/ollama",
+                os.path.expanduser("~/.local/bin/ollama"),
+            ]:
+                if os.path.isfile(p) and os.access(p, os.X_OK):
+                    return p
+        return None
+
     def is_installed(self) -> bool:
         return self._which("ollama") is not None
 
     def get_version(self) -> str | None:
+        ollama_bin = self._which("ollama") or "ollama"
         try:
             result = subprocess.run(
-                ["ollama", "--version"],
+                [ollama_bin, "--version"],
                 capture_output=True, text=True, timeout=5,
             )
             # "ollama version 0.3.6" or "ollama version is 0.7.0"
@@ -128,20 +143,25 @@ if not dl_url:
         r = subprocess.run(["brew", "list", "ollama"], capture_output=True, timeout=10)
         if r.returncode == 0:
             subprocess.run(["brew", "upgrade", "ollama"], timeout=120)
-    raise SystemExit(0)
+            raise SystemExit(0)
+    raise SystemExit(1)
 
 # Download
 tmp_file = tempfile.mktemp(suffix=os.path.splitext(dl_url)[1] or ".tmp")
 try:
     urllib.request.urlretrieve(dl_url, tmp_file)
 except Exception:
-    os.unlink(tmp_file)
+    try:
+        os.unlink(tmp_file)
+    except OSError:
+        pass
     # Final fallback: try brew
     if shutil.which("brew"):
         r = subprocess.run(["brew", "list", "ollama"], capture_output=True, timeout=10)
         if r.returncode == 0:
             subprocess.run(["brew", "upgrade", "ollama"], timeout=120)
-    raise SystemExit(0)
+            raise SystemExit(0)
+    raise SystemExit(1)
 
 # Extract to temp dir
 tmp_dir = tempfile.mktemp(suffix=".ollama")
@@ -159,9 +179,13 @@ finally:
 binary = os.path.join(tmp_dir, "ollama")
 if not os.path.isfile(binary):
     shutil.rmtree(tmp_dir, ignore_errors=True)
-    raise SystemExit(0)
+    raise SystemExit(1)
 
-target = shutil.which("ollama") or "/usr/local/bin/ollama"
+target = shutil.which("ollama") or (
+    "/usr/local/bin/ollama"
+    if os.path.isfile("/usr/local/bin/ollama")
+    else os.path.expanduser("~/.local/bin/ollama")
+)
 target_dir = os.path.dirname(target)
 
 # If target dir is not writable, fall back to user-local bin
@@ -173,8 +197,7 @@ try:
     shutil.copy2(binary, target)
     os.chmod(target, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
 except PermissionError:
-    # If the fallback also fails, give up — sudo won't work in a bg process
-    raise SystemExit(0)
+    raise SystemExit(1)
 
 # Ensure ~/.local/bin is in PATH when falling back to it
 if target.startswith(os.path.expanduser("~/.local/bin/ollama")):
