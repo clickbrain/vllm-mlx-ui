@@ -241,16 +241,17 @@ def set_config(data: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
     before saving to prevent the server from trying to proxy config reads back
     to itself (infinite loop).
 
+    Merges incoming data with the existing config so that partial updates
+    (e.g. ``{"engine_id": "rapid-mlx"}``) don't overwrite other saved settings.
+
     Args:
-        data: Config dict submitted by the client.
+        data: Config dict submitted by the client (may be partial).
     """
-    # A misconfigured or stale client might submit the full config including
-    # remote_mgmt_url. If the server saved that, it would try to proxy every
-    # subsequent load_config() call back to itself — infinite loop.
-    # server_manager._LOCAL_ONLY_KEYS defines the exact keys to strip.
-    from .server_manager import _LOCAL_ONLY_KEYS
+    from .server_manager import _LOCAL_ONLY_KEYS, load_config
     filtered = {k: v for k, v in data.items() if k not in _LOCAL_ONLY_KEYS}
-    sm.save_config(filtered)
+    existing = load_config()
+    merged = {**existing, **filtered}
+    sm.save_config(merged)
     return {"ok": True}
 
 

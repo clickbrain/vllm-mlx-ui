@@ -89,7 +89,7 @@ async function selectEngine(id: string) {
 }
 
 async function saveEngineAndRestart() {
-  if (!selectedEngine.value || selectedEngine.value === serverStore.engineId) return
+  if (!selectedEngine.value) return
   try {
     await api.post('/config', { engine_id: selectedEngine.value })
     await serverStore.restart()

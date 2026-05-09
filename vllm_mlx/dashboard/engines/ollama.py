@@ -92,6 +92,11 @@ class OllamaEngine(BaseEngine):
     def upgrade_command(self) -> list[str] | None:
         """Return a Python command to download and install the latest Ollama release.
 
+        Queries the GitHub releases API to find the macOS asset by prefix
+        (``ollama-darwin``), so renames between ``.zip``, ``.tgz``, etc.
+        never break the upgrade.  Falls back to ``brew upgrade ollama`` if
+        the API call or download fails.
+
         Base64-encodes the script so it's a single shell-safe argument
         (multi-line scripts break inside ``sh -c`` strings).
         """
@@ -99,28 +104,61 @@ class OllamaEngine(BaseEngine):
         version = self.latest_version()
         if not version:
             return None
-        url = f"https://github.com/ollama/ollama/releases/download/v{version}/ollama-darwin.zip"
         script = f"""
-import os, shutil, stat, subprocess, tempfile, urllib.request, zipfile
+import json, os, shutil, stat, subprocess, tarfile, tempfile, urllib.request, zipfile
 
-url = "{url}"
-tmp_zip = tempfile.mktemp(suffix='.ollama.zip')
+# Query GitHub releases API for the macOS CLI asset
+api_url = "https://api.github.com/repos/ollama/ollama/releases/tags/v{version}"
+dl_url = None
 try:
-    urllib.request.urlretrieve(url, tmp_zip)
+    with urllib.request.urlopen(api_url, timeout=10) as r:
+        data = json.loads(r.read().decode())
+    for asset in data.get("assets", []):
+        name = asset["name"]
+        # Match "ollama-darwin" (CLI) but NOT "Ollama-darwin" (desktop app)
+        if name.startswith("ollama-darwin") and not name.startswith("Ollama"):
+            dl_url = asset["browser_download_url"]
+            break
 except Exception:
-    os.unlink(tmp_zip)
-    if shutil.which('brew'):
+    pass
+
+if not dl_url:
+    # Fallback: try brew
+    if shutil.which("brew"):
         r = subprocess.run(["brew", "list", "ollama"], capture_output=True, timeout=10)
         if r.returncode == 0:
             subprocess.run(["brew", "upgrade", "ollama"], timeout=120)
     raise SystemExit(0)
 
-tmp_dir = tempfile.mktemp(suffix='.ollama')
-with zipfile.ZipFile(tmp_zip, 'r') as zf:
-    zf.extractall(tmp_dir)
+# Download
+tmp_file = tempfile.mktemp(suffix=os.path.splitext(dl_url)[1] or ".tmp")
+try:
+    urllib.request.urlretrieve(dl_url, tmp_file)
+except Exception:
+    os.unlink(tmp_file)
+    # Final fallback: try brew
+    if shutil.which("brew"):
+        r = subprocess.run(["brew", "list", "ollama"], capture_output=True, timeout=10)
+        if r.returncode == 0:
+            subprocess.run(["brew", "upgrade", "ollama"], timeout=120)
+    raise SystemExit(0)
 
+# Extract to temp dir
+tmp_dir = tempfile.mktemp(suffix=".ollama")
+try:
+    if dl_url.endswith(".zip"):
+        with zipfile.ZipFile(tmp_file, "r") as zf:
+            zf.extractall(tmp_dir)
+    else:
+        with tarfile.open(tmp_file, "r:*") as tf:
+            tf.extractall(tmp_dir)
+finally:
+    os.unlink(tmp_file)
+
+# Find the ollama binary
 binary = os.path.join(tmp_dir, "ollama")
 if not os.path.isfile(binary):
+    shutil.rmtree(tmp_dir, ignore_errors=True)
     raise SystemExit(0)
 
 target = shutil.which("ollama") or "/usr/local/bin/ollama"
@@ -136,7 +174,6 @@ except PermissionError:
     subprocess.run(["sudo", "cp", binary, target], timeout=30)
     subprocess.run(["sudo", "chmod", "755", target], timeout=10)
 
-os.unlink(tmp_zip)
 shutil.rmtree(tmp_dir, ignore_errors=True)
 """
         encoded = _base64.b64encode(script.encode()).decode()

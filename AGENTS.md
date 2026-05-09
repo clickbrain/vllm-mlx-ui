@@ -282,3 +282,26 @@ The following Phase 4 tasks are in upstream `vllm_mlx/` code (outside `dashboard
 - **#26** `ssd_cache.py:503-540` — Replace O(N log N) eviction with priority queue
 - **#27** `server.py:934-946` — Memoize model path resolution
 - **#28** `ssd_cache.py` / `memory_cache.py` — Memory-map large token arrays
+
+### 2026-05-01 → 2026-05-08 — Engine Upgrade Fixes (v0.5.11–v0.5.14)
+
+**Summary:** Engine upgrade commands were embedded inline in the `sh -c` string alongside `brew upgrade` and `pip install`. Because the Python script contained newlines and semicolons that weren't shell-quoted, the shell re-parsed them as separate commands — `python3 -c import` instead of `python3 -c "import base64; exec(...)"` — which broke the `&&` chain and silently prevented ALL engine upgrades AND could interfere with the main chain.
+
+Three failed attempts before the correct fix:
+1. **Base64-encode** the script (`ollama.py`) — didn't fix shell re-parsing of the joined argv
+2. **`shlex.quote()`** each arg (`update_checker.py`) — correct in isolation but still embedded in `&&` chain
+3. **Correct fix:** Remove engine clauses from `upgrade_command()` entirely. Run them as separate `subprocess.run(argv_list)` calls in `_do_upgrade()` — no shell, no `&&`, no ambiguity.
+
+**Critical rule — NEVER DO THIS:**
+- Do NOT embed Python scripts (or any argv with spaces/semicolons) inside a `sh -c` string via `" ".join(argv)`. The shell re-parses spaces and metacharacters, destroying argument boundaries.
+- Do NOT mix engine upgrades into the same shell pipeline as `brew upgrade` / `pip install`. If an engine command breaks (even with `|| true`), it can silently break the `&&` chain.
+- **Always run engine upgrades as separate `subprocess.run(argv_list)` calls** — one call per engine, `check=False`, iterated in the `_do_upgrade()` thread function.
+
+**Files changed:**
+- `vllm_mlx/dashboard/update_checker.py` — Replaced `_engine_upgrade_clauses()` (returned shell-quoted strings) with `engine_upgrade_commands()` (returns `list[list[str]]` argv lists). Added `_resolve_pip_bin()` helper. Removed engine clauses from `upgrade_command()`.
+- `vllm_mlx/dashboard/mgmt_server.py` — `_do_upgrade()` now runs `subprocess.run(cmd)` for main upgrade, then iterates `engine_cmds` with individual `subprocess.run(ec)` calls.
+- `vllm_mlx/dashboard/engines/ollama.py` — `upgrade_command()` still base64-encodes the script (harmless, but not executed through shell anymore).
+
+**Releases:** v0.5.11–v0.5.14
+
+<!-- Add new entries here when agents make changes -->

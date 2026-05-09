@@ -269,7 +269,7 @@ async function doClearCache(type: string) {
       <div class="section-label">
         Live Metrics
         <span v-if="serverStore.metricsError && serverStore.isRunning" class="metrics-stale-badge">metrics unavailable</span>
-        <span v-if="serverStore.isRunning && serverStore.engineId !== 'vllm-mlx'" class="engine-running-badge">{{ serverStore.engineId }}</span>
+        <span v-if="serverStore.isRunning" class="engine-running-badge">Engine: {{ serverStore.engineId }}</span>
         <button class="view-full-link" @click="router.push('/benchmarks')">View full metrics →</button>
       </div>
       <div class="metrics-grid">
