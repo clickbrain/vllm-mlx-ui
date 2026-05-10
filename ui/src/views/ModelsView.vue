@@ -58,6 +58,17 @@ const filteredModels = computed(() => {
 const searchInput = ref('')
 const hideDownloaded = ref(true)
 const showFilters = ref(false)
+const filtersPending = ref(false)
+
+// Client-side filters pending signal
+function markFiltersDirty() {
+  filtersPending.value = true
+}
+
+async function applyFilters() {
+  await modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value === 'last_modified' ? 'last_modified' : 'downloads', false, 100)
+  filtersPending.value = false
+}
 
 // Column sort state: column key + direction
 // server-sort: downloads, likes, last_modified — re-fetches from HF
@@ -122,6 +133,7 @@ function toggleFitLevel(level: string) {
     current.add(level)
   }
   filterFitLevels.value = new Set(current)
+  markFiltersDirty()
 }
 
 function hasFitLevel(level: string): boolean {
@@ -168,9 +180,12 @@ const displayedSearchResults = computed(() => {
   return list
 })
 
+const preFilterCount = computed(() => modelsStore.searchResults.filter(r => r.is_mlx).length)
+
 async function doSearch() {
   sortCol.value = 'last_modified'
   sortDir.value = 'desc'
+  filtersPending.value = false
   await modelsStore.searchHF(searchInput.value.trim(), true, 0, 'last_modified')
 }
 
@@ -444,7 +459,7 @@ watch(activeTab, (tab) => {
           </button>
         </div>
         <label class="hide-downloaded-toggle">
-          <input type="checkbox" v-model="hideDownloaded" />
+          <input type="checkbox" v-model="hideDownloaded" @change="markFiltersDirty" />
           <span>Hide downloaded</span>
         </label>
       </div>
@@ -470,27 +485,37 @@ watch(activeTab, (tab) => {
             <span class="chip-dot too-tight">●</span> Too large
           </label>
           <label class="filter-chip-check">
-            <input type="checkbox" v-model="filterFitOnly" />
+            <input type="checkbox" v-model="filterFitOnly" @change="markFiltersDirty" />
             <span>Only those that fit</span>
           </label>
         </div>
         <div class="filter-row">
           <span class="filter-label">Size:</span>
           <div class="range-inputs">
-            <input type="number" v-model.number="filterSizeMin" min="0" max="200" class="range-input" placeholder="min" />
+            <input type="number" v-model.number="filterSizeMin" min="0" max="200" class="range-input" placeholder="min" @change="markFiltersDirty" />
             <span class="range-dash">–</span>
-            <input type="number" v-model.number="filterSizeMax" min="0" max="200" class="range-input" placeholder="max" />
+            <input type="number" v-model.number="filterSizeMax" min="0" max="200" class="range-input" placeholder="max" @change="markFiltersDirty" />
             <span class="range-unit">GB</span>
           </div>
         </div>
         <div class="filter-row">
           <span class="filter-label">Downloads:</span>
           <div class="range-inputs">
-            <input type="number" v-model.number="filterDownloadsMin" min="0" max="1000000" class="range-input" placeholder="min" />
+            <input type="number" v-model.number="filterDownloadsMin" min="0" max="1000000" class="range-input" placeholder="min" @change="markFiltersDirty" />
             <span class="range-dash">–</span>
-            <input type="number" v-model.number="filterDownloadsMax" min="0" max="1000000" class="range-input" placeholder="max" />
+            <input type="number" v-model.number="filterDownloadsMax" min="0" max="1000000" class="range-input" placeholder="max" @change="markFiltersDirty" />
           </div>
         </div>
+        <div class="filter-apply-row">
+          <AppButton variant="primary" size="sm" :disabled="!filtersPending" :loading="modelsStore.searching" @click="applyFilters">
+            Apply Filters
+          </AppButton>
+        </div>
+      </div>
+
+      <!-- Filter summary -->
+      <div v-if="preFilterCount > 0 && preFilterCount !== displayedSearchResults.length" class="filter-summary">
+        Showing {{ displayedSearchResults.length }} of {{ preFilterCount }} results matching filters
       </div>
 
       <!-- Error -->
@@ -952,6 +977,19 @@ watch(activeTab, (tab) => {
 }
 .range-dash { color: var(--tx-muted); font-size: 13px; }
 .range-unit { font-size: 12px; color: var(--tx-tertiary); }
+
+.filter-apply-row {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--bd-subtle);
+}
+.filter-summary {
+  font-size: 12px;
+  color: var(--tx-tertiary);
+  text-align: center;
+  padding: var(--space-1) 0;
+}
 
 /* Results list */
 .find-results {
