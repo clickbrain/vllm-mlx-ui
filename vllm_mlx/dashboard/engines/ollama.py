@@ -74,6 +74,15 @@ class OllamaEngine(BaseEngine):
 
     def get_version(self) -> str | None:
         ollama_bin = self._which("ollama") or "ollama"
+        # Check sidecar version file first (written by upgrade script)
+        ver_file = os.path.join(os.path.dirname(ollama_bin), ".ollama.version")
+        try:
+            with open(ver_file) as f:
+                v = f.read().strip()
+                if v:
+                    return v
+        except Exception:
+            pass
         try:
             result = subprocess.run(
                 [ollama_bin, "--version"],
@@ -115,6 +124,8 @@ class OllamaEngine(BaseEngine):
             return None
         script = f"""
 import json, os, shutil, stat, subprocess, tarfile, tempfile, urllib.request, zipfile
+
+_installed_version = "{version}"
 
 # Query GitHub releases API for the macOS CLI asset
 api_url = "https://api.github.com/repos/ollama/ollama/releases/tags/v{version}"
@@ -192,6 +203,10 @@ try:
     os.chmod(target, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
 except PermissionError:
     raise SystemExit(1)
+
+# Write sidecar version file so get_version() reflects what we installed
+with open(os.path.join(os.path.dirname(target), ".ollama.version"), "w") as _vf:
+    _vf.write(_installed_version + "\\n")
 
 # Ensure ~/.local/bin is in PATH when falling back to it
 if target.startswith(os.path.expanduser("~/.local/bin/ollama")):
