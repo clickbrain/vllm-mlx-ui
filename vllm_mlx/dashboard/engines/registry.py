@@ -25,12 +25,13 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
-from .vllm_mlx import VllmMlxEngine
-from .rapid_mlx import RapidMlxEngine
-from .ollama import OllamaEngine
-from .lmstudio import LmStudioEngine
+from .ds4_m5 import Ds4M5Engine
 from .llama_cpp import LlamaCppEngine
+from .lmstudio import LmStudioEngine
+from .ollama import OllamaEngine
+from .rapid_mlx import RapidMlxEngine
 from .vllm_metal import VllmMetalEngine
+from .vllm_mlx import VllmMlxEngine
 
 if TYPE_CHECKING:
     from .base import BaseEngine
@@ -38,7 +39,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ── Built-in engines (always present) ─────────────────────────────────────────
-_BUILTINS: list["BaseEngine"] = [
+_BUILTINS: list[BaseEngine] = [
+    Ds4M5Engine(),
     VllmMlxEngine(),
     RapidMlxEngine(),
     OllamaEngine(),
@@ -51,16 +53,17 @@ _BUILTINS: list["BaseEngine"] = [
 _registry_lock = threading.RLock()
 
 # Ordered dict: engine_id → engine instance.  Readers must acquire _registry_lock.
-ENGINES: dict[str, "BaseEngine"] = {e.id: e for e in _BUILTINS}
+ENGINES: dict[str, BaseEngine] = {e.id: e for e in _BUILTINS}
 
 
 # ── Discovery helpers ─────────────────────────────────────────────────────────
 
-def _discover_entry_points() -> list["BaseEngine"]:
+def _discover_entry_points() -> list[BaseEngine]:
     """Load engines registered via importlib.metadata entry_points."""
     discovered: list[BaseEngine] = []
     try:
         from importlib.metadata import entry_points
+
         from .base import BaseEngine as _BaseEngine
         eps = entry_points(group="vllm_mlx_ui.engines")
         for ep in eps:
@@ -79,7 +82,7 @@ def _discover_entry_points() -> list["BaseEngine"]:
     return discovered
 
 
-def _discover_manifests() -> list["BaseEngine"]:
+def _discover_manifests() -> list[BaseEngine]:
     """Load engines from JSON manifests in ~/.config/vllm-mlx-ui/engines/."""
     try:
         from .manifest import discover_manifests
@@ -89,12 +92,12 @@ def _discover_manifests() -> list["BaseEngine"]:
         return []
 
 
-def _build_registry() -> dict[str, "BaseEngine"]:
+def _build_registry() -> dict[str, BaseEngine]:
     """Build a fresh registry snapshot: builtins first, then discovered engines.
 
     Built-in IDs always win over discovered engines with the same ID.
     """
-    registry: dict[str, "BaseEngine"] = {}
+    registry: dict[str, BaseEngine] = {}
 
     # 1. Built-ins (highest priority)
     for engine in _BUILTINS:
@@ -138,7 +141,7 @@ def reload() -> None:
     logger.info("Engine registry reloaded — %d engine(s) registered", len(new_registry))
 
 
-def get_engine(engine_id: str) -> "BaseEngine":
+def get_engine(engine_id: str) -> BaseEngine:
     """Return the engine adapter for *engine_id*.
 
     Raises:

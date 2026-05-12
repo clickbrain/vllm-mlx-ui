@@ -340,4 +340,15 @@ This ensures `which ollama` resolves to the new version even for desktop app use
 **Files changed:**
 - `vllm_mlx/dashboard/engines/ollama.py:179-211` — PATH setup logic after install
 
+### 2026-05-10 — v0.5.21: Find tab filter apply button
+
+**Problem:** Client-side filters (size range, fit level, download range) only operated on the 25 pre-fetched HF results. Setting `sizeMin=7GB` silently reduced display to 0–1 results with no way to re-fetch.
+
+**Fix:** Added `filtersPending` ref that activates when any filter input changes. "Apply Filters" button appears in the filter panel. Clicking re-fetches from HF with `limit=100` (4× default page size), then applies client-side filters on the larger pool. "Showing X of Y results matching filters" summary provides visibility.
+
+**Files changed:**
+- `ui/src/views/ModelsView.vue` — `filtersPending` ref, `markFiltersDirty()`, `applyFilters()`, `preFilterCount` computed, Apply button + filter summary in template, CSS
+
+**Release:** v0.5.21
+
 <!-- Add new entries here when agents make changes -->
