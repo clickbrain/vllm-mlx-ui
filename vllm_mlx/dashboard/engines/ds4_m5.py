@@ -291,6 +291,16 @@ class Ds4M5Engine(BaseEngine):
             f"&& echo '=== Install complete! Engine + model ready. ==='",
         ]
 
+    def uninstall_command(self) -> list[str]:
+        """Remove the ds4-m5 engine directory (~/.local/share/ds4-m5)."""
+        d = _ds4_dir()
+        return [
+            "sh", "-c",
+            f"echo '=== Removing ds4-m5 from {shlex_quote(d)} ===' "
+            f"&& rm -rf {shlex_quote(d)} "
+            f"&& echo '=== Uninstall complete. ==='",
+        ]
+
     def config_schema(self) -> list[dict[str, Any]]:
         default_quant = _recommended_quant()
 

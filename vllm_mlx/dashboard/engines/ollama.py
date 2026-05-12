@@ -250,6 +250,26 @@ shutil.rmtree(tmp_dir, ignore_errors=True)
             f"import base64; exec(base64.b64decode({encoded!r}).decode())",
         ]
 
+    def uninstall_command(self) -> list[str]:
+        """Remove the Ollama binary, preferring the local install path."""
+        import shutil as _shutil
+        binary = _shutil.which("ollama")
+        fallback = os.path.expanduser("~/.local/bin/ollama")
+        if not binary and os.path.isfile(fallback):
+            binary = fallback
+        if not binary:
+            # Try brew as last resort
+            if _shutil.which("brew"):
+                return ["brew", "uninstall", "ollama"]
+            raise NotImplementedError(
+                "Ollama binary not found. Uninstall manually: https://ollama.com/download"
+            )
+
+        return [
+            sys.executable, "-c",
+            f"import os, stat; os.chmod({binary!r}, stat.S_IWUSR|stat.S_IXUSR|stat.S_IRUSR); os.remove({binary!r}); print('Removed {binary!r}')",
+        ]
+
     def resolve_launch_model(self, config: dict[str, Any]) -> str:
         """Return the Ollama model tag to pass to the API.
 

@@ -229,6 +229,22 @@ class BaseEngine(ABC):
         """
         return [sys.executable, "-m", "pip", "install", "--upgrade", self.get_package_name()]
 
+    def uninstall_command(self) -> list[str]:
+        """Return the argv list to uninstall this engine, or raise NotImplementedError.
+
+        Default runs ``pip uninstall -y`` for pip-installed engines.
+        Override in subclasses that need different removal logic
+        (e.g. ``rm -rf`` for git-cloned engines, ``brew uninstall``).
+        Raises ``NotImplementedError`` for bundled engines.
+        """
+        if self.install_method == "bundled":
+            raise NotImplementedError(f"Engine {self.id!r} is bundled and cannot be uninstalled.")
+        if self.install_method == "pip":
+            return [sys.executable, "-m", "pip", "uninstall", "-y", self.get_package_name()]
+        raise NotImplementedError(
+            f"Engine {self.id!r} has no automated uninstaller — remove manually."
+        )
+
     def upgrade_command(self) -> list[str] | None:
         """Return a shell command to upgrade this engine, or None if not supported.
 

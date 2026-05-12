@@ -68,6 +68,16 @@ class LlamaCppEngine(BaseEngine):
             "See https://github.com/ggerganov/llama.cpp/blob/master/docs/install.md"
         )
 
+    def uninstall_command(self) -> list[str]:
+        """Uninstall llama.cpp via Homebrew, or raise."""
+        import shutil
+        if shutil.which("brew"):
+            return ["brew", "uninstall", "llama.cpp"]
+        raise NotImplementedError(
+            "llama.cpp must be uninstalled manually on this platform. "
+            "See https://github.com/ggerganov/llama.cpp"
+        )
+
     # ── BaseEngine implementation ─────────────────────────────────────────────
 
     def build_command(self, config: dict[str, Any]) -> list[str]:

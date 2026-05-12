@@ -1797,6 +1797,42 @@ async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
     return StreamingResponse(_stream(), media_type="text/plain")
 
 
+@app.post("/engines/{engine_id}/uninstall")
+async def uninstall_engine(engine_id: str, _: None = Depends(_check_auth)):
+    """Uninstall the specified engine (SSE stream of output)."""
+    import asyncio as _asyncio
+    from fastapi.responses import StreamingResponse
+    from vllm_mlx.dashboard.engines.registry import get_engine as _get_engine
+
+    try:
+        engine = _get_engine(engine_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown engine: {engine_id}")
+
+    try:
+        cmd = engine.uninstall_command()
+    except NotImplementedError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc) or f"Engine {engine_id!r} has no automated uninstaller.",
+        ) from None
+
+    async def _stream():
+        proc = await _asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=_asyncio.subprocess.PIPE,
+            stderr=_asyncio.subprocess.STDOUT,
+        )
+        if proc.stdout:
+            async for line in proc.stdout:
+                yield line
+        await proc.wait()
+        exit_msg = f"\n{'✅ Uninstall complete.' if proc.returncode == 0 else f'❌ Uninstall failed (exit {proc.returncode}).'}\n"
+        yield exit_msg.encode()
+
+    return StreamingResponse(_stream(), media_type="text/plain")
+
+
 @app.post("/shutdown")
 def shutdown(_: None = Depends(_check_auth)) -> dict:
     """Terminate the vllm-mlx-ui process entirely."""

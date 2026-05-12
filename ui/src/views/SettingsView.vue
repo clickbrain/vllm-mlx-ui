@@ -49,6 +49,7 @@ const enginesLoading = ref(false)
 const enginesError = ref('')
 const selectedEngine = ref(serverStore.engineId)
 const installingEngine = ref<string | null>(null)
+const uninstallingEngine = ref<string | null>(null)
 const engineInstallLog = ref<Record<string, string>>({})
 const reloadingEngines = ref(false)
 
@@ -128,6 +129,40 @@ async function installEngine(id: string) {
     enginesError.value = `Install failed: ${e?.message ?? 'unknown error'}`
   } finally {
     installingEngine.value = null
+  }
+}
+
+async function uninstallEngine(id: string, name: string) {
+  if (!window.confirm(`Uninstall "${name}"? This will remove the engine package and all its files.`)) return
+  uninstallingEngine.value = id
+  engineInstallLog.value[id] = ''
+  try {
+    const resp = await fetch(`${BASE}/engines/${id}/uninstall`, {
+      method: 'POST',
+      headers: getMgmtApiKey() ? { 'X-Api-Key': getMgmtApiKey() } : {},
+    })
+    if (resp.status === 400) {
+      const err = await resp.json().catch(() => ({}))
+      enginesError.value = err.detail || 'This engine cannot be uninstalled automatically.'
+      return
+    }
+    if (!resp.body) throw new Error('No response body')
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let done = false
+    while (!done) {
+      const { value, done: d } = await reader.read()
+      done = d
+      if (value) {
+        const chunk = decoder.decode(value)
+        engineInstallLog.value[id] = (engineInstallLog.value[id] ?? '') + chunk
+      }
+    }
+    await loadEngines()
+  } catch (e: any) {
+    enginesError.value = `Uninstall failed: ${e?.message ?? 'unknown error'}`
+  } finally {
+    uninstallingEngine.value = null
   }
 }
 
@@ -540,6 +575,13 @@ async function doRestart() {
               :loading="installingEngine === eng.id"
               @click.stop="installEngine(eng.id)"
             >Install</AppButton>
+            <AppButton
+              v-if="eng.installed && eng.install_method !== 'bundled'"
+              variant="danger"
+              size="sm"
+              :loading="uninstallingEngine === eng.id"
+              @click.stop="uninstallEngine(eng.id, eng.name)"
+            >Uninstall</AppButton>
           </div>
           <div v-if="engineInstallLog[eng.id]" class="engine-install-log">
             <pre>{{ engineInstallLog[eng.id] }}</pre>
