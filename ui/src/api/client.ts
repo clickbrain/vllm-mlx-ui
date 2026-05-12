@@ -20,6 +20,7 @@
 // In dev: Vite proxy rewrites /api → http://localhost:8502 and strips the prefix.
 // In production: Vue is served directly from mgmt_server at port 8502, so no prefix needed.
 const BASE = import.meta.env.DEV ? '/api' : ''
+export { BASE }
 
 const LS_KEY = 'vmui_mgmt_api_key'
 

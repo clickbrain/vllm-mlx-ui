@@ -19,7 +19,7 @@ import { useUpdatesStore } from '@/stores/updates'
 import AppButton from '@/components/shared/AppButton.vue'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 import CollapsibleSection from '@/components/shared/CollapsibleSection.vue'
-import { api } from '@/api/client'
+import { api, BASE, getMgmtApiKey } from '@/api/client'
 
 const machinesStore = useMachinesStore()
 const serverStore = useServerStore()
@@ -102,7 +102,10 @@ async function installEngine(id: string) {
   installingEngine.value = id
   engineInstallLog.value[id] = 'Starting install...\n'
   try {
-    const resp = await fetch(`/api/engines/${id}/install`)
+    const resp = await fetch(`${BASE}/engines/${id}/install`, {
+      method: 'POST',
+      headers: getMgmtApiKey() ? { 'X-Api-Key': getMgmtApiKey() } : {},
+    })
     if (resp.status === 400) {
       const err = await resp.json().catch(() => ({}))
       enginesError.value = err.detail || 'This engine cannot be installed automatically. See description for instructions.'
