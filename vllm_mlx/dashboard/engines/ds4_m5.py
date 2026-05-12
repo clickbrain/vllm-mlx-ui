@@ -120,30 +120,22 @@ class Ds4M5Engine(BaseEngine):
     def description(self) -> str:
         chip = detect_apple_chip()
         ram = _total_ram_gb()
-        m5_badge = ""
-        if chip and chip.upper().startswith("M5"):
-            m5_badge = " *M5 Metal optimisations active* — ~1.86× prefill, ~1.45× generation vs main."
-        elif chip:
-            m5_badge = f" Running on {chip} — the m5 branch is used and works on all Apple Silicon."
 
-        ram_note = ""
+        chip_info = ""
+        if chip and chip.upper().startswith("M5"):
+            chip_info = " M5-optimised — ~1.86× prefill, ~1.45× gen."
+        elif chip:
+            chip_info = f" Running on {chip} (m5 branch works on all Apple Silicon)."
+
+        ram_info = ""
         if ram > 0:
-            rec = "q4-imatrix" if ram >= 256 else "q2-imatrix"
-            ram_note = f" Detected {ram} GB RAM — will auto-select {rec} on install."
+            rec = _recommended_quant()
+            ram_info = f" Detected {ram} GB RAM — will auto-select {rec} on install."
 
         return (
-            f"Specialised native Metal inference engine for DeepSeek V4 Flash GGUF models. "
-            f"OpenAI/Anthropic-compatible server with thinking mode, DSML tool calls, "
-            f"and disk-backed KV cache for long-context sessions.{m5_badge}\n\n"
-            f"🚨 HARDWARE REQUIREMENTS 🚨\n"
-            f"• Apple Silicon Mac (M1–M5) with 96GB+ unified memory (q2 quant)\n"
-            f"• 128GB+ recommended for q2 imatrix with 100k+ context\n"
-            f"• 256GB+ required for q4 imatrix\n"
-            f"• M3 Ultra / M5 Max recommended for best performance\n"
-            f"• 1M context = ~26GB extra for compressed indexer\n"
-            f"• q2-imatrix (~81 GB) → 96–128 GB machines\n"
-            f"• q4-imatrix (~153 GB) → 256+ GB machines{ram_note}\n\n"
-            f"Install: git clone -b m5 https://github.com/Swival/ds4-m5.git && make"
+            f"Specialised Metal inference engine for DeepSeek V4 Flash GGUF.{chip_info}{ram_info}\n\n"
+            f"⚠ HARDWARE ⚠ Apple Silicon Mac with ≥96 GB RAM (q2-imatrix ~81 GB)\n"
+            f"≥256 GB for q4-imatrix (~153 GB). 1M ctx ~ +26 GB. M3 Ultra / M5 recommended."
         )
     capabilities: ClassVar[frozenset[str]] = frozenset({
         "tool_calls",

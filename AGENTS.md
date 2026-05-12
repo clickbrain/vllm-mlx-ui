@@ -351,4 +351,25 @@ This ensures `which ollama` resolves to the new version even for desktop app use
 
 **Release:** v0.5.21
 
+### 2026-05-12 — v0.6.0: ds4-m5 inference engine (DeepSeek V4 Flash)
+
+**New engine:** `ds4-m5` — native Metal/CUDA inference engine for DeepSeek V4 Flash GGUF models, forked from antirez/ds4 with M5 optimisations.
+
+**Files added:**
+- `vllm_mlx/dashboard/engines/ds4_m5.py` — Full engine adapter with:
+  - `detect_apple_chip()` / `is_m5_chip()` — reads `sysctl machdep.cpu.brand_string` to detect M1–M5
+  - `_total_ram_gb()` — reads `sysctl hw.memsize` to detect available RAM
+  - `_recommended_quant()` — picks `q2-imatrix` (<256 GB) or `q4-imatrix` (≥256 GB)
+  - `install_command()` — `git clone -b m5` → `make` → `download_model.sh <auto-detected quant>`
+  - `build_command()` — launches `ds4-server` with host/port/ctx/kv-disk flags
+  - `upgrade_command()` — `git pull + make clean + make`
+  - `config_schema()` — quantization selector (auto-defaults to RAM-appropriate quant), context window, KV cache dir/size, MTP draft, thinking toggle
+  - Dynamic description shows chip badge (M5 badge when on M5) + RAM detection + auto-selected quant + hardware requirements table
+
+**Files modified:**
+- `vllm_mlx/dashboard/engines/registry.py` — Import and register Ds4M5Engine in `_BUILTINS`
+- `ui/src/views/SettingsView.vue` — `white-space: pre-line` on `.engine-card-desc` for multi-line requirement display
+
+**Release:** v0.6.0
+
 <!-- Add new entries here when agents make changes -->

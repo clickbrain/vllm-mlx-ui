@@ -11,7 +11,7 @@
   are reflected immediately to the server config via the settings store.
 -->
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
@@ -28,12 +28,46 @@ const router = useRouter()
 const serverStore = useServerStore()
 const modelsStore = useModelsStore()
 
+interface EngineInfo {
+  id: string
+  name: string
+  installed: boolean
+}
+
 interface NetworkInterface {
   ip: string
   label: string
 }
 const networkInterfaces = ref<NetworkInterface[]>([])
 const copiedUrl = ref<string | null>(null)
+
+// Engine + model selection
+const engines = ref<EngineInfo[]>([])
+const selectedEngine = ref('')
+const engineChanged = computed(() => selectedEngine.value && selectedEngine.value !== serverStore.engineId)
+const applyPending = ref(false)
+
+async function fetchEngines() {
+  try {
+    const r = await api.get<{ engines: EngineInfo[] }>('/engines')
+    engines.value = r.engines.filter(e => e.installed)
+    if (!selectedEngine.value && serverStore.engineId) {
+      selectedEngine.value = serverStore.engineId
+    }
+  } catch { /* non-critical */ }
+}
+
+async function saveEngineAndRestart() {
+  applyPending.value = true
+  try {
+    const updates: Record<string, unknown> = { engine_id: selectedEngine.value }
+    if (serverStore.modelId) updates.model = serverStore.modelId
+    await serverStore.saveConfig(updates as any)
+    await serverStore.stopServer()
+    await serverStore.startServer()
+  } catch { /* error handled by store */ }
+  finally { applyPending.value = false }
+}
 
 // Clear cache confirms
 const confirmClearAll = ref(false)
@@ -43,9 +77,15 @@ const cacheMsg = ref<string | null>(null)
 onMounted(() => {
   modelsStore.fetchModels()
   refreshLogs()
+  fetchEngines()
   api.get<NetworkInterface[]>('/network/interfaces').then(r => { networkInterfaces.value = r }).catch(() => { /* non-critical network info */ })
   api.get<{ enabled: boolean }>('/auto_switch_enabled').then(r => { autoSwitchEnabled.value = r.enabled }).catch(() => { /* non-critical auto-switch status */ })
 })
+
+// Sync selectedEngine from store when engineId becomes available
+watch(() => serverStore.engineId, (val) => {
+  if (val && !selectedEngine.value) selectedEngine.value = val
+}, { immediate: true })
 
 const status = computed(() => {
   if (serverStore.loading) return 'loading' as const
@@ -229,6 +269,32 @@ async function doClearCache(type: string) {
             <div v-if="switchingModel" class="picker-spinner" />
           </div>
         </div>
+
+        <!-- Engine picker -->
+        <div class="model-picker-wrap">
+          <div class="model-picker-label">Engine</div>
+          <div class="model-picker-control">
+            <select
+              class="model-select"
+              v-model="selectedEngine"
+              aria-label="Select inference engine"
+            >
+              <option v-for="e in engines" :key="e.id" :value="e.id">
+                {{ e.name }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Apply & Restart when engine changes -->
+        <AppButton
+          v-if="engineChanged"
+          variant="primary"
+          size="sm"
+          :loading="applyPending"
+          aria-label="Apply engine change and restart"
+          @click="saveEngineAndRestart"
+        >⟳ Apply & Restart</AppButton>
 
         <AppButton
           v-if="!serverStore.isRunning"
