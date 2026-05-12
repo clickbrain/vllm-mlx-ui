@@ -150,11 +150,30 @@ class Ds4M5Engine(BaseEngine):
 
     # ── Core BaseEngine implementation ───────────────────────────────────────
 
+    def _find_gguf(self) -> str | None:
+        """Scan the gguf/ directory for a .gguf file, or None."""
+        gguf_dir = _gguf_dir()
+        if not os.path.isdir(gguf_dir):
+            return None
+        for entry in sorted(os.listdir(gguf_dir)):
+            if entry.endswith(".gguf"):
+                return os.path.join(gguf_dir, entry)
+        return None
+
     def build_command(self, config: dict[str, Any]) -> list[str]:
         """Build the ``ds4-server`` launch command."""
         engine_settings = config.get("engine_settings", {}).get(self.id, {})
 
+        # ── Model path ──────────────────────────────────────────────
+        model = self.resolve_launch_model(config) or self._find_gguf()
+        if not model:
+            raise RuntimeError(
+                "No GGUF model found for ds4-m5. "
+                "Run install first, or set a launch_model path in engine settings."
+            )
+
         cmd = [self._path_to_binary()]
+        cmd += ["--model", model]
         cmd += ["--host", str(config.get("host", "127.0.0.1"))]
         cmd += ["--port", str(config.get("port", 8000))]
 
@@ -178,9 +197,6 @@ class Ds4M5Engine(BaseEngine):
 
         if config.get("api_key"):
             cmd += ["--api-key", config["api_key"]]
-
-        if engine_settings.get("nothink"):
-            cmd += ["--nothink"]
 
         return cmd
 
@@ -332,16 +348,6 @@ class Ds4M5Engine(BaseEngine):
                 "max": 65536,
                 "help": "Maximum disk space for the KV cache directory.",
             },
-            {
-                "key": "nothink",
-                "label": "Disable Thinking Mode",
-                "type": "bool",
-                "default": False,
-                "help": (
-                    "Start with thinking/reasoning disabled by default. "
-                    "Clients can still request thinking via the API."
-                ),
-            },
             # ── MTP speculative decoding ─────────────────────────────────
             {
                 "key": "mtp_model_path",
@@ -369,9 +375,16 @@ class Ds4M5Engine(BaseEngine):
         return None
 
     def resolve_launch_model(self, config: dict[str, Any]) -> str:
-        """ds4 uses a local GGUF path — return the configured path or default."""
+        """Return the GGUF model path — configured, auto-discovered, or empty."""
         engine_settings = config.get("engine_settings", {}).get(self.id, {})
-        return engine_settings.get("launch_model") or config.get("model", "")
+        explicit = engine_settings.get("launch_model", "").strip()
+        if explicit:
+            return os.path.expanduser(explicit)
+        # Auto-discover the GGUF in the install directory
+        found = self._find_gguf()
+        if found:
+            return found
+        return ""
 
 
 def shlex_quote(s: str) -> str:
