@@ -1,24 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""VllmMetalEngine — adapter for the original vLLM project on Apple Silicon.
+"""VllmMetalEngine — adapter for the original vLLM project.
 
 vLLM (github.com/vllm-project/vllm) is a high-throughput LLM serving engine.
-Recent versions include experimental Apple Silicon / MPS support.
+Device is auto-detected from the platform plugin system.
 
 Install:  ``pip install vllm``
-          (Apple Silicon MPS support available in vLLM 0.6+; may require
-           ``pip install vllm --pre`` for the latest builds.)
-Launch:   ``vllm serve <model> --device mps --dtype float16 ...``
-          or the older entrypoint:
-          ``python -m vllm.entrypoints.openai.api_server --model <m> ...``
-
-Device handling:
-  On Apple Silicon we automatically add ``--device mps --dtype float16``.
-  On other platforms we omit the device flag and let vLLM auto-detect.
+Launch:   ``vllm serve <model> ...``
 
 Note:
-  vLLM's Apple Silicon support is marked experimental upstream.  For
-  production Apple Silicon inference, vllm-mlx (bundled) or Rapid-MLX are
-  the recommended choices.
+  vLLM >= 0.19 removed the ``--device`` CLI flag.  On Apple Silicon, the
+  vllm-mlx (bundled) or Rapid-MLX engines are recommended for GPU inference
+  since the original vLLM no longer supports ``--device mps``.
 """
 from __future__ import annotations
 
@@ -72,6 +64,12 @@ class VllmMetalEngine(BaseEngine):
 
         Tries the ``vllm serve`` CLI first (vLLM ≥ 0.4), falls back to
         the ``python -m vllm.entrypoints.openai.api_server`` entrypoint.
+
+        Note: vLLM >= 0.19 removed the ``--device`` CLI flag. Device is
+        auto-detected from the platform plugin. The ``VLLM_PLUGINS=""`` env
+        var (set in ``build_env``) prevents the vllm-mlx MLXPlatform plugin
+        from hijacking device detection. On Apple Silicon this means CPU
+        fallback — for GPU inference, use the vllm-mlx or Rapid-MLX engines.
         """
         import shutil
         model = self.resolve_launch_model(config)
@@ -88,9 +86,11 @@ class VllmMetalEngine(BaseEngine):
 
         cmd += ["--host", host, "--port", str(port)]
 
-        # Apple Silicon: use MPS backend with float16 for stability.
-        if _is_apple_silicon():
-            cmd += ["--device", "mps", "--dtype", "float16"]
+        # Note: vllm >= 0.19 removed the --device CLI flag. Device is now
+        # auto-detected from the platform plugin. On Apple Silicon with
+        # VLLM_PLUGINS="" (set in build_env to avoid the vllm-mlx MLXPlatform
+        # conflict), this falls back to CPU. For GPU inference on Apple Silicon,
+        # use the vllm-mlx or Rapid-MLX engines instead.
 
         # Expose the canonical HF repo ID as the served model name so the
         # dashboard's requests use the same identifier regardless of aliases.
@@ -102,8 +102,7 @@ class VllmMetalEngine(BaseEngine):
 
         # Engine settings
         dtype = engine_settings.get("dtype", "")
-        if dtype and dtype != "auto" and not _is_apple_silicon():
-            # Don't double-set dtype on Apple Silicon (already set above).
+        if dtype and dtype != "auto":
             cmd += ["--dtype", dtype]
 
         max_model_len = int(engine_settings.get("max_model_len", 0))
