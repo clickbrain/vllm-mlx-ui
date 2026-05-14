@@ -1,4 +1,8 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.6.7 — 2026-05-14
+
+- Fix: **vLLM (Metal) no longer passes `--device mps`** — vLLM >= 0.18 removed the `--device` CLI flag. The engine now lets vLLM auto-detect the device (falls back to CPU on Apple Silicon). For GPU inference on Mac, use the vllm-mlx or Rapid-MLX engines.
+
 ## v0.6.6 — 2026-05-14
 
 - Fix: **vLLM (Metal) engine crash on Apple Silicon** — `vllm-mlx` v0.3.0 registers a `MLXPlatform` plugin via entry points that conflicts with NVIDIA vLLM when both packages are installed. The `VllmMetalEngine` subprocess now sets `VLLM_PLUGINS=""` to prevent the MLX platform plugin from hijacking platform detection. Fixes `AttributeError: 'MLXPlatform' object has no attribute 'fp8_dtype'`.
