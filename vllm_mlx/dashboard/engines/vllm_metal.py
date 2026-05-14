@@ -62,6 +62,11 @@ class VllmMetalEngine(BaseEngine):
 
     # ── BaseEngine implementation ─────────────────────────────────────────────
 
+    def build_env(self, config: dict[str, Any]) -> dict[str, str]:
+        # Prevent vllm-mlx's MLXPlatform plugin from hijacking the platform
+        # detection when both vllm and vllm-mlx are installed in the same env.
+        return {"VLLM_PLUGINS": ""}
+
     def build_command(self, config: dict[str, Any]) -> list[str]:
         """Build the vLLM serve command.
 

@@ -1,4 +1,8 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.6.6 — 2026-05-14
+
+- Fix: **vLLM (Metal) engine crash on Apple Silicon** — `vllm-mlx` v0.3.0 registers a `MLXPlatform` plugin via entry points that conflicts with NVIDIA vLLM when both packages are installed. The `VllmMetalEngine` subprocess now sets `VLLM_PLUGINS=""` to prevent the MLX platform plugin from hijacking platform detection. Fixes `AttributeError: 'MLXPlatform' object has no attribute 'fp8_dtype'`.
+
 ## v0.3.80 — 2026-04-27
 
 - Fix: **Benchmark tok/s now accurate for all models** — was dividing `completion_tokens` (total including buffered thinking) by `gen_time` (only the streaming window after first token), giving impossible numbers like 9700 tok/s on a 9B model; fixed to divide by total wall-clock time from request start, giving true effective throughput

@@ -373,3 +373,16 @@ This ensures `which ollama` resolves to the new version even for desktop app use
 **Release:** v0.6.0
 
 <!-- Add new entries here when agents make changes -->
+
+### 2026-05-14 — Project Rename Notes (PENDING)
+**Context:** User wants to rename this project (`vllm-mlx-ui` / `clickbrain/vllm-mlx-ui`) to a new name. Full audit completed — ~1800 references across ~70 files. Key findings:
+- **Python package** `vllm_mlx/` is ~50% upstream code (waybarrios/vllm-mlx — DO NOT MODIFY) and ~50% our dashboard code
+- **Upstream code** (`vllm_mlx/server.py`, `engine/`, `models/`, etc.) must stay as-is or be PR'd to upstream
+- **Our code** in `vllm_mlx/dashboard/`, `ui/`, `docs/`, `scripts/`, `Formula/`, `.github/`, root files — all editable
+- **Homebrew formula** `Formula/vllm-mlx-ui.rb` with class `VllmMlxUi`
+- **State dir** `~/.vllm_mlx_ui/` used in ~14 files
+- **Config dir** `~/.config/vllm-mlx-ui/engines/` and `~/.config/vllm-mlx-ui/config.json`
+- **Entry point group** `vllm_mlx_ui.engines` for plugin discovery
+- **TOUR_KEY** = `'vllm-mlx-ui-tour-completed'` in `ui/src/stores/tour.ts`
+- **Biggest decision:** whether to rename the `vllm_mlx/` Python package dir or just the project wrapper
+- When user says "rename notes" or "name change notes" — refer here
