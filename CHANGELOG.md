@@ -1,4 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
+## v0.6.8 — 2026-05-14
+
+- **ds4-m5: model now auto-discovered after install** — `GET /models/cached` appends engine-discovered GGUF models tagged `source=engine`; `start_server()` auto-populates model from engine when empty; install endpoint auto-registers model in config after successful download.
+- **ds4-m5: update checking tracks model weights separately** — `hf_model_latest()`, `model_update_available()`, `model_upgrade_command()` added; `check_updates()` creates independent `PackageInfo` for model weights alongside engine binary updates.
+- **Fix: `urllib.request.urlopen` double-namespace in `ds4_m5.py`** — `import urllib.request as _urllib` followed by `_urllib.request.urlopen` caused `AttributeError` caught by bare `except`, making `latest_version()` and `hf_model_latest()` silently return `None`. Fixed to `_urllib.urlopen()`.
+- **Tests:** 18 unit tests for `Ds4M5Engine` (`get_discovered_models`, `_model_get_version`, `hf_model_latest`, `model_update_available`, `model_upgrade_command`) and `BaseEngine.get_discovered_models` default.
+- **Removed: upstream vLLM (NVIDIA) engine** — the `VllmMetalEngine` adapter has been deleted from the registry. The `vllm` pip package (v0.19.1) has been uninstalled. vLLM (Metal) is no longer available as an engine option. Use `vllm-mlx`, `rapid-mlx`, or another engine for Apple Silicon GPU inference.
+- **Removed:** `[vllm]` optional dependencies from `pyproject.toml`.
+
 ## v0.6.7 — 2026-05-14
 
 - Fix: **vLLM (Metal) no longer passes `--device mps`** — vLLM >= 0.18 removed the `--device` CLI flag. The engine now lets vLLM auto-detect the device (falls back to CPU on Apple Silicon). For GPU inference on Mac, use the vllm-mlx or Rapid-MLX engines.

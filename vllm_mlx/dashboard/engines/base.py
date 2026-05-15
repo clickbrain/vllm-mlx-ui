@@ -79,6 +79,15 @@ class BaseEngine(ABC):
 
     # ── Optional overrides ─────────────────────────────────────────────────────
 
+    def get_discovered_models(self) -> list[dict[str, Any]]:
+        """Return models that this engine discovers on the local filesystem.
+
+        Each dict should have at minimum an ``id`` key (display name or path).
+        Default implementation returns an empty list.  Override in engines
+        that auto-download or auto-discover models (e.g. ds4-m5).
+        """
+        return []
+
     def config_schema(self) -> list[dict[str, Any]]:
         """Return the engine-specific settings fields for the dynamic settings panel.
 

@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 authors = [
     {name = "vllm-mlx contributors"}
 ]
-keywords = ["llm", "mlx", "apple-silicon", "vllm", "inference", "transformers"]
+keywords = ["llm", "mlx", "apple-silicon", "inference", "transformers"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -72,9 +72,6 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
-]
-vllm = [
-    "vllm>=0.4.0",
 ]
 vision = [
     "torch>=2.8.0",

@@ -286,8 +286,30 @@ def set_mgmt_key(data: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
 
 @app.get("/models/cached")
 def cached_models(_: None = Depends(_check_auth)) -> list:
-    """Return all locally cached HuggingFace model repos that contain weight files."""
-    return mm.get_cached_models()
+    """Return all locally cached model repos, including engine-discovered models.
+
+    Engine-discovered models (e.g. ds4-m5's auto-downloaded GGUF) are appended
+    with ``source="engine"`` so the frontend can distinguish them from HF models.
+    """
+    models = mm.get_cached_models()
+    try:
+        from vllm_mlx.dashboard.engines.registry import ENGINES
+        for engine in list(ENGINES.values()):
+            try:
+                discovered = engine.get_discovered_models()
+                for m in discovered:
+                    models.append({
+                        "id": m["id"],
+                        "name": m.get("display", m.get("name", m["id"])),
+                        "size_gb": m.get("size_gb", 0),
+                        "engine": engine.id,
+                        "source": "engine",
+                    })
+            except Exception:
+                logger.warning("Failed to discover models for engine %s", engine.id, exc_info=True)
+    except Exception:
+        logger.warning("Failed to query engine registry for models", exc_info=True)
+    return models
 
 
 @app.get("/models/gguf-files")
@@ -1791,8 +1813,26 @@ async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
             async for line in proc.stdout:
                 yield line
         await proc.wait()
-        exit_msg = f"\n{'✅ Install complete.' if proc.returncode == 0 else f'❌ Install failed (exit {proc.returncode}).'}\n"
-        yield exit_msg.encode()
+        if proc.returncode == 0:
+            yield b"\n=== Auto-registering model... ===\n"
+            try:
+                discovered = engine.get_discovered_models()
+                if discovered:
+                    m = discovered[0]
+                    from vllm_mlx.dashboard.server_manager import load_config, save_config
+                    cfg = load_config()
+                    engine_settings = dict(cfg.get("engine_settings", {}))
+                    engine_settings.setdefault(engine_id, {})
+                    engine_settings[engine_id]["launch_model"] = m.get("path", m["id"])
+                    cfg["engine_settings"] = engine_settings
+                    cfg["model"] = m["id"]
+                    save_config(cfg)
+                    yield f"Model registered: {m.get('display', m['id'])}\n".encode()
+            except Exception as exc:
+                yield f"⚠ Model registration skipped: {exc}\n".encode()
+            yield b"✅ Install complete.\n"
+        else:
+            yield f"❌ Install failed (exit {proc.returncode}).\n".encode()
 
     return StreamingResponse(_stream(), media_type="text/plain")
 

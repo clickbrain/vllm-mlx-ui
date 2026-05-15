@@ -63,6 +63,9 @@ def is_m5_chip() -> bool:
 
 _DEFAULT_DS4_DIR = os.path.expanduser("~/.local/share/ds4-m5")
 
+# HuggingFace repo that hosts the DeepSeek V4 Flash GGUF model files
+_MODEL_HF_REPO = "swival/DeepSeek-V4-Flash-GGUF"
+
 
 def _ds4_dir() -> str:
     return os.environ.get("DS4_DIR") or _DEFAULT_DS4_DIR
@@ -251,7 +254,7 @@ class Ds4M5Engine(BaseEngine):
             import json as _json
             import urllib.request as _urllib
 
-            with _urllib.request.urlopen(
+            with _urllib.urlopen(
                 "https://api.github.com/repos/Swival/ds4-m5/commits/m5",
                 timeout=5,
             ) as resp:
@@ -300,6 +303,88 @@ class Ds4M5Engine(BaseEngine):
             f"&& rm -rf {shlex_quote(d)} "
             f"&& echo '=== Uninstall complete. ==='",
         ]
+
+    # ── Model version/info ──────────────────────────────────────────────────────
+
+    def _model_get_version(self) -> str | None:
+        """Return the installed model's version (HF commit SHA or mtime hash)."""
+        gguf = self._find_gguf()
+        if not gguf:
+            return None
+        try:
+            mtime = os.path.getmtime(gguf)
+            import datetime
+            return datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
+        except OSError:
+            return None
+
+    def hf_model_latest(self) -> str | None:
+        """Check the HF model repo for the latest update date."""
+        if not _MODEL_HF_REPO:
+            return None
+        try:
+            import json as _json
+            import urllib.request as _urllib
+            url = f"https://huggingface.co/api/models/{_MODEL_HF_REPO}"
+            with _urllib.urlopen(url, timeout=5) as resp:
+                data = _json.loads(resp.read().decode())
+            last_modified = data.get("lastModified", "")
+            if last_modified:
+                import datetime
+                dt = datetime.datetime.fromisoformat(last_modified.replace("Z", "+00:00"))
+                return dt.strftime("%Y-%m-%d")
+            siblings = data.get("siblings", [])
+            for sib in siblings:
+                lm = sib.get("lastModified", sib.get("rfilename", ""))
+                if lm:
+                    return str(lm)[:10]
+        except Exception:
+            return None
+        return None
+
+    def model_update_available(self) -> bool:
+        """Return True when a newer model version is available on HF."""
+        installed = self._model_get_version()
+        latest = self.hf_model_latest()
+        if not installed or not latest:
+            return False
+        return latest > installed
+
+    def model_upgrade_command(self) -> list[str] | None:
+        """Re-download the model for the current quantization."""
+        d = _ds4_dir()
+        scripts = ["download_model.sh", os.path.join(d, "download_model.sh")]
+        script = next((s for s in scripts if os.path.isfile(s)), None)
+        if not script:
+            return None
+        quant = _recommended_quant()
+        engine_settings = {}  # populated at runtime
+        return [
+            "sh", "-c",
+            f"cd {shlex_quote(d)} && echo '=== Re-downloading model ({quant}) ===' "
+            f"&& bash {shlex_quote(script)} {quant} "
+            f"&& echo '=== Model update complete. ==='",
+        ]
+
+    def get_discovered_models(self) -> list[dict[str, Any]]:
+        gguf = self._find_gguf()
+        if not gguf:
+            return []
+        name = os.path.basename(gguf)
+        size_gb = 0.0
+        try:
+            size_gb = round(os.path.getsize(gguf) / (1024 ** 3), 2)
+        except OSError:
+            pass
+        return [{
+            "id": f"ds4-m5:{name}",
+            "name": name,
+            "path": gguf,
+            "size_gb": size_gb,
+            "engine": self.id,
+            "display": f"DeepSeek V4 Flash ({name})",
+            "cached": True,
+        }]
 
     def config_schema(self) -> list[dict[str, Any]]:
         default_quant = _recommended_quant()

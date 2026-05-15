@@ -852,7 +852,24 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
         return False, "Server is already running."
 
     if not config.get("model", "").strip():
-        return False, "No model specified. Set a model in the configuration below."
+        engine_id = config.get("engine_id", "vllm-mlx")
+        try:
+            from vllm_mlx.dashboard.engines.registry import get_engine
+            eng = get_engine(engine_id)
+            discovered = eng.get_discovered_models()
+            if discovered:
+                # Engine auto-discovers its model — populate config
+                m = discovered[0]
+                engine_settings = dict(config.get("engine_settings", {}))
+                engine_settings.setdefault(engine_id, {})
+                engine_settings[engine_id]["launch_model"] = m.get("path", m["id"])
+                config["model"] = m["id"]
+                config["engine_settings"] = engine_settings
+                save_config(config)
+            else:
+                return False, "No model specified. Set a model in the configuration below."
+        except (KeyError, Exception):
+            return False, "No model specified. Set a model in the configuration below."
 
     port = int(config.get("port", 8000))
     host = config.get("host", "127.0.0.1")

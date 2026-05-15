@@ -443,6 +443,37 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
                 return _check_engine
 
             checkers.append(_make_engine_checker())
+
+            # ── Model update check (for engines that support it) ──────────
+            try:
+                if hasattr(_engine, "hf_model_latest") and callable(_engine.hf_model_latest):
+                    _mname = _engine.name
+                    _meng = _engine
+                    def _make_model_checker(_e=_meng, _en=_mname):
+                        def _check_model():
+                            try:
+                                installed = _e._model_get_version() if hasattr(_e, "_model_get_version") else None
+                                latest = _e.hf_model_latest()
+                                if not installed or not latest:
+                                    return None
+                                updated = False
+                                if hasattr(_e, "model_update_available") and callable(_e.model_update_available):
+                                    updated = _e.model_update_available()
+                                return PackageInfo(
+                                    name=f"{_en} (model weights)",
+                                    installed=str(installed),
+                                    latest=str(latest),
+                                    update_available=updated,
+                                    url=getattr(_e, "release_url", ""),
+                                )
+                            except Exception as exc:
+                                logger.warning("Model update check failed for %s: %s", _en, exc, exc_info=True)
+                                return None
+                        return _check_model
+                    checkers.append(_make_model_checker())
+            except Exception as exc:
+                logger.warning("Model update check setup failed: %s", exc)
+
     except Exception as exc:
         logger.warning("Could not load engine registry for update checks: %s", exc)
 

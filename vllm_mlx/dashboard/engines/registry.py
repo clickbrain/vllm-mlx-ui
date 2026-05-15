@@ -30,7 +30,6 @@ from .llama_cpp import LlamaCppEngine
 from .lmstudio import LmStudioEngine
 from .ollama import OllamaEngine
 from .rapid_mlx import RapidMlxEngine
-from .vllm_metal import VllmMetalEngine
 from .vllm_mlx import VllmMlxEngine
 
 if TYPE_CHECKING:
@@ -46,7 +45,6 @@ _BUILTINS: list[BaseEngine] = [
     OllamaEngine(),
     LmStudioEngine(),
     LlamaCppEngine(),
-    VllmMetalEngine(),
 ]
 
 # ── Global registry state ─────────────────────────────────────────────────────
