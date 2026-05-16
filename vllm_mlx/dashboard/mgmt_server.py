@@ -1830,7 +1830,7 @@ async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
                     yield f"Model registered: {m.get('display', m['id'])}\n".encode()
             except Exception as exc:
                 yield f"⚠ Model registration skipped: {exc}\n".encode()
-            yield b"✅ Install complete.\n"
+            yield "✅ Install complete.\n".encode()
         else:
             yield f"❌ Install failed (exit {proc.returncode}).\n".encode()
 

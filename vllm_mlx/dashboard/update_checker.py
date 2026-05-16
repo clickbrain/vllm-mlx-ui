@@ -359,10 +359,15 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
             # over __version__ (pip package, which may have been upgraded separately
             # leaving the JS assets from an older formula tarball).
             cellar_ver = _homebrew_formula_version()
-            installed_ver = cellar_ver or _ui_ver
+            if cellar_ver and _version_gt(_ui_ver, cellar_ver):
+                # Dev install: pip __version__ is ahead of the brew formula.
+                # Show the actual running version without annotation.
+                installed_ver = _ui_ver
+            else:
+                installed_ver = cellar_ver or _ui_ver
             ui_update = _version_gt(ui_latest, installed_ver)
             installed_display = f"v{installed_ver}"
-            if cellar_ver and cellar_ver != _ui_ver:
+            if cellar_ver and cellar_ver != _ui_ver and _version_gt(cellar_ver, _ui_ver):
                 installed_display += f" (pip: v{_ui_ver})"
             latest_display = f"v{ui_latest}" if ui_latest != "unknown" else installed_ver
         return PackageInfo(
