@@ -789,6 +789,21 @@ def _build_env(config: dict[str, Any]) -> dict | None:
     return {**os.environ, **{str(k): str(v) for k, v in extra.items()}}
 
 
+def _build_cwd(config: dict[str, Any]) -> str | None:
+    """Return the working directory for the engine subprocess, or None.
+
+    Delegates to the selected engine's ``get_working_directory()``.
+    Returns ``None`` meaning "inherit the parent's CWD".
+    """
+    from vllm_mlx.dashboard.engines.registry import get_engine
+    engine_id = config.get("engine_id", "vllm-mlx")
+    try:
+        engine = get_engine(engine_id)
+    except KeyError:
+        return None
+    return engine.get_working_directory()
+
+
 def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
     """Return True if something is already listening on host:port."""
     check_host = "127.0.0.1" if host == "0.0.0.0" else host
@@ -902,6 +917,7 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
 
     cmd = _build_command(config)
     env = _build_env(config)
+    cwd = _build_cwd(config)
     with open(LOG_FILE, "w") as log_fh:
         proc = subprocess.Popen(
             cmd,
@@ -910,6 +926,7 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
             stderr=subprocess.STDOUT,
             start_new_session=True,
             env=env,
+            cwd=cwd,
         )
     _write_server_state(proc.pid, config)
 
@@ -1037,7 +1054,7 @@ def get_metrics(api_key: str = "") -> dict | None:
         if r.status_code == 200:
             return r.json()
     except Exception:
-        logger.warning("Operation failed", exc_info=True)
+        logger.debug("get_metrics: server not yet reachable at %s", url)
     return None
 
 

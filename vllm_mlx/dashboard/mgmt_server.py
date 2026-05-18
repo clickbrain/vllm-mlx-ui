@@ -2039,6 +2039,8 @@ def network_interfaces(_: None = Depends(_check_auth)) -> list:
                 ["ipconfig", "getifaddr", device],
                 text=True, stderr=_sp.DEVNULL,
             ).strip()
+        except _sp.CalledProcessError:
+            ip = ""  # exit code 1 = no IP assigned to this interface — expected
         except Exception as e:
             logger.warning("Operation failed: %s", e, exc_info=True)
             ip = ""

@@ -254,6 +254,16 @@ class BaseEngine(ABC):
             f"Engine {self.id!r} has no automated uninstaller — remove manually."
         )
 
+    def get_working_directory(self) -> str | None:
+        """Return the working directory for the engine subprocess, or None to inherit.
+
+        Override in engines that look for resources relative to their install
+        directory at runtime (e.g. ds4-m5 loads Metal shaders from ``metal/``).
+
+        Default implementation returns None (inherit parent's CWD).
+        """
+        return None
+
     def upgrade_command(self) -> list[str] | None:
         """Return a shell command to upgrade this engine, or None if not supported.
 

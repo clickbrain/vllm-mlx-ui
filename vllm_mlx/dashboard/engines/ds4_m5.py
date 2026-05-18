@@ -264,6 +264,9 @@ class Ds4M5Engine(BaseEngine):
         except Exception:
             return None
 
+    def get_working_directory(self) -> str | None:
+        return _ds4_dir()
+
     def upgrade_command(self) -> list[str] | None:
         """Return a command that pulls the latest code and rebuilds."""
         d = _ds4_dir()

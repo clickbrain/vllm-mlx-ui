@@ -38,6 +38,7 @@ def _find_vllm_ui_pids() -> list[int]:
     pids: list[int] = []
 
     # Strategy 1: find by process name via pgrep
+    # pgrep exits with code 1 when no matches are found — that is normal, not an error.
     try:
         out = _sp.check_output(
             ["pgrep", "-f", "vllm_mlx/dashboard|vllm-mlx-ui"],
@@ -50,6 +51,8 @@ def _find_vllm_ui_pids() -> list[int]:
                     pids.append(pid)
             except ValueError:
                 pass
+    except _sp.CalledProcessError:
+        pass  # exit code 1 = no matching processes — expected
     except Exception:
         logger.warning("Operation failed", exc_info=True)
 

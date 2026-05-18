@@ -248,22 +248,24 @@ def _version_gt(latest: str, installed: str) -> bool:
     """Return True if latest semver is strictly greater than installed."""
     if latest in ("unknown", "") or installed in ("unknown", ""):
         return False
+    from packaging.version import InvalidVersion, Version
     try:
-        from packaging.version import Version
         return Version(latest) > Version(installed)
+    except InvalidVersion:
+        pass  # git SHAs and other non-version strings — compare numerically below
     except Exception as e:
         logger.warning("Operation failed: %s", e, exc_info=True)
-        # Fallback: parse semver tuples for numeric comparison
-        def _parse(ver: str) -> tuple[int, ...]:
-            parts = ver.lstrip("v").split(".")
-            result: list[int] = []
-            for p in parts:
-                try:
-                    result.append(int(p))
-                except ValueError:
-                    break
-            return tuple(result) or (0,)
-        return _parse(latest) > _parse(installed)
+    # Fallback: parse semver tuples for numeric comparison
+    def _parse(ver: str) -> tuple[int, ...]:
+        parts = ver.lstrip("v").split(".")
+        result: list[int] = []
+        for p in parts:
+            try:
+                result.append(int(p))
+            except ValueError:
+                break
+        return tuple(result) or (0,)
+    return _parse(latest) > _parse(installed)
 
 
 def _homebrew_formula_version() -> str | None:
@@ -369,7 +371,11 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
             installed_display = f"v{installed_ver}"
             if cellar_ver and cellar_ver != _ui_ver and _version_gt(cellar_ver, _ui_ver):
                 installed_display += f" (pip: v{_ui_ver})"
-            latest_display = f"v{ui_latest}" if ui_latest != "unknown" else installed_ver
+            if ui_latest != "unknown" and not ui_update:
+                # Installed is same or newer than latest tag (e.g. dev build).
+                latest_display = f"v{installed_ver}"
+            else:
+                latest_display = f"v{ui_latest}" if ui_latest != "unknown" else installed_ver
         return PackageInfo(
             name="vllm-mlx-ui (dashboard)",
             installed=installed_display,
