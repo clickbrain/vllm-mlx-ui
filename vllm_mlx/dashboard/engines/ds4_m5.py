@@ -194,10 +194,26 @@ class Ds4M5Engine(BaseEngine):
         cmd += ["--host", str(config.get("host", "127.0.0.1"))]
         cmd += ["--port", str(config.get("port", 8000))]
 
-        ctx = int(engine_settings.get("ctx_size", 100000))
+        ctx = int(engine_settings.get("ctx_size", _recommended_ctx_size()))
         cmd += ["--ctx", str(ctx)]
 
-        kv_dir = engine_settings.get("kv_disk_dir", "").strip()
+        # Per-request output token limit.  The server default is very low; the
+        # project docs recommend 384000 for agent clients.  65536 is a safe
+        # default for chat — large enough to accommodate a long thinking section
+        # plus a full answer, without eating all available RAM on large contexts.
+        max_out = int(engine_settings.get("max_output_tokens", 65536))
+        cmd += ["--tokens", str(max_out)]
+
+        # --chdir MUST be passed so the server can find metal/*.metal shader
+        # files relative to its own source tree, regardless of which directory
+        # the management server launches it from.
+        cmd += ["--chdir", _ds4_dir()]
+
+        # Disk KV cache — strongly recommended by the dev; defaults to
+        # ~/.cache/ds4-kv if the user has not overridden it.
+        kv_dir = os.path.expanduser(
+            engine_settings.get("kv_disk_dir", "~/.cache/ds4-kv").strip()
+        )
         if kv_dir:
             cmd += ["--kv-disk-dir", kv_dir]
 
@@ -262,19 +278,31 @@ class Ds4M5Engine(BaseEngine):
         return None
 
     def latest_version(self) -> str | None:
-        """Query GitHub for the latest ds4-m5 commit."""
+        """Query GitHub for the latest ds4 commit.
 
+        Swival/ds4-m5 is an M5-optimised fork that rebases on antirez/ds4 main.
+        We check the parent project's main branch for upstream changes, then
+        also check the m5 branch for the M5-specific commit that is actually
+        installed.  Returns the most recent SHA of the two.
+        """
         try:
             import json as _json
             import urllib.request as _urllib
 
-            with _urllib.urlopen(
+            shas: list[str] = []
+            for url in (
+                "https://api.github.com/repos/antirez/ds4/commits/main",
                 "https://api.github.com/repos/Swival/ds4-m5/commits/m5",
-                timeout=5,
-            ) as resp:
-                data = _json.loads(resp.read().decode())
-                sha = data.get("sha", "")
-                return sha[:12] if sha else None
+            ):
+                try:
+                    with _urllib.urlopen(url, timeout=5) as resp:
+                        data = _json.loads(resp.read().decode())
+                        sha = data.get("sha", "")
+                        if sha:
+                            shas.append(sha[:12])
+                except Exception:
+                    pass
+            return shas[0] if shas else None
         except Exception:
             return None
 
@@ -444,21 +472,35 @@ class Ds4M5Engine(BaseEngine):
                 "help": (
                     "Maximum context length (KV cache size). "
                     "Auto-detected based on available RAM. "
-                    "⚠ Must be ≥ 393216 to enable Think Max mode (unlimited reasoning). "
-                    "Smaller values use 'high effort' mode with a ~1024-token thinking budget — "
-                    "the proxy automatically disables thinking for those contexts to avoid silent failures. "
-                    "393216 (384K) uses ~7.5 GB; 131072 (128K) uses ~2.5 GB."
+                    "≥128 GB RAM: 393216 (384K, ~7.5 GB) — full Think Max mode available. "
+                    "<128 GB RAM: 131072 (128K, ~2.5 GB) — normal thinking, reliable chat. "
+                    "Full 1M context requires ~26 GB extra."
+                ),
+            },
+            {
+                "key": "max_output_tokens",
+                "label": "Max Output Tokens (--tokens)",
+                "type": "int",
+                "default": 65536,
+                "min": 1024,
+                "max": 393216,
+                "help": (
+                    "Per-request output token limit passed to ds4-server as --tokens. "
+                    "In thinking mode, both the thinking section AND the answer count against this limit. "
+                    "Too small (e.g. 2048) → thinking section exhausts the budget, no answer returned. "
+                    "65536 (64K) is a safe default for interactive chat. "
+                    "Use 384000 for agent/coding clients per the ds4 project recommendation."
                 ),
             },
             {
                 "key": "kv_disk_dir",
                 "label": "Disk KV Cache Directory",
                 "type": "str",
-                "default": "",
+                "default": "~/.cache/ds4-kv",
                 "help": (
-                    "Directory for disk-backed KV cache (enables session persistence "
-                    "across server restarts).  Leave blank to disable. "
-                    "Example: /tmp/ds4-kv or ~/.cache/ds4-kv"
+                    "Directory for disk-backed KV cache. "
+                    "Strongly recommended — saves expensive prefill work across sessions and server restarts. "
+                    "Leave blank to disable."
                 ),
             },
             {
