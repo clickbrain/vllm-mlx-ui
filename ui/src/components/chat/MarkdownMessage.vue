@@ -146,6 +146,110 @@ watchEffect(async () => {
 
     pre.insertBefore(header, codeEl)
   })
+
+  // ── HTML live preview (only after streaming completes) ────────────────────
+  if (!props.streaming) {
+    containerRef.value.querySelectorAll('pre').forEach(pre => {
+      const codeEl = pre.querySelector('code.language-html, code.language-htm')
+      if (!codeEl) return
+      if (pre.querySelector('.preview-btn')) return  // already wired up
+
+      const htmlContent = codeEl.textContent ?? ''
+      if (htmlContent.trim().length < 50) return
+
+      const header = pre.querySelector('.code-header')
+      if (!header) return
+
+      // ── Preview toggle button ──────────────────────────────────────────────
+      const previewBtn = document.createElement('button')
+      previewBtn.className = 'preview-btn'
+      previewBtn.setAttribute('aria-label', 'Toggle live HTML preview')
+
+      // ── Iframe preview wrapper ─────────────────────────────────────────────
+      const wrapper = document.createElement('div')
+      wrapper.className = 'html-preview-wrapper'
+
+      // Controls bar: size presets + open-in-new-tab
+      const controlsBar = document.createElement('div')
+      controlsBar.className = 'html-preview-controls'
+
+      const sizeLabel = document.createElement('span')
+      sizeLabel.className = 'preview-size-label'
+      sizeLabel.textContent = 'Height:'
+      controlsBar.appendChild(sizeLabel)
+
+      const iframe = document.createElement('iframe')
+      iframe.className = 'html-preview-iframe'
+      // allow-scripts without allow-same-origin gives the iframe an opaque
+      // origin so it cannot read the app's localStorage or cookies.
+      // allow-pointer-lock enables mouse-lock for games.
+      iframe.setAttribute('sandbox', 'allow-scripts allow-pointer-lock')
+      iframe.setAttribute('allowfullscreen', '')
+
+      const heights: Array<[string, number]> = [
+        ['S', 300], ['M', 500], ['L', 700], ['Full', 900],
+      ]
+      heights.forEach(([label, h]) => {
+        const btn = document.createElement('button')
+        btn.className = 'size-btn' + (h === 500 ? ' active' : '')
+        btn.textContent = label
+        btn.addEventListener('click', () => {
+          iframe.style.height = h + 'px'
+          controlsBar.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'))
+          btn.classList.add('active')
+        })
+        controlsBar.appendChild(btn)
+      })
+
+      // "Open" button — wraps the HTML in a sandboxed shell to prevent the
+      // Blob URL (same-origin) from accessing the app's localStorage/cookies.
+      const openBtn = document.createElement('button')
+      openBtn.className = 'preview-open-btn'
+      openBtn.textContent = '⤢ Open'
+      openBtn.title = 'Open in new tab'
+      openBtn.addEventListener('click', () => {
+        const shell = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0}html,body,iframe{width:100%;height:100%;border:none;display:block;background:#fff}</style></head><body><iframe sandbox="allow-scripts allow-pointer-lock" srcdoc=${JSON.stringify(htmlContent)}></iframe></body></html>`
+        const blob = new Blob([shell], { type: 'text/html' })
+        const url = URL.createObjectURL(blob)
+        window.open(url, '_blank', 'noopener,noreferrer')
+        setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      })
+      controlsBar.appendChild(openBtn)
+
+      wrapper.appendChild(controlsBar)
+      wrapper.appendChild(iframe)
+      pre.after(wrapper)
+
+      let previewVisible = false
+
+      function openPreview() {
+        if (!iframe.srcdoc) iframe.srcdoc = htmlContent  // lazy-load
+        wrapper.style.display = 'block'
+        pre.style.display = 'none'
+        previewBtn.textContent = '{ } Code'
+        previewVisible = true
+      }
+      function closePreview() {
+        wrapper.style.display = 'none'
+        pre.style.display = ''
+        previewBtn.textContent = '▶ Preview'
+        previewVisible = false
+      }
+      closePreview()  // initial state
+
+      previewBtn.addEventListener('click', () => {
+        previewVisible ? closePreview() : openPreview()
+      })
+
+      // Insert preview button before the copy button
+      const copyBtn = header.querySelector('.copy-btn')
+      header.insertBefore(previewBtn, copyBtn)
+
+      // Auto-show preview for complete HTML documents
+      const isCompleteDoc = htmlContent.includes('<!DOCTYPE') || /<html[\s>]/i.test(htmlContent)
+      if (isCompleteDoc) openPreview()
+    })
+  }
 })
 </script>
 
@@ -390,4 +494,89 @@ watchEffect(async () => {
 /* ── Strong / em ── */
 .markdown-body :deep(strong) { font-weight: 600; color: var(--tx-primary); }
 .markdown-body :deep(em) { font-style: italic; color: var(--tx-secondary); }
+
+/* ── HTML live preview ── */
+.markdown-body :deep(.preview-btn) {
+  background: transparent;
+  border: 1px solid var(--si-700, #2d4a8a);
+  border-radius: var(--r-sm);
+  color: var(--si-300);
+  font-size: 12px;
+  font-family: var(--font-sans, inherit);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: color 100ms ease, border-color 100ms ease;
+  line-height: 1.4;
+  margin-right: 4px;
+}
+.markdown-body :deep(.preview-btn:hover) {
+  color: var(--si-200);
+  border-color: var(--si-500);
+}
+
+.markdown-body :deep(.html-preview-wrapper) {
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  margin: 0.6em 0;
+}
+
+.markdown-body :deep(.html-preview-controls) {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px var(--space-3, 12px);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--bd-subtle);
+}
+
+.markdown-body :deep(.preview-size-label) {
+  font-size: 11px;
+  color: var(--tx-muted);
+  margin-right: 2px;
+  font-family: var(--font-mono);
+}
+
+.markdown-body :deep(.size-btn) {
+  background: transparent;
+  border: 1px solid var(--bd-default);
+  border-radius: 3px;
+  color: var(--tx-muted);
+  font-size: 11px;
+  padding: 1px 6px;
+  cursor: pointer;
+  transition: all 100ms ease;
+  line-height: 1.4;
+}
+.markdown-body :deep(.size-btn.active),
+.markdown-body :deep(.size-btn:hover) {
+  color: var(--tx-primary);
+  border-color: var(--bd-emphasis);
+  background: var(--bg-elevated);
+}
+
+.markdown-body :deep(.preview-open-btn) {
+  background: transparent;
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-sm);
+  color: var(--tx-muted);
+  font-size: 11px;
+  padding: 1px 6px;
+  cursor: pointer;
+  margin-left: auto;
+  transition: all 100ms ease;
+  line-height: 1.4;
+}
+.markdown-body :deep(.preview-open-btn:hover) {
+  color: var(--si-300);
+  border-color: var(--si-500);
+}
+
+.markdown-body :deep(.html-preview-iframe) {
+  display: block;
+  width: 100%;
+  height: 500px;
+  border: none;
+  background: #fff;
+}
 </style>
