@@ -197,13 +197,6 @@ class Ds4M5Engine(BaseEngine):
         ctx = int(engine_settings.get("ctx_size", _recommended_ctx_size()))
         cmd += ["--ctx", str(ctx)]
 
-        # Per-request output token limit.  The server default is very low; the
-        # project docs recommend 384000 for agent clients.  65536 is a safe
-        # default for chat — large enough to accommodate a long thinking section
-        # plus a full answer, without eating all available RAM on large contexts.
-        max_out = int(engine_settings.get("max_output_tokens", 65536))
-        cmd += ["--tokens", str(max_out)]
-
         # --chdir MUST be passed so the server can find metal/*.metal shader
         # files relative to its own source tree, regardless of which directory
         # the management server launches it from.
