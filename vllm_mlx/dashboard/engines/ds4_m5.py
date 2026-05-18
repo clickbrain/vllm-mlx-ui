@@ -369,6 +369,13 @@ class Ds4M5Engine(BaseEngine):
             f"&& echo '=== Model update complete. ==='",
         ]
 
+    def get_fixed_model_display(self) -> str | None:
+        """ds4-m5 serves a single fixed GGUF — report it so the UI shows a label."""
+        gguf = self._find_gguf()
+        if gguf:
+            return f"DeepSeek V4 Flash ({os.path.basename(gguf)})"
+        return "DeepSeek V4 Flash"
+
     def get_discovered_models(self) -> list[dict[str, Any]]:
         gguf = self._find_gguf()
         if not gguf:

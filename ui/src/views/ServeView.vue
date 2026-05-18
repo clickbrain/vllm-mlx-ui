@@ -32,6 +32,7 @@ interface EngineInfo {
   id: string
   name: string
   installed: boolean
+  fixed_model_display?: string | null
 }
 
 interface NetworkInterface {
@@ -47,6 +48,11 @@ const selectedEngine = ref('')
 const engineChanged = computed(() => selectedEngine.value && selectedEngine.value !== serverStore.engineId)
 const applyPending = ref(false)
 
+const selectedEngineInfo = computed(() =>
+  engines.value.find(e => e.id === selectedEngine.value) ?? null
+)
+const fixedModelDisplay = computed(() => selectedEngineInfo.value?.fixed_model_display ?? null)
+
 async function fetchEngines() {
   try {
     const r = await api.get<{ engines: EngineInfo[] }>('/engines')
@@ -61,7 +67,9 @@ async function saveEngineAndRestart() {
   applyPending.value = true
   try {
     const updates: Record<string, unknown> = { engine_id: selectedEngine.value }
-    if (serverStore.modelId) updates.model = serverStore.modelId
+    // Don't propagate the current model when switching to a fixed-model engine —
+    // it would overwrite the engine's own model selection with an unrelated HF repo ID.
+    if (serverStore.modelId && !fixedModelDisplay.value) updates.model = serverStore.modelId
     await serverStore.saveConfig(updates as any)
     await serverStore.stopServer()
     await serverStore.startServer()
@@ -251,22 +259,28 @@ async function doClearCache(type: string) {
         <div class="model-picker-wrap">
           <div class="model-picker-label">Model</div>
           <div class="model-picker-control">
-            <select
-              class="model-select"
-              :value="serverStore.modelId ?? ''"
-              :disabled="switchingModel"
-              aria-label="Select inference model"
-              @change="handleModelSwitch"
-            >
-              <option v-if="!serverStore.modelId" value="" disabled>No model loaded</option>
-              <option v-if="serverStore.modelId && !modelsStore.models.find(m => m.id === serverStore.modelId)" :value="serverStore.modelId">
-                {{ serverStore.modelId }}
-              </option>
-              <option v-for="m in modelsStore.models" :key="m.id" :value="m.id">
-                {{ m.id.split('/').pop() }}
-              </option>
-            </select>
-            <div v-if="switchingModel" class="picker-spinner" />
+            <!-- Fixed-model engines (e.g. ds4-m5): show a static label -->
+            <div v-if="fixedModelDisplay" class="model-fixed-label" :title="fixedModelDisplay">
+              {{ fixedModelDisplay }}
+            </div>
+            <template v-else>
+              <select
+                class="model-select"
+                :value="serverStore.modelId ?? ''"
+                :disabled="switchingModel"
+                aria-label="Select inference model"
+                @change="handleModelSwitch"
+              >
+                <option v-if="!serverStore.modelId" value="" disabled>No model loaded</option>
+                <option v-if="serverStore.modelId && !modelsStore.models.find(m => m.id === serverStore.modelId)" :value="serverStore.modelId">
+                  {{ serverStore.modelId }}
+                </option>
+                <option v-for="m in modelsStore.models" :key="m.id" :value="m.id">
+                  {{ m.id.split('/').pop() }}
+                </option>
+              </select>
+              <div v-if="switchingModel" class="picker-spinner" />
+            </template>
           </div>
         </div>
 
@@ -696,6 +710,23 @@ async function doClearCache(type: string) {
   transition: border-color var(--transition-fast);
   min-width: 200px;
   max-width: 320px;
+}
+
+.model-fixed-label {
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  color: var(--tx-primary);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  padding: 5px 10px;
+  min-width: 200px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+  cursor: default;
 }
 
 .model-select:focus {

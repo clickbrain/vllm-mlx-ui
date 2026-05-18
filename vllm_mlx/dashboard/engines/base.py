@@ -135,6 +135,16 @@ class BaseEngine(ABC):
         engine_settings = config.get("engine_settings", {}).get(self.id, {})
         return engine_settings.get("launch_model") or config.get("model", "")
 
+    def get_fixed_model_display(self) -> str | None:
+        """Return a display string for the engine's fixed model, or None.
+
+        Engines that only support a single pre-determined model (e.g. ds4-m5
+        with its DeepSeek V4 Flash GGUF) should override this to return a
+        human-readable name.  The UI replaces the model dropdown with a
+        static label when this returns a non-empty string.
+        """
+        return None
+
     def default_engine_settings(self) -> dict[str, Any]:
         """Return the default values for this engine's engine_settings namespace.
 

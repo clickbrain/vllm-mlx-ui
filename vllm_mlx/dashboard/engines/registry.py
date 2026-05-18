@@ -189,6 +189,7 @@ def list_engines() -> list[dict]:
             "version": version,
             "release_url": getattr(engine, "release_url", ""),
             "latest_version": latest,
+            "fixed_model_display": engine.get_fixed_model_display() if installed else None,
         })
     return result
 
