@@ -1824,6 +1824,12 @@ async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
                 yield line
         await proc.wait()
         if proc.returncode == 0:
+            # Invalidate flag probe cache so the newly-installed binary is re-probed
+            try:
+                from vllm_mlx.dashboard.engines.flag_probe import invalidate as _fp_inv
+                _fp_inv(cmd[0] if cmd else None)
+            except Exception:
+                pass
             yield b"\n=== Auto-registering model... ===\n"
             try:
                 discovered = engine.get_discovered_models()
@@ -1987,6 +1993,12 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
             logger.warning("Failed to stop inference server after upgrade", exc_info=True)
         # Bust cache so the next /updates check reflects newly installed versions
         _uc.bust_cache()
+        # Invalidate flag probe cache so newly-upgraded binaries are re-probed
+        try:
+            from vllm_mlx.dashboard.engines.flag_probe import invalidate as _fp_invalidate
+            _fp_invalidate()
+        except Exception:
+            logger.warning("Failed to invalidate flag probe cache after upgrade", exc_info=True)
         _uc.upgrade_status = "restarting"
         _t.sleep(2)
         try:

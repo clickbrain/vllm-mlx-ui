@@ -28,6 +28,7 @@ import subprocess
 from typing import Any, ClassVar
 
 from .base import BaseEngine
+from .flag_probe import add_if_supported
 
 # ── Apple Silicon chip detection ─────────────────────────────────────────────
 
@@ -217,7 +218,13 @@ class Ds4M5Engine(BaseEngine):
             cmd += ["--mtp-draft", str(int(engine_settings.get("mtp_draft", 2)))]
 
         if config.get("api_key"):
-            cmd += ["--api-key", config["api_key"]]
+            add_if_supported(
+                cmd, (_ds4_bin(),), "--api-key", [config["api_key"]],
+                warn_if_unsupported=(
+                    "ds4-server does not support --api-key in this version; "
+                    "API key will not be enforced by the engine."
+                ),
+            )
 
         return cmd
 

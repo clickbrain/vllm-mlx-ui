@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from .base import BaseEngine
+from .flag_probe import add_if_supported
 
 
 class LlamaCppEngine(BaseEngine):
@@ -149,7 +150,13 @@ class LlamaCppEngine(BaseEngine):
             cmd += ["--parallel", str(parallel)]
 
         if config.get("api_key"):
-            cmd += ["--api-key", config["api_key"]]
+            add_if_supported(
+                cmd, (llama_bin,), "--api-key", [config["api_key"]],
+                warn_if_unsupported=(
+                    "llama-server does not support --api-key in this version; "
+                    "API key will not be enforced by the engine."
+                ),
+            )
 
         return cmd
 

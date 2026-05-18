@@ -26,6 +26,7 @@ import sys
 from typing import Any, ClassVar
 
 from .base import BaseEngine
+from .flag_probe import add_if_supported
 
 
 # Curated alias → canonical HF repo ID map for the Quick Start section.
@@ -81,6 +82,7 @@ class RapidMlxEngine(BaseEngine):
 
         # rapid-mlx ships a binary (rapid-mlx), not a Python module.
         rapid_bin = self._which("rapid-mlx") or "rapid-mlx"
+        probe = (rapid_bin, "serve")
         cmd = [rapid_bin, "serve", model]
         cmd += ["--host", str(config.get("host", "127.0.0.1"))]
         cmd += ["--port", str(config.get("port", 8000))]
@@ -88,53 +90,58 @@ class RapidMlxEngine(BaseEngine):
         es = config.get("engine_settings", {}).get(self.id, {})
 
         if config.get("api_key"):
-            cmd += ["--api-key", config["api_key"]]
+            add_if_supported(
+                cmd, probe, "--api-key", [config["api_key"]],
+                warn_if_unsupported=(
+                    "rapid-mlx does not support --api-key in this version; "
+                    "API key will not be enforced by the engine."
+                ),
+            )
 
         # --- Performance flags ---
         if es.get("kv_turboquant"):
-            cmd += ["--kv-cache-turboquant"]
+            add_if_supported(cmd, probe, "--kv-cache-turboquant")
         if es.get("kv_quantization"):
-            cmd += ["--kv-cache-quantization"]
+            add_if_supported(cmd, probe, "--kv-cache-quantization")
         if es.get("enable_prefix_cache"):
-            # Default is OFF in the engine; user opts in via settings.
-            cmd += ["--enable-prefix-cache"]
+            add_if_supported(cmd, probe, "--enable-prefix-cache")
         prefill = es.get("prefill_step_size", 0)
         if prefill and prefill > 0:
-            cmd += ["--prefill-step-size", str(prefill)]
+            add_if_supported(cmd, probe, "--prefill-step-size", [str(prefill)])
         gpu_util = es.get("gpu_memory_utilization", 0.0)
         if gpu_util and 0.0 < gpu_util < 1.0:
-            cmd += ["--gpu-memory-utilization", str(gpu_util)]
+            add_if_supported(cmd, probe, "--gpu-memory-utilization", [str(gpu_util)])
         if es.get("enable_tool_logits_bias"):
-            cmd += ["--enable-tool-logits-bias"]
+            add_if_supported(cmd, probe, "--enable-tool-logits-bias")
 
         # --- Token limits ---
         if es.get("max_tokens", 0) > 0:
-            cmd += ["--max-tokens", str(es["max_tokens"])]
+            add_if_supported(cmd, probe, "--max-tokens", [str(es["max_tokens"])])
 
-        # --- Cloud routing (--cloud-model is a litellm model string, not a bool) ---
+        # --- Cloud routing ---
         cloud_model = es.get("cloud_model", "").strip()
         if cloud_model:
-            cmd += ["--cloud-model", cloud_model]
+            add_if_supported(cmd, probe, "--cloud-model", [cloud_model])
             cloud_threshold = es.get("cloud_threshold", 0)
             if cloud_threshold and cloud_threshold > 0:
-                cmd += ["--cloud-threshold", str(cloud_threshold)]
+                add_if_supported(cmd, probe, "--cloud-threshold", [str(cloud_threshold)])
 
-        # --- Parser overrides (auto-detected from model name by default) ---
+        # --- Parser overrides ---
         tool_parser = es.get("tool_call_parser", "").strip()
         if tool_parser:
-            cmd += ["--tool-call-parser", tool_parser]
+            add_if_supported(cmd, probe, "--tool-call-parser", [tool_parser])
         reasoning_parser = es.get("reasoning_parser", "").strip()
         if reasoning_parser:
-            cmd += ["--reasoning-parser", reasoning_parser]
+            add_if_supported(cmd, probe, "--reasoning-parser", [reasoning_parser])
 
         # --- Rate limits ---
         rate_limit = es.get("rate_limit", 0)
         if rate_limit and rate_limit > 0:
-            cmd += ["--rate-limit", str(rate_limit)]
+            add_if_supported(cmd, probe, "--rate-limit", [str(rate_limit)])
 
         # --- Multimodal mode ---
         if es.get("mllm"):
-            cmd += ["--mllm"]
+            add_if_supported(cmd, probe, "--mllm")
 
         return cmd
 
