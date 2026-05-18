@@ -197,11 +197,6 @@ class Ds4M5Engine(BaseEngine):
         ctx = int(engine_settings.get("ctx_size", _recommended_ctx_size()))
         cmd += ["--ctx", str(ctx)]
 
-        # --chdir MUST be passed so the server can find metal/*.metal shader
-        # files relative to its own source tree, regardless of which directory
-        # the management server launches it from.
-        cmd += ["--chdir", _ds4_dir()]
-
         # Disk KV cache — strongly recommended by the dev; defaults to
         # ~/.cache/ds4-kv if the user has not overridden it.
         kv_dir = os.path.expanduser(

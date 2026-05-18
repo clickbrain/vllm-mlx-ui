@@ -563,11 +563,11 @@ async function doRestart() {
             <span class="engine-method-chip">{{ eng.install_method }}</span>
             <span v-if="eng.version" class="engine-version dim">v{{ eng.version }}</span>
             <AppButton
-              v-if="eng.installed && eng.id === selectedEngine && selectedEngine !== serverStore.engineId"
+              v-if="eng.installed && eng.id === selectedEngine"
               variant="primary"
               size="sm"
               @click.stop="saveEngineAndRestart()"
-            >Save & Restart</AppButton>
+            >{{ eng.id !== serverStore.engineId ? 'Save & Restart' : 'Restart' }}</AppButton>
             <AppButton
               v-if="!eng.installed && eng.install_method !== 'bundled'"
               variant="primary"
