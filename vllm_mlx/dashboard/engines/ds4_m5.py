@@ -17,7 +17,7 @@ Install::
     cd ds4-m5 && make
     ./download_model.sh q2-imatrix   # or q4-imatrix
 
-Launch:  ``./ds4-server --ctx 100000 --kv-disk-dir /tmp/ds4-kv``
+Launch:  ``./ds4-server --ctx 393216 --kv-disk-dir /tmp/ds4-kv``  (≥128 GB RAM)
 """
 from __future__ import annotations
 
@@ -100,6 +100,20 @@ def _recommended_quant() -> str:
     if ram >= 256:
         return "q4-imatrix"
     return "q2-imatrix"
+
+
+def _recommended_ctx_size() -> int:
+    """Pick a context window size appropriate for available RAM.
+
+    With the q2-imatrix model using ~74 GB:
+    - ≥128 GB: 393216 (384K) → ~7.5 GB buffer → Think Max mode enabled
+    - <128 GB: 131072 (128K) → ~2.5 GB buffer → leaves ~18 GB headroom on 96 GB
+      (proxy auto-disables thinking for this size to avoid budget exhaustion)
+    """
+    ram = _total_ram_gb()
+    if ram >= 128:
+        return 393216
+    return 131072
 
 
 def _download_script() -> str:
@@ -398,7 +412,7 @@ class Ds4M5Engine(BaseEngine):
 
     def config_schema(self) -> list[dict[str, Any]]:
         default_quant = _recommended_quant()
-
+        default_ctx = _recommended_ctx_size()
 
         return [
             # ── Model selector ────────────────────────────────────────────
@@ -424,16 +438,16 @@ class Ds4M5Engine(BaseEngine):
                 "key": "ctx_size",
                 "label": "Context Window (tokens)",
                 "type": "int",
-                "default": 393216,
+                "default": default_ctx,
                 "min": 2048,
                 "max": 1_000_000,
                 "help": (
                     "Maximum context length (KV cache size). "
+                    "Auto-detected based on available RAM. "
                     "⚠ Must be ≥ 393216 to enable Think Max mode (unlimited reasoning). "
-                    "Smaller values use 'high effort' mode with a ~1024-token thinking budget, "
-                    "which can cause failures on multi-turn conversations. "
-                    "393216 (384K) uses ~7.5 GB of context buffer — the recommended minimum. "
-                    "Full 1M context requires ~26 GB extra."
+                    "Smaller values use 'high effort' mode with a ~1024-token thinking budget — "
+                    "the proxy automatically disables thinking for those contexts to avoid silent failures. "
+                    "393216 (384K) uses ~7.5 GB; 131072 (128K) uses ~2.5 GB."
                 ),
             },
             {
