@@ -1167,6 +1167,17 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
     if key:
         req_headers["Authorization"] = f"Bearer {key}"
 
+    # ds4-m5 "high effort" thinking mode has a hard-coded ~1024-token budget.
+    # When exceeded (common on multi-turn conversations), the model exhausts its
+    # thinking budget and returns no answer tokens at all.  Think Max mode
+    # (no budget limit) requires --ctx >= 393216.  If the server was started with
+    # a smaller context, disable thinking so responses always come through.
+    # The client can override by sending "thinking" explicitly in the request body.
+    if cfg.get("engine_id") == "ds4-m5" and "thinking" not in request:
+        ctx_size = int(cfg.get("engine_settings", {}).get("ds4-m5", {}).get("ctx_size", 393216))
+        if ctx_size < 393216:
+            request = {**request, "thinking": {"type": "disabled"}}
+
     if needs_switch:
         if client_wants_stream:
             # ── Streaming model-switch path ──────────────────────────────────

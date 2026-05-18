@@ -424,13 +424,16 @@ class Ds4M5Engine(BaseEngine):
                 "key": "ctx_size",
                 "label": "Context Window (tokens)",
                 "type": "int",
-                "default": 100000,
+                "default": 393216,
                 "min": 2048,
                 "max": 1_000_000,
                 "help": (
-                    "Maximum context length.  Larger contexts use more memory. "
-                    "With 128 GB RAM and q2, 100k-300k is typical. "
-                    "Full 1M context requires ~26 GB extra for the compressed indexer."
+                    "Maximum context length (KV cache size). "
+                    "⚠ Must be ≥ 393216 to enable Think Max mode (unlimited reasoning). "
+                    "Smaller values use 'high effort' mode with a ~1024-token thinking budget, "
+                    "which can cause failures on multi-turn conversations. "
+                    "393216 (384K) uses ~7.5 GB of context buffer — the recommended minimum. "
+                    "Full 1M context requires ~26 GB extra."
                 ),
             },
             {
