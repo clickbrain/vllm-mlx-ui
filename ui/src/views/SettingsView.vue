@@ -1319,7 +1319,7 @@ async function doRestart() {
 .engine-installed-badge.installed { color: #4ade80; background: rgba(74,222,128,.1); border: 1px solid rgba(74,222,128,.25); }
 .engine-installed-badge.not-installed { color: var(--tx-muted); background: var(--bg-inset); border: 1px solid var(--bd-subtle); }
 .engine-custom-badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: var(--r-pill); color: var(--tx-secondary); background: var(--bg-inset); border: 1px solid var(--bd-subtle); margin-right: 4px; }
-.engine-card-desc { font-size: 13px; color: var(--tx-muted); line-height: 1.4; margin-bottom: var(--space-3); white-space: pre-line; }
+.engine-card-desc { font-size: 13px; color: var(--tx-secondary); line-height: 1.4; margin-bottom: var(--space-3); white-space: pre-line; }
 .engine-card-footer { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .engine-method-chip { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--tx-muted); padding: 1px 6px; border-radius: var(--r-pill); background: var(--bg-inset); border: 1px solid var(--bd-subtle); }
 .engine-version { font-size: 12px; font-family: var(--font-mono); }
@@ -1343,9 +1343,9 @@ async function doRestart() {
   border: 1px solid rgba(245, 158, 11, .3);
   border-radius: var(--r-md);
 }
-.engine-req-warning-title { font-size: 12px; font-weight: 700; color: #f59e0b; margin-bottom: var(--space-1); }
+.engine-req-warning-title { font-size: 13px; font-weight: 700; color: #f59e0b; margin-bottom: var(--space-1); }
 .engine-req-warning-list { margin: 0; padding-left: var(--space-4); }
-.engine-req-warning-list li { font-size: 12px; color: #fcd34d; line-height: 1.5; }
+.engine-req-warning-list li { font-size: 13px; color: var(--tx-primary); line-height: 1.5; }
 .pref-list { display: flex; flex-direction: column; }
 .pref-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--bd-subtle); }
 .pref-row:last-child { border-bottom: none; }

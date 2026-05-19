@@ -1,5 +1,9 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.6.25 — 2026-05-19
+
+- **Fix: Settings page text contrast** — engine card description text was using `--tx-muted` (`#636366`, dark grey) which was hard to read on dark backgrounds. Switched to `--tx-secondary` (`#AEAEB2`). Warning list items changed from pale amber `#fcd34d` to `--tx-primary` (white) so the text is readable; the amber border/background still communicates the warning state. Both warning title and list items bumped from 12px to 13px.
+
 ## v0.6.24 — 2026-05-19
 
 - **Fix: Blank page on load (critical)** — `useMachinesStore` called `watch(activeMachine, ..., { immediate: true })` before `const activeMachine = computed(...)` was declared. JavaScript's temporal dead zone (TDZ) caused a `ReferenceError: Cannot access 'activeMachine' before initialization` at app startup, preventing Vue from mounting. Moved the computed declaration above the watch. This bug has been present since Phase 5 was released.
