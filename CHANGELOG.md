@@ -1,4 +1,65 @@
 # Changelog — vllm-mlx Dashboard UI
+
+## v0.6.21 — 2026-05-19
+
+- **Engine system requirements checking** — `BaseEngine` gains `check_requirements()` and `check_warnings()` abstract methods. Engines can now report unmet hardware/OS requirements (errors) and advisory conditions (e.g. low available RAM, warnings). The Settings engine card shows a red error panel and hides the Install button when requirements are not met; a yellow advisory panel appears for warnings that don't block install.
+- **ds4 engine rewrite: antirez/audreyt fork auto-selection** — `Ds4M5Engine` now auto-selects the correct upstream fork based on chip generation: M5 and newer use `audreyt/ds4` (Metal Tensor 4 optimised), M1–M4 use `antirez/ds4` (original, authoritative). `_detect_installed_fork()` reads the git remote to identify what is already installed. `upgrade_command()` includes a migration path for users on the legacy `Swival/ds4-m5` fork — clones correct fork and re-uses the existing GGUF directory (no 87 GB re-download).
+- **ds4 requirements checks** — ds4 `check_requirements()` verifies macOS (not Linux/Windows), Apple Silicon (not Intel), and minimum 24 GB unified memory. `check_warnings()` warns when current free memory is below the recommended minimum for the selected quantization.
+- **`_chip_generation()` / `is_m5_or_newer()`** — future-proof chip detection handles M6, M7, etc. without hardcoded version ceilings.
+- **Engine registry: `requirements_errors` / `requirements_warnings` fields** — `list_engines()` now includes these in every engine dict so the UI can render them without an extra API call.
+
+## v0.6.19 — 2026-05-19
+
+- **Fix: ds4 install path** — resolved edge case where `_ds4_dir()` returned the legacy `~/.local/share/ds4-m5` path on machines that had never installed ds4, causing the install command to target the wrong directory. Now consistently returns `~/.local/share/ds4` for fresh installs with legacy fallback only when the old directory actually exists on disk.
+
+## v0.6.18 — 2026-05-18
+
+- **ds4: Metal Tensor 4 acceleration (`--mt auto`)** — `build_command()` now probes the ds4 binary for `--mt` flag support (via `flag_probe`) and adds `--mt auto` when present. Provides ~1.86× prefill speedup on M5 Max hardware. Falls back gracefully on older chips that don't support the flag.
+- **ds4: Reproducible output toggle** — new `reproducible` boolean setting (default `true`) in the ds4 engine config. When enabled, sets `DS4_REPRODUCIBLE=1` in the subprocess environment, which injects seed 42 and stable tool-call IDs so every run with the same prompt produces the same output. Recommended for auditability; can be disabled for varied responses.
+- **Fix: chat markdown renderer improvements** — `MarkdownMessage.vue` code block rendering fixes for edge cases with nested backtick strings and language-detection accuracy.
+
+## v0.6.17 — 2026-05-18
+
+- **Fix: remote machine API routing** — replaced the hardcoded `BASE = import.meta.env.DEV ? '/api' : ''` constant in `api/client.ts` with a dynamic `getBase()` / `setApiBase()` function pair. `machines.ts` now watches the active machine and calls `setApiBase()` immediately when the selection changes (including on startup via `immediate: true`). This fixes all API calls (chat completions, preset loading, docs, settings saves) failing to route to the correct remote machine after switching.
+
+## v0.6.16 — 2026-05-18
+
+- **Chat: live HTML preview** — code blocks with `language-html` or `language-htm` now show a **Preview** toggle button after streaming completes. Clicking it renders the HTML in a sandboxed `<iframe>` directly below the code block with size presets (Mobile / Tablet / Desktop / Full) and an open-in-new-tab button. The preview is never shown while streaming to avoid partial-render flicker.
+
+## v0.6.15 — 2026-05-17
+
+- **Runtime flag capability probing (`engines/flag_probe.py`)** — new module that runs `<binary> --help` once per session and caches the flags found. `build_command()` in all engine adapters now calls `flag_probe.add_if_supported()` before adding optional flags, so the dashboard never passes flags that the installed binary version doesn't support. Probe failures (binary not installed, timeout) fall back to optimistic behaviour for backward compatibility.
+- **vllm-mlx, rapid-mlx, llama.cpp engine adapters updated** — all three use `flag_probe` to guard optional flags (e.g. `--api-key`, `--continuous-batching`, `--kv-cache-type`) that vary across binary versions.
+- **New management endpoint** — `GET /engines/<id>/flags` returns the probed flag set for a given engine binary, useful for debugging compatibility issues.
+
+## v0.6.14 — 2026-05-16
+
+- **Fix: ds4 engine description rendering** — `SettingsView.vue` engine card description now uses `white-space: pre-line` so multi-line hardware requirement tables in the ds4 description display correctly instead of collapsing to a single line.
+- **Fix: ds4 engine config cleanup** — removed stale `kv_disk_dir` and `kv_disk_size` config schema fields that referenced a non-existent ds4 flag, preventing spurious `--kv-disk-dir` arguments from being passed on launch.
+
+## v0.6.13 — 2026-05-16
+
+- **Fix: ds4 `build_command()` cleanup** — removed `--chdir` workaround that was added for Metal shader path resolution; the flag does not exist in the ds4 binary and caused a launch failure. Metal shaders resolve correctly without it when the binary is invoked from its own directory via the engine adapter.
+
+## v0.6.12 — 2026-05-15
+
+- **ds4 engine: auto-select antirez/audreyt fork (initial implementation)** — `_select_fork()` chooses `audreyt/ds4` on M5+, `antirez/ds4` otherwise. `install_command()` clones the correct fork. `_ds4_dir()` normalised to `~/.local/share/ds4` with legacy fallback. `_MODEL_HF_REPO` corrected to `antirez/deepseek-v4-gguf`.
+- **Fix: mgmt_server `set_config` deep-merge** — `POST /config` previously overwrote the entire config file with only the fields in the request body, losing all other settings. Now merges the incoming dict over the existing config before saving.
+
+## v0.6.11 — 2026-05-15
+
+- **Fix: ds4 `max_output_tokens` default** — raised from 65536 to 384000 per antirez/ds4 project recommendation for coding agent workloads. The previous default caused early truncation on long multi-turn conversations.
+- **Fix: ds4 `_recommended_quant()` memory thresholds** — adjusted quant selection thresholds to match antirez's published recommendations: `q2-imatrix` for < 256 GB, `q4-imatrix` for ≥ 256 GB unified memory.
+
+## v0.6.10 — 2026-05-15
+
+- **ds4: Think Max mode context guard** — default context size raised to 393 216 tokens (384k). Added automatic `"thinking": {"type": "disabled"}` injection in `mgmt_server.py` when the ds4 engine is active and the server was started with `ctx_size < 393216`. The ds4 "high effort" thinking mode has a hardcoded ~1024-token budget; exhausting it on multi-turn conversations causes the model to return zero answer tokens. Think Max (no budget limit) requires `--ctx ≥ 393216`.
+- **Fix: context size help text** — updated config schema description to document the 393k minimum for Think Max mode and the approximate memory cost (~7.5 GB for the context buffer).
+
+## v0.6.9 — 2026-05-14
+
+- **Fixed-model engine support in Serve page** — engines that manage their own model (e.g. ds4) now show a static read-only label instead of the model dropdown. `BaseEngine` gains a `fixed_model_display` property; when non-`None`, `ServeView.vue` renders the label and suppresses the model selector. Engine switching no longer propagates the current HF model ID to a fixed-model engine, preventing it from overwriting the engine's own model config.
+
 ## v0.6.8 — 2026-05-14
 
 - **ds4-m5: model now auto-discovered after install** — `GET /models/cached` appends engine-discovered GGUF models tagged `source=engine`; `start_server()` auto-populates model from engine when empty; install endpoint auto-registers model in config after successful download.

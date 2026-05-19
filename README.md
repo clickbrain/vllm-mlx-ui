@@ -1,32 +1,32 @@
-# vllm-mlx Dashboard UI with local and remote network access
+# vllm-mlx Dashboard UI
 
-A comprehensive macOS web dashboard for [vllm-mlx](https://github.com/waybarrios/vllm-mlx) — the high-performance Apple Silicon LLM inference server. Run powerful AI models completely locally: no cloud, no subscriptions, no data leaving your Mac.
+A fast, modern web dashboard for managing local AI inference on Apple Silicon. Run LLMs, multimodal models, and DeepSeek V4 locally — no cloud, no subscriptions, no data leaving your Mac.
 
-> **Note:** This UI was fully designed and coded by AI (GitHub Copilot / Claude). It is offered as a contribution to the vllm-mlx community.
+📖 **[→ Full User Guide](docs/dashboard/user-guide.md)** | **[→ Releases](https://github.com/clickbrain/vllm-mlx-ui/releases)** | **[→ Changelog](CHANGELOG.md)**
 
 ---
 
 ## What It Does
 
-The vllm-mlx Dashboard gives you a beautiful, zero-configuration web UI to control every aspect of your local AI server — no terminal knowledge required.
-
-📖 **[→ Full User Guide](docs/dashboard/user-guide.md)** — complete documentation for every feature, page, and setting.
+The dashboard gives you a zero-configuration web UI (Vue 3, served at **http://localhost:8502**) to manage every aspect of local AI inference — no terminal knowledge required.
 
 | Feature | Description |
 |---------|-------------|
-| 📊 **Overview** | Live metrics (tokens/sec, GPU memory, latency), server health at a glance |
-| 🖥️ **Server** | Start / stop / restart the server, full configuration with dropdowns, all connection URLs shown |
-| 📦 **Models** | Browse your downloaded models, search the mlx-community on HuggingFace, download by ID, one-click model switching, model card links |
-| ⚡ **Benchmarks** | Run performance benchmarks, compare models, view historical results with charts |
-| 💬 **Chat** | Built-in chat with full history, named conversations, per-chat model switching |
-| ⚙️ **Settings** | Network access, remote server control, auto model-switch proxy |
+| 🤖 **6 Inference Engines** | vllm-mlx, DeepSeek V4 Flash (ds4), Rapid-MLX, llama.cpp, Ollama, LM Studio — install, configure, upgrade from the UI |
+| 🖥️ **Serve** | Start / stop / restart any engine, full configuration, live connection URLs, log viewer |
+| 📦 **Models** | Browse downloaded models, search HuggingFace, download by ID, one-click model switching, virtual-scrolled list |
+| ⚡ **Benchmarks** | Speed, quality (GSM8K / MMLU / HumanEval), custom prompts, multi-model comparison bar charts |
+| 💬 **Chat** | Full chat history, named conversations, live HTML preview in code blocks, streaming responses |
+| ⚙️ **Settings** | Per-engine configuration, remote machine management, multi-machine fleet support |
+| 📑 **Docs** | Full documentation browsable in-app at `/docs` |
+| ⌨️ **Command Palette** | `Cmd+K` quick navigation and action launcher |
 
 ---
 
 ## Requirements
 
 - **macOS 13 (Ventura) or later**
-- **Apple Silicon Mac** (M1, M2, M3, or M4)  
+- **Apple Silicon Mac** (M1–M5)  
   *(Remote-only dashboard works on any OS with Python 3.10+)*
 - **Python 3.10 or later**
 
@@ -200,98 +200,69 @@ Removes the package (pip or Homebrew), Desktop shortcut, and optionally your set
 vllm-mlx-ui
 ```
 
-Or directly with Streamlit:
+The dashboard opens automatically at **http://localhost:8502**.
 
-```bash
-streamlit run vllm_mlx/dashboard/_ui.py
-```
-
-The dashboard opens at `http://localhost:8501`.
+> The management API and Vue UI are both served by the same FastAPI/uvicorn process on port 8502. The inference engine runs separately on port 8000.
 
 ---
 
 ## Features In Detail
 
-### 📊 Overview Page
+### 🤖 Inference Engines
 
-- Live server health banner (running / starting / stopped)
-- Real-time metrics: tokens per second, time to first token, GPU memory, active requests
-- Charts refreshing every 5 seconds (configurable)
-- One-click navigation to Server settings
+Six engines are built in. Install, configure, and upgrade each from **Settings → Engines**:
 
-### 🖥️ Server Page
+| Engine | Best for |
+|--------|----------|
+| **vllm-mlx** | General-purpose MLX inference (text, multimodal, audio) |
+| **DeepSeek V4 Flash (ds4)** | DeepSeek V4 Flash GGUF — native Metal, M5 optimised via `audreyt/ds4` fork |
+| **Rapid-MLX** | Faster MLX inference variant |
+| **llama.cpp** | GGUF models, broad compatibility |
+| **Ollama** | Pre-packaged models, easy model library |
+| **LM Studio** | Connect to a running LM Studio instance |
 
-**Connection Info Card** (shown when server is running):
-- Your LAN IP address and the correct base URL for OpenAI clients
-- The loaded model ID (ready to copy-paste into any client)
-- API key (if configured)
-- Management API URL for remote control
+Engine cards show system requirement errors (blocks install) and memory advisories before you attempt an install.
 
-**Configuration:**
-- All settings are dropdowns and number inputs — no guessing required
-- **Load Optimal Settings** button reads the model's HuggingFace card and pre-fills context length, architecture, temperature
-- Network settings: listen on localhost only or all interfaces for LAN access
-- Port, API key, embedding model, rerank model
-- Cache controls (clear all caches / prefix cache)
-- Full server log viewer
+### 🖥️ Serve Page
 
-**Quick Switch** (sidebar): Change the active model with one click, without navigating to the Models page.
+- Start / stop / restart the active engine
+- Full engine configuration (all settings rendered from engine schema)
+- Live connection URLs — base URL, chat endpoint, OpenAI-compatible API
+- Quick model switch for standard engines; fixed-model label for single-model engines (e.g. ds4)
+- Full server log viewer with auto-scroll
 
 ### 📦 Models Page
 
-**My Library tab:**
-- All downloaded models with disk usage
-- Disk usage pie chart
-- One-click **⚡ Switch** to activate a model (auto-restarts server with optimal settings)
-- **↗ Model Card** link to view on HuggingFace
-- Safe delete with confirmation
-
-**Search mlx-community tab:**
-- Search all of [mlx-community](https://huggingface.co/mlx-community) on HuggingFace
-- Filter by: quantization bits (4-bit, 8-bit, etc.), model size (1B–70B+)
-- Sort by: downloads, likes, name
-- **↗ Card** link for each result
-- ✓ badge on already-downloaded models
-- One-click download
-
-**Download by ID tab:**
-- Paste any HuggingFace model ID
-- Supports private/gated models with HuggingFace token
+- **My Library** — all downloaded models with disk usage, pie chart, one-click Switch, HuggingFace card link, safe delete
+- **Find Models** — search HuggingFace with filters (size range, quantization, fit level); Apply Filters re-fetches up to 100 results
+- **Download by ID** — paste any HuggingFace model ID; supports private/gated models with HF token
+- Virtual-scrolled list handles thousands of models without lag
 
 ### ⚡ Benchmarks Page
 
-- Run benchmarks against the currently loaded model
-- Configure: prompt, max tokens, number of runs
-- Results: tokens/sec, time to first token, total latency
-- Historical benchmark chart comparing all results
-- Export / delete benchmark history
+- **Speed** — tokens/sec and TTFT across N runs, accurate timing (skips buffered streams)
+- **Quality** — GSM8K, MMLU, HumanEval with authentic test data; thinking mode disabled for fair measurement
+- **Custom Prompts** — run your own prompts, per-prompt results table
+- **Multi-model comparison** — bar charts comparing speed and quality across models
+- Benchmark history with export and delete
 
 ### 💬 Chat Page
 
-- Full chat history with **named conversations**
-- Create, rename, delete chats
-- **Per-chat model selector** — each conversation can use a different model
-- Auto-title from first message
-- Streaming responses
-- System prompt support
-- All Streamlit chat features: message history, clear chat
+- Full chat history with named conversations, auto-title from first message
+- Per-chat model selector; conversation presets (Chat / Code / Creative / Analysis / Precise)
+- Streaming responses with live markdown rendering
+- **Live HTML preview** — HTML code blocks get a Preview button that renders in a sandboxed iframe with Mobile / Tablet / Desktop / Full size presets
 
 ### ⚙️ Settings Page
 
-**Network Access:**
-- Set the dashboard host/port
-- Enable LAN access with one toggle — shows the shareable URL
+- Per-engine configuration panels
+- **Multi-machine fleet** — add remote machines (host + port), switch the active machine; all API calls route to the selected machine automatically
+- **Auto Model Switch Proxy** — port 8502 acts as an OpenAI proxy; client model requests trigger automatic server reload with the right model
+- Network access: localhost or LAN (`0.0.0.0`)
 
-**Remote Server:**
-- Enter inference API URL and management API URL for a remote vllm-mlx machine
-- API key support
-- Live health check — confirms the connection is working
-- When connected, all operations run on the remote machine
+### ⌨️ Command Palette (`Cmd+K`)
 
-**Auto Model Switch Proxy:**
-- When enabled, the management API (port 8502) becomes an OpenAI-compatible proxy
-- If your chat client requests a model that isn't loaded, the server automatically restarts with the correct model
-- Shows the exact proxy URL to paste into your client
+Quick-launch navigation to any page or action from anywhere in the UI.
 
 ---
 
@@ -301,16 +272,13 @@ The dashboard opens at `http://localhost:8501`.
 ┌─────────────────────────────────────┐
 │  Your Mac (Apple Silicon)           │
 │                                     │
-│  vllm-mlx inference server :8000   │
-│  Management API            :8502   │
-│  Streamlit dashboard       :8501   │
+│  Inference engine (e.g. vllm-mlx)  :8000  │
+│  Dashboard + Management API        :8502  │
 └─────────────────────────────────────┘
            ↕ LAN / WiFi / Thunderbolt Bridge
 ┌─────────────────────────────────────┐
 │  Another device (any OS)            │
-│                                     │
-│  Remote dashboard only              │
-│  (controls the Mac above)           │
+│  Dashboard only — controls Mac above│
 └─────────────────────────────────────┘
 ```
 
@@ -409,25 +377,24 @@ Base URL: http://<your-mac-ip>:8502/v1
 
 ```
 vllm_mlx/dashboard/
-├── _ui.py              # Main Streamlit app (all 6 pages)
-├── app.py              # CLI entry point + mgmt server launch
-├── server_manager.py   # Server lifecycle, config, remote-aware
-├── model_manager.py    # HuggingFace Hub integration, remote-aware
-├── benchmark_runner.py # Benchmark execution + history
-├── mgmt_server.py      # FastAPI management API (port 8502)
-└── __init__.py
+├── mgmt_server.py      # FastAPI app — serves Vue UI + all /api/* endpoints (port 8502)
+├── app.py              # CLI entry point, process management, browser open
+├── server_manager.py   # Engine lifecycle, config, remote-aware
+├── model_manager.py    # HuggingFace Hub integration, download queue
+├── benchmark_runner.py # Speed/quality/custom benchmark execution + history
+├── quality_runner.py   # GSM8K, MMLU, HumanEval graders
+├── update_checker.py   # Version checking for UI + engines
+├── engines/            # Engine adapters (ds4_m5, vllm_mlx, rapid_mlx, llama_cpp, ollama, lm_studio)
+├── ui_dist/            # Built Vue 3 frontend (committed, served by FastAPI)
+└── __init__.py         # Version
 
-.streamlit/
-└── config.toml         # iFrame support, CORS settings
-
-install.sh              # Full installer (vllm-mlx + UI + model)
-install-remote.sh       # Remote-only installer (UI only)
+ui/                     # Vue 3 source (npm run build → ui_dist/)
 ```
 
 State is stored in `~/.vllm_mlx_ui/`:
-- `server_config.json` — all configuration
-- `server.pid` — PID of the running server
-- `server.log` — server log output
+- `config.json` — all configuration
+- `server.pid` — PID of the running inference engine
+- `server.log` — engine log output
 - `benchmark_results.json` — benchmark history
 - `chats.json` — chat history
 
@@ -470,13 +437,9 @@ vllm-mlx-ui
 
 **Can't connect from another device:** In Server settings, change "Listen on" to `0.0.0.0 — all network interfaces` and restart.
 
-**Remote dashboard can't reach server:** Make sure the Mac running vllm-mlx has "Listen on 0.0.0.0" enabled in Server settings. Check that your firewall allows ports 8000 and 8502 *(System Settings → Network → Firewall → Options → add `vllm-mlx-ui`)*.
+**Remote dashboard can't reach server:** Make sure the Mac running the inference engine has "Listen on 0.0.0.0" enabled in Serve settings. Check that your firewall allows ports 8000 and 8502 *(System Settings → Network → Firewall → Options → add `vllm-mlx-ui`)*.
 
-**Remote connection is very slow or laggy:** You may be connecting via a `.local` hostname which resolves to IPv6 first, adding 3–6 s per request. Go to **⚙️ Settings → Remote Server** and enter the IPv4 address instead (e.g. `http://192.168.68.74:8000`). The settings page will show you the resolved IP after you save. See [Remote Access Architecture](#remote-access-architecture) for full setup instructions.
-
-**Remote connection shows local machine RAM on Benchmarks page:** This was fixed in v0.3.3. Run `brew update && brew upgrade vllm-mlx-ui` on both machines.
-
-**"ScriptRunContext" warnings flooding the terminal:** These were caused by the dashboard library being imported from the management API process. Fixed in v0.3.5. Run `brew update && brew upgrade vllm-mlx-ui`.
+**Remote connection is very slow or laggy:** You may be connecting via a `.local` hostname which resolves to IPv6 first, adding 3–6 s per request. Go to **⚙️ Settings → Machines** and enter the IPv4 address instead (e.g. `http://192.168.68.74:8502`). See [Remote Access Architecture](#remote-access-architecture) for full setup instructions.
 
 ---
 

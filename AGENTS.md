@@ -4,6 +4,47 @@
 
 ---
 
+## ⚠️ MANDATORY RELEASE CHECKLIST — EVERY RELEASE, NO EXCEPTIONS
+
+**Before running `scripts/release.sh`**, ALL of the following must be complete:
+
+### 1. CHANGELOG.md — Required
+- Add a `## vX.Y.Z — YYYY-MM-DD` section at the TOP of `CHANGELOG.md`
+- Every change must be documented: features added, bugs fixed, behavior changed
+- Be specific — include what broke, what was fixed, and why. Bad: "Fix ds4 bug". Good: "Fix ds4 `build_command()` passing `--ctx` before `--host`, causing a parse error on ds4-server ≥ 0.3"
+- The CHANGELOG entry is the release notes shown on GitHub Releases — users read it
+
+### 2. README.md — Update when needed
+- **Feature table**: update when a new capability is added or removed
+- **Requirements**: update when OS/hardware requirements change (e.g. new Apple chip support)
+- **Engine list**: update when an engine is added, removed, or renamed
+- **Troubleshooting**: update when a fix changes a known workaround
+- **File layout**: update when the architecture changes significantly
+- Do NOT leave stale version numbers, wrong ports, or removed features in the README
+
+### 3. docs/ — Update when needed
+- `docs/dashboard/user-guide.md`: update when UI pages, features, or workflows change
+- `docs/getting-started/installation.md`: update when install steps change
+- `docs/reference/cli.md`: update when CLI flags change
+- `docs/reference/configuration.md`: update when config keys are added/removed
+- Engine-specific docs: update when engine config schema changes
+
+### 4. GitHub Release — AUTOMATIC via release.sh
+- `scripts/release.sh` calls `gh release create --generate-notes` automatically
+- **Never push a tag manually** — always use `scripts/release.sh`
+- Verify on GitHub after every release: https://github.com/clickbrain/vllm-mlx-ui/releases
+- The latest release on GitHub MUST match the version in `vllm_mlx/dashboard/__init__.py`
+
+### 5. App help links — Verify before release
+- All `href` links in the Vue UI must point to real pages
+- The `/docs` route must load correctly with the latest docs content
+- External links (GitHub, HuggingFace, Prometheus) must still be valid
+
+### ENFORCEMENT
+**If a PR or release is missing any of the above, it is incomplete.** Do not mark a task done, do not run release.sh, until the docs are updated. "I'll update docs later" is not acceptable.
+
+---
+
 ## Current State (as of 2026-04-29)
 
 ### Audit Completed
