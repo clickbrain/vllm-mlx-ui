@@ -198,6 +198,13 @@ class Ds4M5Engine(BaseEngine):
         ctx = int(engine_settings.get("ctx_size", _recommended_ctx_size()))
         cmd += ["--ctx", str(ctx)]
 
+        # Per-request output token budget.  In thinking mode the <think> section
+        # counts against this limit, so too-small values (e.g. 2048) exhaust
+        # the budget before the answer is emitted.  64K is the safe default.
+        max_tokens = int(engine_settings.get("max_output_tokens", 65536))
+        if max_tokens > 0:
+            add_if_supported(cmd, (_ds4_bin(),), "--tokens", [str(max_tokens)])
+
         # Disk KV cache — strongly recommended by the dev; defaults to
         # ~/.cache/ds4-kv if the user has not overridden it.
         kv_dir = os.path.expanduser(
