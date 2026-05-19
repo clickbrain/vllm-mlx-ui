@@ -201,21 +201,6 @@ watchEffect(async () => {
         controlsBar.appendChild(btn)
       })
 
-      // "Open" button — wraps the HTML in a sandboxed shell to prevent the
-      // Blob URL (same-origin) from accessing the app's localStorage/cookies.
-      const openBtn = document.createElement('button')
-      openBtn.className = 'preview-open-btn'
-      openBtn.textContent = '⤢ Open'
-      openBtn.title = 'Open in new tab'
-      openBtn.addEventListener('click', () => {
-        const shell = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{margin:0;padding:0}html,body,iframe{width:100%;height:100%;border:none;display:block;background:#fff}</style></head><body><iframe sandbox="allow-scripts allow-pointer-lock" srcdoc=${JSON.stringify(htmlContent)}></iframe></body></html>`
-        const blob = new Blob([shell], { type: 'text/html' })
-        const url = URL.createObjectURL(blob)
-        window.open(url, '_blank', 'noopener,noreferrer')
-        setTimeout(() => URL.revokeObjectURL(url), 60_000)
-      })
-      controlsBar.appendChild(openBtn)
-
       wrapper.appendChild(controlsBar)
       wrapper.appendChild(iframe)
       pre.after(wrapper)
@@ -224,14 +209,14 @@ watchEffect(async () => {
 
       function openPreview() {
         if (!iframe.srcdoc) iframe.srcdoc = htmlContent  // lazy-load
+        codeEl.style.display = 'none'
         wrapper.style.display = 'block'
-        pre.style.display = 'none'
         previewBtn.textContent = '{ } Code'
         previewVisible = true
       }
       function closePreview() {
+        codeEl.style.display = ''
         wrapper.style.display = 'none'
-        pre.style.display = ''
         previewBtn.textContent = '▶ Preview'
         previewVisible = false
       }
@@ -241,9 +226,37 @@ watchEffect(async () => {
         previewVisible ? closePreview() : openPreview()
       })
 
-      // Insert preview button before the copy button
+      // "Save As" button — downloads the raw HTML as a file
+      const saveBtn = document.createElement('button')
+      saveBtn.className = 'save-btn'
+      saveBtn.textContent = '↓ Save'
+      saveBtn.title = 'Save as HTML file'
+      saveBtn.addEventListener('click', () => {
+        const blob = new Blob([htmlContent], { type: 'text/html' })
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = 'output.html'
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(a.href), 10_000)
+      })
+
+      // "Open" button — opens the HTML directly in a new browser tab
+      const openBtn = document.createElement('button')
+      openBtn.className = 'preview-open-btn'
+      openBtn.textContent = '⤢ Open'
+      openBtn.title = 'Open in new tab'
+      openBtn.addEventListener('click', () => {
+        const blob = new Blob([htmlContent], { type: 'text/html' })
+        const url = URL.createObjectURL(blob)
+        window.open(url, '_blank', 'noopener,noreferrer')
+        setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      })
+
+      // Insert preview, save, open buttons before the copy button in the header
       const copyBtn = header.querySelector('.copy-btn')
       header.insertBefore(previewBtn, copyBtn)
+      header.insertBefore(saveBtn, copyBtn)
+      header.insertBefore(openBtn, copyBtn)
 
       // Auto-show preview for complete HTML documents
       const isCompleteDoc = htmlContent.includes('<!DOCTYPE') || /<html[\s>]/i.test(htmlContent)
@@ -555,7 +568,8 @@ watchEffect(async () => {
   background: var(--bg-elevated);
 }
 
-.markdown-body :deep(.preview-open-btn) {
+.markdown-body :deep(.preview-open-btn),
+.markdown-body :deep(.save-btn) {
   background: transparent;
   border: 1px solid var(--bd-default);
   border-radius: var(--r-sm);
@@ -567,7 +581,8 @@ watchEffect(async () => {
   transition: all 100ms ease;
   line-height: 1.4;
 }
-.markdown-body :deep(.preview-open-btn:hover) {
+.markdown-body :deep(.preview-open-btn:hover),
+.markdown-body :deep(.save-btn:hover) {
   color: var(--si-300);
   border-color: var(--si-500);
 }

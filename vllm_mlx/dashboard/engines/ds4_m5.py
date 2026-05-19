@@ -226,6 +226,10 @@ class Ds4M5Engine(BaseEngine):
                 ),
             )
 
+        # Metal Tensor 4 acceleration — auto-enables on M5+ if the binary supports it.
+        # Provides ~1.86x prefill speedup on M5 Max. Falls back gracefully on older chips.
+        add_if_supported(cmd, (_ds4_bin(),), "--mt", ["auto"])
+
         return cmd
 
     def _path_to_binary(self) -> str:
@@ -528,10 +532,30 @@ class Ds4M5Engine(BaseEngine):
                 "max": 5,
                 "help": "Number of speculative tokens for MTP draft (1-5). Only active when MTP model path is set.",
             },
+            # ── Reproducibility ──────────────────────────────────────────
+            {
+                "key": "reproducible",
+                "label": "Reproducible Output (DS4_REPRODUCIBLE=1)",
+                "type": "bool",
+                "default": True,
+                "help": (
+                    "Set DS4_REPRODUCIBLE=1 when launching ds4-server. "
+                    "Injects seed 42 and produces stable tool-call IDs — "
+                    "every run with the same prompt returns the same output. "
+                    "Recommended for auditability. Disable if you prefer varied responses."
+                ),
+            },
         ]
 
     def build_env(self, config: dict[str, Any]) -> dict[str, str] | None:
-        return None
+        engine_settings = config.get("engine_settings", {}).get(self.id, {})
+        env: dict[str, str] = {}
+        # DS4_REPRODUCIBLE=1: injects seed 42 and stable tool-call IDs so every
+        # run with the same prompt produces the same output — recommended by the
+        # antirez/ds4 project for auditability.  Users can opt out via settings.
+        if engine_settings.get("reproducible", True):
+            env["DS4_REPRODUCIBLE"] = "1"
+        return env or None
 
     def resolve_launch_model(self, config: dict[str, Any]) -> str:
         """Return the GGUF model path — configured, auto-discovered, or empty."""
