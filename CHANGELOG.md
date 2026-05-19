@@ -1,5 +1,9 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.6.24 — 2026-05-19
+
+- **Fix: Blank page on load (critical)** — `useMachinesStore` called `watch(activeMachine, ..., { immediate: true })` before `const activeMachine = computed(...)` was declared. JavaScript's temporal dead zone (TDZ) caused a `ReferenceError: Cannot access 'activeMachine' before initialization` at app startup, preventing Vue from mounting. Moved the computed declaration above the watch. This bug has been present since Phase 5 was released.
+
 ## v0.6.23 — 2026-05-19
 
 - **Fix: Blank page after in-app upgrade** — The browser was caching the old `index.html` (with old asset hash) after an upgrade. The new JS bundle has a different content-hash filename, so the stale HTML pointed to a file that no longer existed, producing a blank white page. Fixed two ways: (1) the server now sends `Cache-Control: no-store` on every `index.html` response so browsers never cache it; (2) the post-upgrade reload now navigates to `/` with `window.location.href` instead of `window.location.reload()` to guarantee a fresh HTTP request for the HTML.

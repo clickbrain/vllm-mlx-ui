@@ -47,6 +47,9 @@ export const useMachinesStore = defineStore('machines', () => {
   watch(machines, (v) => localStorage.setItem(LS_KEY, JSON.stringify(v)), { deep: true })
   watch(activeMachineId, (v) => localStorage.setItem(LS_ACTIVE_KEY, v))
 
+  // Must be declared before the watch below that references it.
+  const activeMachine = computed(() => machines.value.find(m => m.id === activeMachineId.value) ?? machines.value[0])
+
   // Keep the API client base URL in sync with the active machine.
   // immediate: true handles the case where a remote machine was persisted
   // from a previous session and is already active on startup.
@@ -58,8 +61,6 @@ export const useMachinesStore = defineStore('machines', () => {
       setApiBase(`http://${machine.host}:${machine.port}`)
     }
   }, { immediate: true })
-
-  const activeMachine = computed(() => machines.value.find(m => m.id === activeMachineId.value) ?? machines.value[0])
 
   function addMachine(m: Omit<Machine, 'id' | 'online'>) {
     machines.value.push({ ...m, id: crypto.randomUUID(), online: false })
