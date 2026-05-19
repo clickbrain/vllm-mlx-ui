@@ -85,6 +85,14 @@ git pull --rebase
 git tag "${TAG}"
 git push origin main "${TAG}"
 
+# ── 5b. Create GitHub Release ──────────────────────────────
+echo "→ Creating GitHub Release..."
+gh release create "${TAG}" \
+  --title "${TAG}" \
+  --generate-notes \
+  --repo "clickbrain/vllm-mlx-ui"
+echo "  ✓ GitHub Release created"
+
 # ── 6. Wait for GitHub to generate the tarball ─────────────
 TARBALL_URL="https://github.com/clickbrain/vllm-mlx-ui/archive/refs/tags/${TAG}.tar.gz"
 echo "→ Waiting for GitHub tarball to become available..."
