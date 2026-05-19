@@ -1804,6 +1804,13 @@ async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
     if engine.install_method == "bundled":
         raise HTTPException(status_code=400, detail=f"Engine {engine_id!r} is bundled and cannot be installed.")
 
+    req_errors = engine.check_requirements()
+    if req_errors:
+        raise HTTPException(
+            status_code=400,
+            detail="\n".join(req_errors),
+        )
+
     try:
         cmd = engine.install_command()
     except NotImplementedError as exc:

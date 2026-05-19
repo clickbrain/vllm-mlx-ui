@@ -177,6 +177,16 @@ def list_engines() -> list[dict]:
             latest = engine.latest_version()
         except Exception:
             pass
+        req_errors: list[str] = []
+        try:
+            req_errors = engine.check_requirements()
+        except Exception as e:
+            logger.warning("check_requirements failed for %s: %s", engine.id, e)
+        req_warnings: list[str] = []
+        try:
+            req_warnings = engine.check_warnings()
+        except Exception as e:
+            logger.warning("check_warnings failed for %s: %s", engine.id, e)
         result.append({
             "id": engine.id,
             "name": engine.name,
@@ -190,6 +200,8 @@ def list_engines() -> list[dict]:
             "release_url": getattr(engine, "release_url", ""),
             "latest_version": latest,
             "fixed_model_display": engine.get_fixed_model_display() if installed else None,
+            "requirements_errors": req_errors,
+            "requirements_warnings": req_warnings,
         })
     return result
 

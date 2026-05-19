@@ -1,23 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Ds4M5Engine — adapter for the DeepSeek V4 Flash inference engine with M5 optimizations.
+"""Ds4M5Engine — adapter for the DeepSeek V4 Flash (ds4) inference engine.
 
-The ds4-m5 engine (github.com/Swival/ds4-m5) is a specialised native Metal/CUDA
-inference engine for DeepSeek V4 Flash GGUF models.  It provides an OpenAI-compatible
-server with native thinking/reasoning support, tool calls via DSML, and a disk-backed
-KV cache for long-context sessions.
+Auto-selects the best upstream fork based on your Apple Silicon chip:
+  • M5 and newer → ``audreyt/ds4``  (M5 Metal Tensor: +~10% gen, +~5% prefill)
+  • M1–M4         → ``antirez/ds4``  (original by Salvatore Sanfilippo; authoritative)
 
-Requires an Apple Silicon Mac (M1–M5) with **at least 96 GB of RAM** for the
-2-bit quantised model (q2-imatrix) and 256 GB+ for the 4-bit quant (q4-imatrix).
-The ``m5`` branch includes M5-specific Metal optimisations that provide ~1.86x
-prefill and ~1.45x generation speedup on Apple M5 Max hardware.
+Both forks use the same ``antirez/deepseek-v4-gguf`` weights and expose identical
+endpoints including ``/v1/responses`` (Codex CLI), ``/v1/messages`` (Claude Code),
+and ``/v1/chat/completions``.
+
+Requires an Apple Silicon Mac with ≥96 GB RAM (q2-imatrix, ~81 GB) or ≥256 GB
+for q4-imatrix (~153 GB).  Typical generation: 26 t/s on M3 Max 128 GB, 38 t/s
+on M5 Max 128 GB.
 
 Install::
 
-    git clone -b m5 https://github.com/Swival/ds4-m5.git
-    cd ds4-m5 && make
-    ./download_model.sh q2-imatrix   # or q4-imatrix
+    git clone https://github.com/antirez/ds4.git   # M1–M4
+    git clone https://github.com/audreyt/ds4.git    # M5+
+    cd ds4 && make
+    ./download_model.sh q2-imatrix
 
-Launch:  ``./ds4-server --ctx 393216 --kv-disk-dir /tmp/ds4-kv``  (≥128 GB RAM)
+Launch:  ``./ds4-server --ctx 393216 --kv-disk-dir ~/.cache/ds4-kv``  (≥128 GB)
 """
 from __future__ import annotations
 
@@ -33,11 +36,7 @@ from .flag_probe import add_if_supported
 # ── Apple Silicon chip detection ─────────────────────────────────────────────
 
 def detect_apple_chip() -> str | None:
-    """Detect the Apple Silicon chip generation.
-
-    Returns ``"M1"``, ``"M2"``, ``"M3"``, ``"M4"``, ``"M5"`` or ``None``
-    when not running on Apple Silicon.
-    """
+    """Return ``"M1"``, ``"M2"``, ``"M3"``, ``"M4"``, ``"M5"`` etc. or ``None``."""
     if platform.system() != "Darwin":
         return None
     try:
@@ -45,8 +44,7 @@ def detect_apple_chip() -> str | None:
             ["sysctl", "-n", "machdep.cpu.brand_string"],
             capture_output=True, text=True, timeout=2,
         )
-        variant = result.stdout.strip()
-        m = re.search(r"Apple\s+(M\d+)", variant)
+        m = re.search(r"Apple\s+(M\d+)", result.stdout.strip())
         if m:
             return m.group(1)
     except Exception:
@@ -54,22 +52,89 @@ def detect_apple_chip() -> str | None:
     return None
 
 
-def is_m5_chip() -> bool:
-    """Return ``True`` if running on an Apple M5-series chip."""
+def _chip_generation() -> int | None:
+    """Return the Apple Silicon generation number (1=M1, 5=M5, …) or ``None``."""
     chip = detect_apple_chip()
-    return chip is not None and chip.upper().startswith("M5")
+    if chip is None:
+        return None
+    m = re.match(r"M(\d+)", chip.upper())
+    return int(m.group(1)) if m else None
+
+
+def is_m5_chip() -> bool:
+    """Return ``True`` if running on an Apple M5-series chip (kept for compatibility)."""
+    return is_m5_or_newer()
+
+
+def is_m5_or_newer() -> bool:
+    """Return ``True`` if running on M5 or any newer Apple Silicon chip."""
+    gen = _chip_generation()
+    return gen is not None and gen >= 5
+
+
+# ── Fork selection ────────────────────────────────────────────────────────────
+
+_FORK_M5 = "audreyt"   # M5+: Metal Tensor optimization
+_FORK_STD = "antirez"  # M1–M4: original, authoritative
+
+_FORK_REPOS: dict[str, str] = {
+    "antirez": "https://github.com/antirez/ds4.git",
+    "audreyt": "https://github.com/audreyt/ds4.git",
+}
+
+
+def _select_fork() -> str:
+    """Choose the best fork for the current machine (used for new installs)."""
+    return _FORK_M5 if is_m5_or_newer() else _FORK_STD
+
+
+def _detect_installed_fork(ds4_dir: str) -> str | None:
+    """Read git remote origin and return ``"antirez"``, ``"audreyt"``, ``"swival"``, or ``None``."""
+    git_dir = os.path.join(ds4_dir, ".git")
+    if not os.path.isdir(git_dir):
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=ds4_dir, capture_output=True, text=True, timeout=5,
+        )
+        remote = result.stdout.strip().lower()
+        if "audreyt" in remote:
+            return "audreyt"
+        if "antirez" in remote:
+            return "antirez"
+        if "swival" in remote:
+            return "swival"
+    except Exception:
+        pass
+    return None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-_DEFAULT_DS4_DIR = os.path.expanduser("~/.local/share/ds4-m5")
+# Legacy Swival install path (migrate → _DEFAULT_DS4_DIR on upgrade)
+_LEGACY_DS4_DIR = os.path.expanduser("~/.local/share/ds4-m5")
+# Canonical install path used for all new installs
+_DEFAULT_DS4_DIR = os.path.expanduser("~/.local/share/ds4")
 
 # HuggingFace repo that hosts the DeepSeek V4 Flash GGUF model files
-_MODEL_HF_REPO = "swival/DeepSeek-V4-Flash-GGUF"
+_MODEL_HF_REPO = "antirez/deepseek-v4-gguf"
 
 
 def _ds4_dir() -> str:
-    return os.environ.get("DS4_DIR") or _DEFAULT_DS4_DIR
+    """Resolve the ds4 install directory.
+
+    Priority: ``$DS4_DIR`` env var → ``~/.local/share/ds4`` (new canonical) →
+    ``~/.local/share/ds4-m5`` (legacy Swival fallback) → ``~/.local/share/ds4``.
+    """
+    explicit = os.environ.get("DS4_DIR")
+    if explicit:
+        return explicit
+    if os.path.isdir(_DEFAULT_DS4_DIR):
+        return _DEFAULT_DS4_DIR
+    if os.path.isdir(_LEGACY_DS4_DIR):
+        return _LEGACY_DS4_DIR
+    return _DEFAULT_DS4_DIR
 
 
 def _ds4_bin() -> str:
@@ -95,6 +160,46 @@ def _total_ram_gb() -> int:
     return 0
 
 
+def _free_ram_gb() -> int:
+    """Return approximately available (free + inactive + speculative) RAM in GB.
+
+    On Apple Silicon, inactive pages are reclaimed on demand, so this is a
+    realistic estimate of how much RAM the OS can hand to a new process.
+    Returns 0 if detection fails.
+    """
+    try:
+        if platform.system() == "Darwin":
+            # Get page size (4096 on Intel, 16384 on Apple Silicon)
+            ps = subprocess.run(
+                ["sysctl", "-n", "hw.pagesize"],
+                capture_output=True, text=True, timeout=2,
+            )
+            page_size = int(ps.stdout.strip()) if ps.returncode == 0 else 16384
+
+            vm = subprocess.run(
+                ["vm_stat"], capture_output=True, text=True, timeout=2,
+            )
+            free = inactive = speculative = 0
+            for line in vm.stdout.splitlines():
+                def _pages(l: str) -> int:
+                    return int(l.split(":")[1].strip().rstrip("."))
+                if "Pages free:" in line:
+                    free = _pages(line)
+                elif "Pages inactive:" in line:
+                    inactive = _pages(line)
+                elif "Pages speculative:" in line:
+                    speculative = _pages(line)
+            return (free + inactive + speculative) * page_size // (1024 ** 3)
+        elif platform.system() == "Linux":
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) // 1024 // 1024
+    except Exception:
+        pass
+    return 0
+
+
 def _recommended_quant() -> str:
     """Pick the best model quant for the available RAM."""
     ram = _total_ram_gb()
@@ -109,7 +214,6 @@ def _recommended_ctx_size() -> int:
     With the q2-imatrix model using ~74 GB:
     - ≥128 GB: 393216 (384K) → ~7.5 GB buffer → Think Max mode enabled
     - <128 GB: 131072 (128K) → ~2.5 GB buffer → leaves ~18 GB headroom on 96 GB
-      (proxy auto-disables thinking for this size to avoid budget exhaustion)
     """
     ram = _total_ram_gb()
     if ram >= 128:
@@ -129,32 +233,58 @@ def _gguf_dir() -> str:
 
 
 class Ds4M5Engine(BaseEngine):
-    """Adapter for the DeepSeek V4 Flash inference engine (ds4-m5)."""
+    """Adapter for the DeepSeek V4 Flash (ds4) inference engine."""
 
     id: ClassVar[str] = "ds4-m5"
-    name: ClassVar[str] = "ds4-m5 (DeepSeek V4 Flash)"
+    name: ClassVar[str] = "DeepSeek V4 Flash (ds4)"
 
     @property
     def description(self) -> str:
         chip = detect_apple_chip()
         ram = _total_ram_gb()
+        d = _ds4_dir()
+        installed_fork = _detect_installed_fork(d)
+        target_fork = _select_fork()
 
-        chip_info = ""
-        if chip and chip.upper().startswith("M5"):
-            chip_info = " M5-optimised — ~1.86× prefill, ~1.45× gen."
-        elif chip:
-            chip_info = f" Running on {chip} (m5 branch works on all Apple Silicon)."
+        # Fork status line
+        if installed_fork == "swival":
+            fork_line = (
+                "⚠️  Legacy Swival fork detected — missing /v1/responses (Codex CLI).\n"
+                "   Click 'Upgrade Engine' to migrate to the official fork without re-downloading the model."
+            )
+        elif installed_fork in ("antirez", "audreyt"):
+            fork_line = f"Engine source: {installed_fork}/ds4 ✓"
+        elif target_fork == _FORK_M5:
+            fork_line = f"Will install: audreyt/ds4 (M5 Metal Tensor — ~10% faster generation)"
+        else:
+            chip_gen = _chip_generation()
+            chip_label = f"M{chip_gen}" if chip_gen else (chip or "your chip")
+            fork_line = f"Will install: antirez/ds4 (original by Salvatore Sanfilippo, optimised for {chip_label})"
 
         ram_info = ""
         if ram > 0:
             rec = _recommended_quant()
-            ram_info = f" Detected {ram} GB RAM — will auto-select {rec} on install."
+            ram_info = f"Detected {ram} GB RAM → auto-selects {rec} on install.  "
 
-        return (
-            f"Specialised Metal inference engine for DeepSeek V4 Flash GGUF.{chip_info}{ram_info}\n\n"
-            f"⚠ HARDWARE ⚠ Apple Silicon Mac with ≥96 GB RAM (q2-imatrix ~81 GB)\n"
-            f"≥256 GB for q4-imatrix (~153 GB). 1M ctx ~ +26 GB. M3 Ultra / M5 recommended."
+        speed_info = ""
+        if chip:
+            gen = _chip_generation()
+            if gen == 5:
+                speed_info = "M5 Max 128 GB: ~86 short-prefill / ~348 long-prefill / ~38 gen t/s."
+            elif gen in (3, 4):
+                speed_info = "M3 Max 128 GB: ~59 short-prefill / ~250 long-prefill / ~27 gen t/s."
+
+        parts = [
+            f"Specialised Metal inference engine for DeepSeek V4 Flash GGUF.\n{fork_line}",
+        ]
+        if ram_info or speed_info:
+            parts.append(f"\n{ram_info}{speed_info}")
+        parts.append(
+            "\n\n⚠ HARDWARE ⚠ Apple Silicon Mac with ≥96 GB RAM (q2-imatrix ~81 GB)\n"
+            "≥256 GB for q4-imatrix (~153 GB).  Full /v1/responses, /v1/messages (Claude Code) endpoints."
         )
+        return "".join(parts)
+
     capabilities: ClassVar[frozenset[str]] = frozenset({
         "tool_calls",
         "reasoning",
@@ -163,7 +293,7 @@ class Ds4M5Engine(BaseEngine):
     })
     install_method: ClassVar[str] = "external"
     is_builtin: ClassVar[bool] = True
-    release_url: ClassVar[str] = "https://github.com/Swival/ds4-m5"
+    release_url: ClassVar[str] = "https://github.com/antirez/ds4"
     health_path: ClassVar[str] = "/v1/models"
 
     # ── Core BaseEngine implementation ───────────────────────────────────────
@@ -181,16 +311,20 @@ class Ds4M5Engine(BaseEngine):
     def build_command(self, config: dict[str, Any]) -> list[str]:
         """Build the ``ds4-server`` launch command."""
         engine_settings = config.get("engine_settings", {}).get(self.id, {})
+        ds4_dir = _ds4_dir()
+        binary = self._path_to_binary()
 
         # ── Model path ──────────────────────────────────────────────
         model = self.resolve_launch_model(config) or self._find_gguf()
         if not model:
             raise RuntimeError(
-                "No GGUF model found for ds4-m5. "
+                "No GGUF model found for ds4. "
                 "Run install first, or set a launch_model path in engine settings."
             )
+        # Normalize to absolute path so --chdir doesn't affect model resolution
+        model = os.path.abspath(model)
 
-        cmd = [self._path_to_binary()]
+        cmd = [binary]
         cmd += ["--model", model]
         cmd += ["--host", str(config.get("host", "127.0.0.1"))]
         cmd += ["--port", str(config.get("port", 8000))]
@@ -198,18 +332,25 @@ class Ds4M5Engine(BaseEngine):
         ctx = int(engine_settings.get("ctx_size", _recommended_ctx_size()))
         cmd += ["--ctx", str(ctx)]
 
-        # Per-request output token budget.  In thinking mode the <think> section
-        # counts against this limit, so too-small values (e.g. 2048) exhaust
-        # the budget before the answer is emitted.  64K is the safe default.
-        max_tokens = int(engine_settings.get("max_output_tokens", 65536))
+        # Per-request output token budget.  Setting this to 384000 (recommended
+        # by the antirez/ds4 project for coding agents) effectively removes the
+        # premature cap — the context window becomes the natural limit.  In
+        # thinking mode the <think> section also counts against this limit, so
+        # a value that is too small (e.g. 2048) exhausts the budget before any
+        # answer is emitted.
+        max_tokens = int(engine_settings.get("max_output_tokens", 384000))
         if max_tokens > 0:
-            add_if_supported(cmd, (_ds4_bin(),), "--tokens", [str(max_tokens)])
+            add_if_supported(cmd, (binary,), "--tokens", [str(max_tokens)])
+
+        # --chdir: required so relative runtime paths (metal/*.metal shaders) resolve
+        # from the ds4 source tree when launched from the dashboard working directory.
+        add_if_supported(cmd, (binary,), "--chdir", [ds4_dir])
 
         # Disk KV cache — strongly recommended by the dev; defaults to
         # ~/.cache/ds4-kv if the user has not overridden it.
-        kv_dir = os.path.expanduser(
+        kv_dir = os.path.abspath(os.path.expanduser(
             engine_settings.get("kv_disk_dir", "~/.cache/ds4-kv").strip()
-        )
+        )) if engine_settings.get("kv_disk_dir", "~/.cache/ds4-kv").strip() else ""
         if kv_dir:
             cmd += ["--kv-disk-dir", kv_dir]
 
@@ -219,23 +360,26 @@ class Ds4M5Engine(BaseEngine):
 
         mtp = engine_settings.get("mtp_model_path", "").strip()
         if mtp:
-            cmd += ["--mtp", mtp]
+            cmd += ["--mtp", os.path.abspath(os.path.expanduser(mtp))]
 
         if engine_settings.get("mtp_draft"):
             cmd += ["--mtp-draft", str(int(engine_settings.get("mtp_draft", 2)))]
 
         if config.get("api_key"):
             add_if_supported(
-                cmd, (_ds4_bin(),), "--api-key", [config["api_key"]],
+                cmd, (binary,), "--api-key", [config["api_key"]],
                 warn_if_unsupported=(
                     "ds4-server does not support --api-key in this version; "
                     "API key will not be enforced by the engine."
                 ),
             )
 
-        # Metal Tensor 4 acceleration — auto-enables on M5+ if the binary supports it.
-        # Provides ~1.86x prefill speedup on M5 Max. Falls back gracefully on older chips.
-        add_if_supported(cmd, (_ds4_bin(),), "--mt", ["auto"])
+        # Metal Tensor acceleration (audreyt fork, M5+).
+        # --mt auto gracefully disables itself on pre-M5 hardware, but only the
+        # audreyt fork includes the M5 Metal Tensor kernels that make it worthwhile.
+        # Only probe on M5+ to avoid spurious --help calls on every launch on M1-M4.
+        if is_m5_or_newer():
+            add_if_supported(cmd, (binary,), "--mt", ["auto"])
 
         return cmd
 
@@ -284,73 +428,164 @@ class Ds4M5Engine(BaseEngine):
         return None
 
     def latest_version(self) -> str | None:
-        """Query GitHub for the latest ds4 commit.
-
-        Swival/ds4-m5 is an M5-optimised fork that rebases on antirez/ds4 main.
-        We check the parent project's main branch for upstream changes, then
-        also check the m5 branch for the M5-specific commit that is actually
-        installed.  Returns the most recent SHA of the two.
-        """
+        """Query GitHub for the latest commit on the installed (or target) fork."""
         try:
             import json as _json
             import urllib.request as _urllib
 
-            shas: list[str] = []
-            for url in (
-                "https://api.github.com/repos/antirez/ds4/commits/main",
-                "https://api.github.com/repos/Swival/ds4-m5/commits/m5",
-            ):
-                try:
-                    with _urllib.urlopen(url, timeout=5) as resp:
-                        data = _json.loads(resp.read().decode())
-                        sha = data.get("sha", "")
-                        if sha:
-                            shas.append(sha[:12])
-                except Exception:
-                    pass
-            return shas[0] if shas else None
+            d = _ds4_dir()
+            installed_fork = _detect_installed_fork(d)
+            # Use installed fork if known; otherwise use what would be installed
+            fork = installed_fork if installed_fork in ("antirez", "audreyt") else _select_fork()
+            url = f"https://api.github.com/repos/{fork}/ds4/commits/main"
+            try:
+                with _urllib.urlopen(url, timeout=5) as resp:
+                    data = _json.loads(resp.read().decode())
+                    sha = data.get("sha", "")
+                    if sha:
+                        return sha[:12]
+            except Exception:
+                pass
         except Exception:
-            return None
+            pass
+        return None
 
     def get_working_directory(self) -> str | None:
         return _ds4_dir()
 
+    def check_requirements(self) -> list[str]:
+        """Return hardware/OS requirement errors for this engine.
+
+        Checks:
+        1. macOS is required (Metal/Apple GPU).
+        2. Apple Silicon (M1+) is required — Intel Macs cannot use Metal.
+        3. At least 96 GB total RAM is required for the q2-imatrix model (~81 GB).
+           (Use check_warnings() for low *free* RAM — that's a runtime condition.)
+        """
+        errors: list[str] = []
+
+        if platform.system() != "Darwin":
+            errors.append(
+                f"Requires macOS (Apple Silicon Mac). "
+                f"Your system is {platform.system()}."
+            )
+            # No point checking further — not macOS at all
+            return errors
+
+        chip = detect_apple_chip()
+        if chip is None:
+            errors.append(
+                "Requires an Apple Silicon Mac (M1 or newer). "
+                "Intel Macs are not supported — this engine uses Metal GPU acceleration."
+            )
+
+        total = _total_ram_gb()
+        if 0 < total < 96:
+            errors.append(
+                f"Requires at least 96 GB of RAM — your machine has {total} GB total. "
+                f"The q2-imatrix model uses ~81 GB of unified memory."
+            )
+
+        return errors
+
+    def check_warnings(self) -> list[str]:
+        """Return advisory warnings about current memory conditions.
+
+        Your machine may have enough total RAM to run this engine, but if other
+        apps are consuming most of it right now, the engine may fail to start.
+        This does NOT block install — it informs the user.
+        """
+        warnings: list[str] = []
+
+        total = _total_ram_gb()
+        if total < 96:
+            # Already blocked by check_requirements() — no need to warn too
+            return warnings
+
+        free = _free_ram_gb()
+        if 0 < free < 96:
+            warnings.append(
+                f"Your machine has {total} GB total RAM (enough to run this engine), "
+                f"but only ~{free} GB is currently free. "
+                f"Close other apps and quit Safari/Chrome before starting — "
+                f"the q2-imatrix model needs ~81 GB of free unified memory."
+            )
+
+        return warnings
+
     def upgrade_command(self) -> list[str] | None:
-        """Return a command that pulls the latest code and rebuilds."""
+        """Return a command that updates and rebuilds the ds4 engine.
+
+        If a legacy Swival install is detected the command migrates to the correct
+        fork — cloning into ``~/.local/share/ds4`` and copying the existing model
+        files so an 80+ GB re-download is not required.
+        """
         d = _ds4_dir()
+        installed_fork = _detect_installed_fork(d)
+
+        if installed_fork == "swival":
+            # Migrate: clone correct fork, build, copy existing model files
+            target_fork = _select_fork()
+            fork_url = _FORK_REPOS[target_fork]
+            new_dir = _DEFAULT_DS4_DIR
+            old_gguf = shlex_quote(os.path.join(d, "gguf"))
+            new_gguf = shlex_quote(os.path.join(new_dir, "gguf"))
+            nq = shlex_quote(new_dir)
+            furl = shlex_quote(fork_url)
+            return [
+                "sh", "-c",
+                f"echo '=== Migrating from Swival fork to {target_fork}/ds4 ===' "
+                f"&& mkdir -p {shlex_quote(os.path.dirname(new_dir))} "
+                f"&& git clone {furl} {nq} "
+                f"&& cd {nq} "
+                f"&& make -j$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4) "
+                f"&& if [ -d {old_gguf} ] && [ ! -d {new_gguf} ]; then "
+                f"echo '=== Copying existing model files (no re-download needed) ===' "
+                f"&& cp -r {old_gguf} {new_gguf}; fi "
+                f"&& echo '=== Migration complete — now using {target_fork}/ds4 ==='",
+            ]
+
         if not os.path.isdir(os.path.join(d, ".git")):
             return None
+
         return [
             "sh", "-c",
             f"cd {shlex_quote(d)} && git pull && make clean && make -j$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)",
         ]
 
     def install_command(self) -> list[str]:
-        """Clone the m5 branch, build, and download the recommended model for this machine."""
+        """Clone the correct fork for this machine, build, and download the recommended model."""
         d = _ds4_dir()
         quant = _recommended_quant()
+        fork = _select_fork()
+        fork_url = _FORK_REPOS[fork]
+        ram = _total_ram_gb()
+        fork_note = (
+            "M5 Metal Tensor fork (audreyt/ds4)" if fork == _FORK_M5
+            else "original upstream fork (antirez/ds4)"
+        )
         return [
             "sh", "-c",
             f"mkdir -p {shlex_quote(os.path.dirname(d))} "
-            f"&& echo '=== Step 1/2: Cloning ds4-m5 engine (m5 branch) ===' "
-            f"&& git clone -b m5 https://github.com/Swival/ds4-m5.git {shlex_quote(d)} "
+            f"&& echo '=== Step 1/2: Cloning ds4 engine ({fork_note}) ===' "
+            f"&& git clone {shlex_quote(fork_url)} {shlex_quote(d)} "
             f"&& cd {shlex_quote(d)} "
             f"&& echo '=== Step 2/2: Building inference engine... ===' "
             f"&& make -j$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4) "
             f"&& echo '=== Build complete. Now downloading model ({quant})... ===' "
-            f"&& echo 'Auto-selected {quant} based on {_total_ram_gb()} GB RAM detected.' "
-            f"&& echo 'This downloads the DeepSeek V4 Flash GGUF weights from HuggingFace.' "
-            f"&& echo 'It may take 10-30 minutes depending on your internet connection.' "
+            f"&& echo 'Auto-selected {quant} based on {ram} GB RAM detected.' "
+            f"&& echo 'Downloading DeepSeek V4 Flash GGUF weights from HuggingFace.' "
+            f"&& echo 'This may take 10-30 minutes depending on your internet connection.' "
             f"&& ./download_model.sh {quant} "
             f"&& echo '=== Install complete! Engine + model ready. ==='",
         ]
 
     def uninstall_command(self) -> list[str]:
-        """Remove the ds4-m5 engine directory (~/.local/share/ds4-m5)."""
+        """Remove the ds4 engine directory."""
         d = _ds4_dir()
         return [
             "sh", "-c",
-            f"echo '=== Removing ds4-m5 from {shlex_quote(d)} ===' "
+            f"echo '=== Removing ds4 from {shlex_quote(d)} ===' "
             f"&& rm -rf {shlex_quote(d)} "
             f"&& echo '=== Uninstall complete. ==='",
         ]
@@ -418,7 +653,7 @@ class Ds4M5Engine(BaseEngine):
         ]
 
     def get_fixed_model_display(self) -> str | None:
-        """ds4-m5 serves a single fixed GGUF — report it so the UI shows a label."""
+        """ds4 serves a single fixed GGUF — report it so the UI shows a label."""
         gguf = self._find_gguf()
         if gguf:
             return f"DeepSeek V4 Flash ({os.path.basename(gguf)})"
@@ -435,7 +670,7 @@ class Ds4M5Engine(BaseEngine):
         except OSError:
             pass
         return [{
-            "id": f"ds4-m5:{name}",
+            "id": f"ds4:{name}",
             "name": name,
             "path": gguf,
             "size_gb": size_gb,
@@ -487,15 +722,15 @@ class Ds4M5Engine(BaseEngine):
                 "key": "max_output_tokens",
                 "label": "Max Output Tokens (--tokens)",
                 "type": "int",
-                "default": 65536,
+                "default": 384000,
                 "min": 1024,
                 "max": 393216,
                 "help": (
                     "Per-request output token limit passed to ds4-server as --tokens. "
-                    "In thinking mode, both the thinking section AND the answer count against this limit. "
-                    "Too small (e.g. 2048) → thinking section exhausts the budget, no answer returned. "
-                    "65536 (64K) is a safe default for interactive chat. "
-                    "Use 384000 for agent/coding clients per the ds4 project recommendation."
+                    "384000 (recommended by the ds4 project for coding agents) effectively removes "
+                    "premature caps — the context window becomes the natural limit. "
+                    "In thinking mode, both the <think> section AND the answer count against this. "
+                    "Reduce to 65536 for interactive chat to free KV cache for new requests."
                 ),
             },
             {

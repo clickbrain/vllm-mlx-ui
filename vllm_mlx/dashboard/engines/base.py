@@ -145,6 +145,29 @@ class BaseEngine(ABC):
         """
         return None
 
+    def check_requirements(self) -> list[str]:
+        """Return a list of human-readable error strings for unmet system requirements.
+
+        Each string explains one requirement that is not satisfied on this machine.
+        Return an empty list if all requirements are met.
+
+        The UI uses this to show a warning on the engine card and to prevent
+        the user from attempting an install that is guaranteed to fail.
+        Override in subclasses that have hardware or OS constraints.
+        """
+        return []
+
+    def check_warnings(self) -> list[str]:
+        """Return a list of human-readable advisory strings about current conditions.
+
+        Unlike check_requirements(), these do NOT block install — they inform the
+        user of conditions that may prevent the engine from running right now
+        (e.g. insufficient free RAM) even though the hardware is capable.
+        Return an empty list if there are no advisories.
+        Override in subclasses that have runtime-condition checks.
+        """
+        return []
+
     def default_engine_settings(self) -> dict[str, Any]:
         """Return the default values for this engine's engine_settings namespace.
 

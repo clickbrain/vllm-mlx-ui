@@ -372,9 +372,31 @@ This ensures `which ollama` resolves to the new version even for desktop app use
 
 **Release:** v0.6.0
 
-<!-- Add new entries here when agents make changes -->
+### 2026-05-XX — ds4 engine adapter rewrite (antirez/audreyt forks)
 
-### 2026-05-14 — Project Rename Notes (PENDING)
+**Problem:** `ds4_m5.py` was using `Swival/ds4-m5` which:
+- Missing `/v1/responses` endpoint (Codex CLI / OpenAI Responses API)
+- Wrong HF model repo (`swival/DeepSeek-V4-Flash-GGUF` vs actual `antirez/deepseek-v4-gguf`)
+- Advertised M5 speedup was measured against an old antirez baseline, not valid
+- Less maintained than the original
+
+**Fix:** Rewrote `ds4_m5.py` to auto-select correct fork by chip:
+- M5 and newer → `audreyt/ds4` (M5 Metal Tensor, ~10% gen speedup, same endpoints)
+- M1–M4 → `antirez/ds4` (original, authoritative, by Salvatore Sanfilippo)
+
+**Key changes:**
+- `_select_fork()` / `_detect_installed_fork()` — fork selection and git remote detection
+- `_chip_generation()` + `is_m5_or_newer()` — future-proof M5+ detection (M6/M7 safe)
+- `_ds4_dir()` — `~/.local/share/ds4` (new) with fallback to `~/.local/share/ds4-m5` (legacy)
+- `_MODEL_HF_REPO` — fixed to `antirez/deepseek-v4-gguf`
+- `build_command()` — added `--chdir` (Metal shader resolution), M5-only `--mt auto`, normalized all paths to absolute
+- `max_output_tokens` default — 384000 (from 65536) per antirez coding agent recommendation
+- `upgrade_command()` — Swival users: migration command that clones correct fork + copies gguf dir (no 87GB re-download)
+- `latest_version()` — tracks the installed fork's GitHub API (not always antirez)
+- `install_command()` — clones correct fork based on chip, `main` branch (no `-b m5`)
+- Engine `name` — "DeepSeek V4 Flash (ds4)", `release_url` → antirez/ds4
+
+
 **Context:** User wants to rename this project (`vllm-mlx-ui` / `clickbrain/vllm-mlx-ui`) to a new name. Full audit completed — ~1800 references across ~70 files. Key findings:
 - **Python package** `vllm_mlx/` is ~50% upstream code (waybarrios/vllm-mlx — DO NOT MODIFY) and ~50% our dashboard code
 - **Upstream code** (`vllm_mlx/server.py`, `engine/`, `models/`, etc.) must stay as-is or be PR'd to upstream

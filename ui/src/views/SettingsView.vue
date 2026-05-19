@@ -43,6 +43,8 @@ interface EngineInfo {
   release_url?: string
   is_builtin?: boolean
   health_path?: string
+  requirements_errors?: string[]
+  requirements_warnings?: string[]
 }
 const engines = ref<EngineInfo[]>([])
 const enginesLoading = ref(false)
@@ -559,6 +561,18 @@ async function doRestart() {
             </span>
           </div>
           <div class="engine-card-desc">{{ eng.description }}</div>
+          <div v-if="eng.requirements_errors && eng.requirements_errors.length" class="engine-req-errors">
+            <div class="engine-req-error-title">⚠ System Requirements Not Met</div>
+            <ul class="engine-req-error-list">
+              <li v-for="err in eng.requirements_errors" :key="err">{{ err }}</li>
+            </ul>
+          </div>
+          <div v-if="eng.requirements_warnings && eng.requirements_warnings.length" class="engine-req-warnings">
+            <div class="engine-req-warning-title">⚡ Low Available Memory</div>
+            <ul class="engine-req-warning-list">
+              <li v-for="warn in eng.requirements_warnings" :key="warn">{{ warn }}</li>
+            </ul>
+          </div>
           <div class="engine-card-footer">
             <span class="engine-method-chip">{{ eng.install_method }}</span>
             <span v-if="eng.version" class="engine-version dim">v{{ eng.version }}</span>
@@ -569,7 +583,7 @@ async function doRestart() {
               @click.stop="saveEngineAndRestart()"
             >{{ eng.id !== serverStore.engineId ? 'Save & Restart' : 'Restart' }}</AppButton>
             <AppButton
-              v-if="!eng.installed && eng.install_method !== 'bundled'"
+              v-if="!eng.installed && eng.install_method !== 'bundled' && !(eng.requirements_errors && eng.requirements_errors.length)"
               variant="primary"
               size="sm"
               :loading="installingEngine === eng.id"
@@ -1292,6 +1306,26 @@ async function doRestart() {
 .engine-external-hint { font-size: 12px; font-style: italic; }
 .engine-install-log { margin-top: var(--space-3); }
 .engine-install-log pre { font-size: 11px; font-family: var(--font-mono); color: var(--tx-muted); background: var(--bg-inset); border-radius: var(--r-sm); padding: var(--space-3); max-height: 160px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+.engine-req-errors {
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(239, 68, 68, .07);
+  border: 1px solid rgba(239, 68, 68, .3);
+  border-radius: var(--r-md);
+}
+.engine-req-error-title { font-size: 12px; font-weight: 700; color: var(--cr-400, #f87171); margin-bottom: var(--space-1); }
+.engine-req-error-list { margin: 0; padding-left: var(--space-4); }
+.engine-req-error-list li { font-size: 12px; color: var(--cr-300, #fca5a5); line-height: 1.5; }
+.engine-req-warnings {
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(245, 158, 11, .07);
+  border: 1px solid rgba(245, 158, 11, .3);
+  border-radius: var(--r-md);
+}
+.engine-req-warning-title { font-size: 12px; font-weight: 700; color: #f59e0b; margin-bottom: var(--space-1); }
+.engine-req-warning-list { margin: 0; padding-left: var(--space-4); }
+.engine-req-warning-list li { font-size: 12px; color: #fcd34d; line-height: 1.5; }
 .pref-list { display: flex; flex-direction: column; }
 .pref-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--bd-subtle); }
 .pref-row:last-child { border-bottom: none; }
