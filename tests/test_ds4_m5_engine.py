@@ -73,7 +73,7 @@ class TestGetDiscoveredModels:
 
         assert len(result) == 1
         item = result[0]
-        assert item["id"] == "ds4-m5:DeepSeek-V4-Flash-Q2-imatrix.gguf"
+        assert item["id"] == "ds4:DeepSeek-V4-Flash-Q2-imatrix.gguf"
         assert item["name"] == "DeepSeek-V4-Flash-Q2-imatrix.gguf"
         assert item["path"] == f"{GGUF_DIR}/DeepSeek-V4-Flash-Q2-imatrix.gguf"
         assert item["size_gb"] == 85.0

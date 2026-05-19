@@ -340,10 +340,30 @@ function cancelCachePath() {
   editCachePath.value = false
 }
 
+const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
+const HOSTNAME_RE = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/
+
+function validateHost(h: string): string {
+  if (IPV4_RE.test(h)) {
+    const octets = h.split('.').map(Number)
+    if (octets.some(o => o > 255)) return 'Invalid IP address — each octet must be 0–255'
+    return ''
+  }
+  if (HOSTNAME_RE.test(h)) return ''
+  return 'Invalid host — enter an IPv4 address or hostname (e.g. 192.168.1.42 or mac-studio.local)'
+}
+
 function submitAdd() {
-  if (!form.name.trim()) { formError.value = 'Name is required'; return }
-  if (!form.host.trim()) { formError.value = 'Host is required'; return }
-  machinesStore.addMachine({ name: form.name, host: form.host, port: form.port, type: form.type, memoryGb: 0 })
+  const name = form.name.trim()
+  const host = form.host.trim()
+  if (!name) { formError.value = 'Name is required'; return }
+  if (!host) { formError.value = 'Host is required'; return }
+  const hostErr = validateHost(host)
+  if (hostErr) { formError.value = hostErr; return }
+  if (form.port < 1 || form.port > 65535) { formError.value = 'Port must be between 1 and 65535'; return }
+  const duplicate = machinesStore.machines.some(m => m.host === host && m.port === form.port)
+  if (duplicate) { formError.value = `A machine at ${host}:${form.port} is already in your fleet`; return }
+  machinesStore.addMachine({ name, host, port: form.port, type: form.type, memoryGb: 0 })
   form.name = ''; form.host = ''; form.port = 8502
   showAddForm.value = false
   formError.value = ''
@@ -653,7 +673,7 @@ async function doRestart() {
           </div>
           <div class="field field-sm">
             <label class="field-label">Port</label>
-            <input v-model.number="form.port" class="field-input" type="number" placeholder="8502" />
+            <input v-model.number="form.port" class="field-input" type="number" min="1" max="65535" placeholder="8502" />
           </div>
         </div>
         <p v-if="formError" class="form-error">{{ formError }}</p>

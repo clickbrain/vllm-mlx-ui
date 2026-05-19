@@ -110,10 +110,22 @@ def _start_background_scheduler() -> None:
 
 
 @app.on_event("shutdown")
-def _stop_background_scheduler() -> None:
+def _stop_background_tasks() -> None:
+    # Stop the update scheduler
     _update_scheduler_stop.set()
     if _update_scheduler_thread is not None:
         _update_scheduler_thread.join(timeout=2)
+    # Signal running benchmarks to stop
+    with _benchmark_lock:
+        if _benchmark_stop_event is not None:
+            _benchmark_stop_event.set()
+    with _compare_lock:
+        if _compare_stop_event is not None:
+            _compare_stop_event.set()
+    # Join tracked background threads so they can clean up
+    for t in (_benchmark_thread, _compare_thread):
+        if t is not None and t.is_alive():
+            t.join(timeout=3)
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -697,6 +709,7 @@ def clear_all_benchmarks(_: None = Depends(_check_auth)) -> dict:
 _benchmark_running = False
 _benchmark_lock = threading.Lock()
 _benchmark_stop_event: threading.Event | None = None
+_benchmark_thread: threading.Thread | None = None
 
 # Global lifecycle lock shared by start/stop, hot-swap, and engine compare.
 # Prevents concurrent engine restarts from racing with each other.
@@ -708,7 +721,7 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
     """Start a benchmark run for one or more models in the background.
     Poll GET /benchmark/status to check progress, GET /benchmarks for results.
     """
-    global _benchmark_running, _benchmark_stop_event
+    global _benchmark_running, _benchmark_stop_event, _benchmark_thread
     with _benchmark_lock:
         if _benchmark_running:
             return {"ok": False, "message": "A benchmark is already running"}
@@ -763,7 +776,10 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
             with _benchmark_lock:
                 _benchmark_running = False
 
-    threading.Thread(target=_run, daemon=True).start()
+    _t = threading.Thread(target=_run, daemon=True, name="benchmark")
+    with _benchmark_lock:
+        _benchmark_thread = _t
+    _t.start()
     return {"ok": True, "message": f"Benchmark started for {len(model_ids)} model(s)"}
 
 
@@ -790,6 +806,7 @@ _compare_running = False
 _compare_lock = threading.Lock()
 _compare_results: list[dict] = []
 _compare_stop_event: threading.Event | None = None
+_compare_thread: threading.Thread | None = None
 
 
 @app.post("/benchmark/compare")
@@ -816,7 +833,7 @@ def run_engine_compare(req: dict[str, Any], _: None = Depends(_check_auth)) -> d
         409: if a lifecycle operation or compare is already running
         409: if active proxied requests are in-flight (would be disrupted)
     """
-    global _compare_running, _compare_stop_event, _compare_results
+    global _compare_running, _compare_stop_event, _compare_results, _compare_thread
     if not _lifecycle_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="A lifecycle operation is already in progress.")
     _lifecycle_lock.release()  # released immediately — compare manages its own sub-lifecycle
@@ -909,7 +926,10 @@ def run_engine_compare(req: dict[str, Any], _: None = Depends(_check_auth)) -> d
             with _compare_lock:
                 _compare_running = False
 
-    threading.Thread(target=_run_compare, daemon=True).start()
+    _ct = threading.Thread(target=_run_compare, daemon=True, name="compare-benchmark")
+    with _compare_lock:
+        _compare_thread = _ct
+    _ct.start()
     return {"ok": True, "message": f"Engine comparison started for {len(engine_ids)} engines"}
 
 
