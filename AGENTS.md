@@ -218,6 +218,31 @@ bash scripts/release.sh <version>
 
 <!-- Add new entries here when agents make changes -->
 
+### 2026-05-19 — Issues #20, #22 closed; upstream PRs #24/#25/#27/#28 closed as N/A
+
+**Issue #22 — Form validation in SettingsView add-machine form** (`ui/src/views/SettingsView.vue`)
+- `validateHost()` helper: accepts IPv4 (with per-octet 0–255 check) or RFC-compliant hostnames
+- Port range check (1–65535) with HTML `min`/`max` attributes on port input
+- Duplicate detection: blocks adding a machine whose `host:port` already exists in the fleet
+- All errors shown via existing `formError` ref; submission blocked until valid
+
+**Issue #20 — Background thread tracking and graceful shutdown** (`vllm_mlx/dashboard/mgmt_server.py`)
+- Added `_benchmark_thread` and `_compare_thread` module-level `Thread | None` refs
+- Thread object stored when each job launches (named `"benchmark"` / `"compare-benchmark"`)
+- Shutdown handler renamed `_stop_background_tasks`; now signals both stop events and joins tracked threads (3 s timeout each) before process exits
+- `server_manager.py` LOG_FILE handle was already a `with` context manager (pre-existing fix)
+- `ssd_cache.py` writer thread is upstream — not modified
+
+**Upstream PR candidates #24/#25/#27/#28 — closed as not applicable**
+- #27 (O(N) prefix scan): already fixed upstream — `SSDIndex.lookup_prefix()` uses `prefix_hash` with compound SQLite index
+- #25 (O(N log N) eviction): core issue fixed — `_enforce_capacity()` uses `ORDER BY accessed_at ASC LIMIT 1` backed by `idx_entries_accessed`
+- #24 (tokenizer memoize): not applicable — `_get_engine_tokenizer()` is two `getattr()` calls, already O(1)
+- #28 (model path memoize): not applicable — `_model_path` is a plain global string, no hot-path cost
+
+**Pre-existing test fix** (`tests/test_ds4_m5_engine.py`): stale `ds4-m5:` model ID prefix updated to `ds4:` to match engine's `get_discovered_models()` output (broke when engine was renamed in v0.6.x)
+
+**Commit:** `20eb0ae`
+
 ### 2026-05-02 — Phase 2-5 Implementation Complete
 **Phase 2 — Frontend Polish (8/8 tasks)**
 - Lazy-loaded routes (`router/index.ts`)
