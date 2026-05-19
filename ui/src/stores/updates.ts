@@ -125,8 +125,10 @@ export const useUpdatesStore = defineStore('updates', () => {
           await api.get('/health')
           clearInterval(healthPoll)
           installPhase.value = 'Done! Reloading…'
-          // Brief pause so the user sees the "Done" message, then reload
-          setTimeout(() => window.location.reload(), 1200)
+          // Hard-navigate to / so the browser fetches fresh HTML (not cached).
+          // window.location.reload() can return a stale index.html whose asset
+          // hash no longer matches the new build, causing a blank page.
+          setTimeout(() => { window.location.href = '/' }, 1200)
         } catch { /* still restarting */ }
       }, 2000)
     }

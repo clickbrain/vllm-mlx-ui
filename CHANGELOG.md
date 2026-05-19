@@ -1,5 +1,9 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.6.23 — 2026-05-19
+
+- **Fix: Blank page after in-app upgrade** — The browser was caching the old `index.html` (with old asset hash) after an upgrade. The new JS bundle has a different content-hash filename, so the stale HTML pointed to a file that no longer existed, producing a blank white page. Fixed two ways: (1) the server now sends `Cache-Control: no-store` on every `index.html` response so browsers never cache it; (2) the post-upgrade reload now navigates to `/` with `window.location.href` instead of `window.location.reload()` to guarantee a fresh HTTP request for the HTML.
+
 ## v0.6.22 — 2026-05-19
 
 - **Fix: Settings form validation** — the Add Machine form now validates IPv4 address format (per-octet 0–255 range check), hostname format (RFC-compliant), port range (1–65535), and duplicate detection (blocks adding a host:port already in the fleet). The port input also enforces `min=1 max=65535` at the HTML level. Clear inline error messages are shown for every failure condition.

@@ -2370,9 +2370,11 @@ if _os.path.isdir(_UI_DIST):
     @app.get("/", include_in_schema=False)
     @app.get("/{full_path:path}", include_in_schema=False)
     async def _serve_spa(full_path: str = "") -> FileResponse:
-        # Don't intercept API paths — they're matched before this catch-all
+        # Don't intercept API paths — they're matched before this catch-all.
+        # no-store prevents browsers caching the old index.html after an upgrade
+        # (asset filenames are content-hashed so they can be cached indefinitely).
         index = _os.path.join(_UI_DIST, "index.html")
-        return FileResponse(index)
+        return FileResponse(index, headers={"Cache-Control": "no-store"})
 
 
 # ── Server startup ────────────────────────────────────────────────────────────
