@@ -1,5 +1,14 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.6.22 — 2026-05-19
+
+- **Fix: Settings form validation** — the Add Machine form now validates IPv4 address format (per-octet 0–255 range check), hostname format (RFC-compliant), port range (1–65535), and duplicate detection (blocks adding a host:port already in the fleet). The port input also enforces `min=1 max=65535` at the HTML level. Clear inline error messages are shown for every failure condition.
+- **Fix: Background thread cleanup on shutdown** — benchmark and engine-comparison threads are now tracked by reference at module level. The FastAPI shutdown handler signals their stop events and joins them (3 s timeout each) so in-flight benchmark runs flush results cleanly instead of being killed mid-run.
+- **Fix: `brew doctor` warning** — removed a stale v0.5.5 formula file that had been left at the root of the Homebrew tap repo. Homebrew expects formulas exclusively inside `Formula/`; the orphaned root copy was causing a spurious warning.
+- **Fix: `release.sh` now creates GitHub Releases** — every tag push now calls `gh release create --generate-notes` so GitHub Releases stay in sync with git tags automatically.
+- **Docs: README rewritten for Vue 3 / FastAPI architecture** — removed all Streamlit references, corrected port to 8502, documented all 6 built-in engines, current features (command palette, HTML preview, multi-machine fleet, virtual scroll, benchmark comparison), and updated file layout.
+- **Docs: CHANGELOG backfilled for v0.6.9–v0.6.21** — release notes were missing for 9 versions; all entries now documented with technical detail.
+
 ## v0.6.21 — 2026-05-19
 
 - **Engine system requirements checking** — `BaseEngine` gains `check_requirements()` and `check_warnings()` abstract methods. Engines can now report unmet hardware/OS requirements (errors) and advisory conditions (e.g. low available RAM, warnings). The Settings engine card shows a red error panel and hides the Install button when requirements are not met; a yellow advisory panel appears for warnings that don't block install.
