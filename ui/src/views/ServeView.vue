@@ -146,6 +146,15 @@ async function handleModelSwitch(e: Event) {
   const target = e.target as HTMLSelectElement
   const newId = target.value
   if (!newId || newId === serverStore.modelId) return
+
+  // Auto-switch engine if the model belongs to a specific engine (e.g. ds4)
+  const modelMeta = modelsStore.models.find(m => m.id === newId)
+  if (modelMeta?.engine && modelMeta.engine !== selectedEngine.value) {
+    selectedEngine.value = modelMeta.engine
+    // Engine changed — user must click Apply & Restart; don't also load the model now
+    return
+  }
+
   switchingModel.value = true
   switchError.value = null
   try {

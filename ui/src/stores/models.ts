@@ -20,6 +20,8 @@ export interface Model {
   quantization: string
   cached: boolean
   active: boolean
+  engine?: string   // set for engine-discovered models (e.g. ds4)
+  source?: string   // "engine" for engine-discovered, undefined for HF cache
 }
 
 export interface HFModel {
@@ -157,7 +159,7 @@ export const useModelsStore = defineStore('models', () => {
     loading.value = true
     try {
       const activeModel = serverStore.modelId
-      const raw = await api.get<Array<{ id: string; size_gb: number; size_bytes?: number }>>('/models/cached')
+      const raw = await api.get<Array<{ id: string; size_gb: number; size_bytes?: number; engine?: string; source?: string }>>('/models/cached')
       models.value = raw.map(m => ({
         id: m.id,
         name: m.id.split('/').pop() ?? m.id,
@@ -165,6 +167,8 @@ export const useModelsStore = defineStore('models', () => {
         quantization: deriveQuantization(m.id),
         cached: true,
         active: m.id === activeModel,
+        engine: m.engine,
+        source: m.source,
       }))
     } finally {
       loading.value = false
