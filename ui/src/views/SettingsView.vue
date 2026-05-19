@@ -19,7 +19,7 @@ import { useUpdatesStore } from '@/stores/updates'
 import AppButton from '@/components/shared/AppButton.vue'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 import CollapsibleSection from '@/components/shared/CollapsibleSection.vue'
-import { api, BASE, getMgmtApiKey } from '@/api/client'
+import { api, getBase, getMgmtApiKey } from '@/api/client'
 
 const machinesStore = useMachinesStore()
 const serverStore = useServerStore()
@@ -103,7 +103,7 @@ async function installEngine(id: string) {
   installingEngine.value = id
   engineInstallLog.value[id] = 'Starting install...\n'
   try {
-    const resp = await fetch(`${BASE}/engines/${id}/install`, {
+    const resp = await fetch(`${getBase()}/engines/${id}/install`, {
       method: 'POST',
       headers: getMgmtApiKey() ? { 'X-Api-Key': getMgmtApiKey() } : {},
     })
@@ -137,7 +137,7 @@ async function uninstallEngine(id: string, name: string) {
   uninstallingEngine.value = id
   engineInstallLog.value[id] = ''
   try {
-    const resp = await fetch(`${BASE}/engines/${id}/uninstall`, {
+    const resp = await fetch(`${getBase()}/engines/${id}/uninstall`, {
       method: 'POST',
       headers: getMgmtApiKey() ? { 'X-Api-Key': getMgmtApiKey() } : {},
     })

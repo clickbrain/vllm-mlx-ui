@@ -11,7 +11,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import { api } from '@/api/client'
+import { api, setApiBase } from '@/api/client'
 
 export interface Machine {
   id: string
@@ -46,6 +46,18 @@ export const useMachinesStore = defineStore('machines', () => {
 
   watch(machines, (v) => localStorage.setItem(LS_KEY, JSON.stringify(v)), { deep: true })
   watch(activeMachineId, (v) => localStorage.setItem(LS_ACTIVE_KEY, v))
+
+  // Keep the API client base URL in sync with the active machine.
+  // immediate: true handles the case where a remote machine was persisted
+  // from a previous session and is already active on startup.
+  watch(activeMachine, (machine) => {
+    if (!machine) return
+    if (machine.type === 'local') {
+      setApiBase(import.meta.env.DEV ? '/api' : '')
+    } else {
+      setApiBase(`http://${machine.host}:${machine.port}`)
+    }
+  }, { immediate: true })
 
   const activeMachine = computed(() => machines.value.find(m => m.id === activeMachineId.value) ?? machines.value[0])
 

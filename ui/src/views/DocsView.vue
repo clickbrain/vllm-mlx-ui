@@ -133,11 +133,11 @@ function tocClick(id: string) {
   nextTick(() => scrollToHash(id))
 }
 
-const BASE = import.meta.env.DEV ? '/api' : ''
+import { getBase } from '@/api/client'
 
 async function loadToc() {
   try {
-    const r = await fetch(`${BASE}/api/docs`)
+    const r = await fetch(`${getBase()}/api/docs`)
     if (!r.ok) throw new Error(`${r.status}`)
     const data = await r.json() as { sections: Section[] }
     sections.value = data.sections
@@ -155,7 +155,7 @@ async function loadDoc(path: string, scrollHash?: string) {
   activeSection.value = ''
 
   try {
-    const r = await fetch(`${BASE}/api/docs/${encodeURIComponent(path)}`)
+    const r = await fetch(`${getBase()}/api/docs/${encodeURIComponent(path)}`)
     if (!r.ok) throw new Error(`${r.status}`)
     const md = await r.text()
 

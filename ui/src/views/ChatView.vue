@@ -21,6 +21,7 @@ import { useModelsStore } from '@/stores/models'
 import { useChatStore } from '@/stores/chat'
 import AppButton from '@/components/shared/AppButton.vue'
 import MarkdownMessage from '@/components/chat/MarkdownMessage.vue'
+import { getBase } from '@/api/client'
 
 defineOptions({ name: 'ChatView' })
 
@@ -212,8 +213,7 @@ async function applyOptimalSettings() {
   if (!modelId.value) return
   loadingOptimal.value = true
   try {
-    const BASE = import.meta.env.DEV ? '/api' : ''
-    const url = `${BASE}/models/presets?model_id=${encodeURIComponent(modelId.value)}&task_mode=${taskMode.value}`
+    const url = `${getBase()}/models/presets?model_id=${encodeURIComponent(modelId.value)}&task_mode=${taskMode.value}`
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`${resp.status}`)
     const data = await resp.json() as { recommended?: Record<string, number> }
@@ -283,9 +283,8 @@ function buildBody(): Record<string, unknown> {
 
 // ── Non-streaming send ────────────────────────────────────────────────────────
 async function sendNonStreaming(body: Record<string, unknown>) {
-  const BASE = import.meta.env.DEV ? '/api' : ''
   abortCtrl = new AbortController()
-  const resp = await fetch(`${BASE}/v1/chat/completions`, {
+  const resp = await fetch(`${getBase()}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -307,9 +306,8 @@ async function sendNonStreaming(body: Record<string, unknown>) {
 
 // ── Streaming send ────────────────────────────────────────────────────────────
 async function sendStreaming(body: Record<string, unknown>) {
-  const BASE = import.meta.env.DEV ? '/api' : ''
   abortCtrl = new AbortController()
-  const resp = await fetch(`${BASE}/v1/chat/completions`, {
+  const resp = await fetch(`${getBase()}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

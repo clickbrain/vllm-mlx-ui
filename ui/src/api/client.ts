@@ -19,8 +19,13 @@
 
 // In dev: Vite proxy rewrites /api → http://localhost:8502 and strips the prefix.
 // In production: Vue is served directly from mgmt_server at port 8502, so no prefix needed.
-const BASE = import.meta.env.DEV ? '/api' : ''
-export { BASE }
+let _base: string = import.meta.env.DEV ? '/api' : ''
+
+/** Get the current API base URL (updated when the active machine changes). */
+export function getBase(): string { return _base }
+
+/** Switch the API base URL to target a different machine. */
+export function setApiBase(base: string): void { _base = base }
 
 const LS_KEY = 'vmui_mgmt_api_key'
 
@@ -46,7 +51,7 @@ function authHeaders(): Record<string, string> {
  * parses the response body as JSON (or returns undefined for empty bodies).
  */
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${_base}${path}`, {
     ...options,
     headers: { ...authHeaders(), ...(options?.headers as Record<string, string> ?? {}) },
   })
