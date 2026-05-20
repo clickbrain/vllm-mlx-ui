@@ -205,6 +205,11 @@ const mgmtPort = computed(() => {
 })
 const autoSwitchEnabled = ref(false)
 
+const allInterfaces = computed<NetworkInterface[]>(() => [
+  { ip: 'localhost', label: 'Localhost' },
+  ...networkInterfaces.value,
+])
+
 function connectionUrl(ip: string) {
   return `http://${ip}:${serverPort.value}/v1`
 }
@@ -400,8 +405,8 @@ async function doClearCache(type: string) {
         </div>
         <p class="conn-note">Copy any URL to use with Cursor, Continue, LM Studio, or any OpenAI-compatible client.</p>
 
-        <div v-if="networkInterfaces.length" class="conn-ifaces">
-          <div v-for="iface in networkInterfaces" :key="iface.ip" class="conn-iface-block">
+        <div v-if="allInterfaces.length" class="conn-ifaces">
+          <div v-for="iface in allInterfaces" :key="iface.ip" class="conn-iface-block">
             <div class="conn-iface-label">{{ iface.label }} — {{ iface.ip }}</div>
             <div class="conn-endpoint-table">
               <div
@@ -423,7 +428,7 @@ async function doClearCache(type: string) {
         <p v-else class="conn-empty">No network interfaces found.</p>
 
         <!-- Proxy endpoints for auto-switch -->
-        <div v-if="networkInterfaces.length" class="conn-proxy-section">
+        <div v-if="allInterfaces.length" class="conn-proxy-section">
           <div class="conn-proxy-header">
             <span class="conn-proxy-title">Via Dashboard Proxy</span>
             <span class="conn-proxy-badge" :class="autoSwitchEnabled ? 'proxy-on' : 'proxy-off'">
@@ -431,7 +436,7 @@ async function doClearCache(type: string) {
             </span>
           </div>
           <p class="conn-proxy-note">Use these URLs if you want automatic model switching — when a client requests a different model it will be loaded automatically and the client notified. Enable in Settings → Network &amp; Access → Auto Model Switch.</p>
-          <div v-for="iface in networkInterfaces" :key="'proxy-'+iface.ip" class="conn-iface-block">
+          <div v-for="iface in allInterfaces" :key="'proxy-'+iface.ip" class="conn-iface-block">
             <div class="conn-iface-label">{{ iface.label }} — {{ iface.ip }}</div>
             <div class="conn-endpoint-table">
               <div
