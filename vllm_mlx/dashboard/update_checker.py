@@ -437,9 +437,7 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
                             url = getattr(_e, "release_url", None) or f"https://pypi.org/project/{pkg}/#history"
                         else:
                             inst = _e.get_version() or "unknown"
-                            latest = _e.latest_version()
-                            if not latest:
-                                return None  # no update info available for this external engine
+                            latest = _e.latest_version() or inst  # fall back to inst so entry still appears
                             url = getattr(_e, "release_url", "")
                         return PackageInfo(
                             name=f"{_e_name} (engine)",
