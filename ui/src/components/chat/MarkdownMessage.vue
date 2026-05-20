@@ -220,7 +220,7 @@ watchEffect(async () => {
         previewBtn.textContent = '▶ Preview'
         previewVisible = false
       }
-      closePreview()  // initial state
+      closePreview()  // always start in code view; user clicks "▶ Preview" to switch
 
       previewBtn.addEventListener('click', () => {
         previewVisible ? closePreview() : openPreview()
@@ -257,10 +257,6 @@ watchEffect(async () => {
       header.insertBefore(previewBtn, copyBtn)
       header.insertBefore(saveBtn, copyBtn)
       header.insertBefore(openBtn, copyBtn)
-
-      // Auto-show preview for complete HTML documents
-      const isCompleteDoc = htmlContent.includes('<!DOCTYPE') || /<html[\s>]/i.test(htmlContent)
-      if (isCompleteDoc) openPreview()
     })
   }
 })

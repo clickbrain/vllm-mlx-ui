@@ -482,25 +482,62 @@ class LoadModelRequest(BaseModel):
     model_id: str
 
 
+def _model_family_from_id(model_id: str) -> str:
+    """
+    Infer model family keyword from the model_id string.
+    Used as a fallback when HuggingFace metadata is unavailable (local GGUF,
+    Ollama, ds4, or private models).  Strips engine prefixes (``ds4:``,
+    ``ollama:``, etc.) before matching.
+    """
+    mid = model_id.lower()
+    # Strip engine prefixes such as "ds4:deepseek-v4-flash" or "ollama:llama3.2"
+    if ":" in mid:
+        mid = mid.split(":", 1)[1]
+    if "deepseek" in mid or mid.startswith("ds4"):
+        return "deepseek"
+    if "qwen3" in mid:
+        return "qwen3"
+    if "qwen" in mid:
+        return "qwen2"
+    if "llama" in mid:
+        return "llama"
+    if "mistral" in mid or "mixtral" in mid:
+        return "mistral"
+    if "gemma" in mid:
+        return "gemma"
+    if "phi" in mid:
+        return "phi"
+    if "claude" in mid:
+        return "claude"
+    return ""
+
+
+def _is_reasoning_model(hint: str) -> bool:
+    """Return True for models that generate extended chain-of-thought / thinking tokens."""
+    return any(x in hint for x in ("deepseek", "r1", "thinking", "reasoner", "qwen3"))
+
+
 def _compute_optimal_params(
     hint: str,
     task_mode: str,
-    max_tokens: int,
+    context_length: int,
+    server_max_tokens: int,
+    ram_gb: float,
 ) -> dict[str, Any]:
     """
-    Compute optimal inference parameters for a model + task mode combination.
+    Compute optimal inference parameters for a model + task mode + hardware.
 
-    ``hint`` is a lowercased string combining model_type_hint and architecture
-    (used to identify the model family).  ``task_mode`` is one of:
-      - "chat"      General conversation. Balanced temperature.
-      - "code"      Code generation / completion. Low temperature, greedy-ish.
-      - "creative"  Creative writing / brainstorming. High temperature.
-      - "analysis"  Summarisation / reasoning / data analysis. Low-mid temperature.
-      - "precise"   Factual Q&A / retrieval. Near-zero temperature.
+    ``hint``              lowercased string with model family keywords
+    ``task_mode``         one of: chat / code / creative / analysis / precise
+    ``context_length``    model's context window (from HF or 8192 fallback)
+    ``server_max_tokens`` server's configured max_tokens ceiling
+    ``ram_gb``            machine's total unified memory in GB
 
-    Returns a dict of sampling parameters suitable for the chat completion API.
+    Returns a dict of sampling parameters for the chat completion API.
     """
-    # --- Per-model-family base settings ---
+    reasoning = _is_reasoning_model(hint)
+
+    # --- Per-model-family base sampling settings ---
     if any(x in hint for x in ("qwen3", "qwen2")):
         base = {"temperature": 0.6, "top_p": 0.9,  "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0}
     elif "deepseek" in hint:
@@ -514,28 +551,36 @@ def _compute_optimal_params(
     else:
         base = {"temperature": 0.7, "top_p": 0.9,  "top_k": 0,  "min_p": 0.0, "repetition_penalty": 1.0}
 
-    # --- Task-mode overrides applied on top of model-family base ---
-    # These deltas shift the base toward what works best for each task type.
-    mode = task_mode.lower()
-    if mode == "code":
-        # Low temperature for determinism; greedy sampling; penalise repetition slightly
-        base.update({"temperature": min(base["temperature"], 0.2), "top_p": 1.0, "top_k": 0, "repetition_penalty": 1.05})
-        tokens = min(max_tokens, 4096)
-    elif mode == "creative":
-        # High temperature for diversity; nucleus sampling wide open
-        base.update({"temperature": max(base["temperature"], 1.0), "top_p": 0.97, "top_k": 0, "repetition_penalty": 1.0})
-        tokens = max_tokens
-    elif mode == "analysis":
-        # Moderate temperature; prefer likely tokens; longer context for summaries
-        base.update({"temperature": max(min(base["temperature"], 0.5), 0.3), "top_p": 0.9, "top_k": 0, "repetition_penalty": 1.0})
-        tokens = max_tokens
-    elif mode == "precise":
-        # Near-zero temperature for factual / retrieval tasks
-        base.update({"temperature": 0.0, "top_p": 1.0, "top_k": 1, "repetition_penalty": 1.0})
-        tokens = min(max_tokens, 1024)
+    # --- Task-specific max output tokens (not the context window) ---
+    # Reasoning models need more headroom for thinking tokens.
+    if reasoning:
+        task_caps = {"chat": 16384, "code": 16384, "creative": 16384, "analysis": 32768, "precise": 8192}
     else:
-        # "chat" — use model-family base unchanged
-        tokens = max_tokens
+        task_caps = {"chat": 8192,  "code": 8192,  "creative": 8192,  "analysis": 16384, "precise": 1024}
+
+    # On machines with < 16 GB RAM the model is likely smaller; cap output tokens
+    # to avoid context pressure that would degrade generation quality.
+    if ram_gb < 16:
+        task_caps = {k: min(v, 4096) for k, v in task_caps.items()}
+    elif ram_gb < 32:
+        task_caps = {k: min(v, 8192) for k, v in task_caps.items()}
+
+    mode = task_mode.lower()
+    raw_cap = task_caps.get(mode, task_caps["chat"])
+    # Honour the server's configured ceiling (never recommend more than the server allows)
+    tokens = min(raw_cap, server_max_tokens, context_length)
+    tokens = max(tokens, 512)  # always at least 512
+
+    # --- Task-mode sampling overrides ---
+    if mode == "code":
+        base.update({"temperature": min(base["temperature"], 0.2), "top_p": 1.0, "top_k": 0, "repetition_penalty": 1.05})
+    elif mode == "creative":
+        base.update({"temperature": max(base["temperature"], 1.0), "top_p": 0.97, "top_k": 0, "repetition_penalty": 1.0})
+    elif mode == "analysis":
+        base.update({"temperature": max(min(base["temperature"], 0.5), 0.3), "top_p": 0.9, "top_k": 0, "repetition_penalty": 1.0})
+    elif mode == "precise":
+        base.update({"temperature": 0.0, "top_p": 1.0, "top_k": 1, "repetition_penalty": 1.0})
+    # "chat" — model-family base used unchanged
 
     base["max_tokens"] = tokens
     return base
@@ -559,6 +604,8 @@ def model_presets(
 
     The response includes ``recommended`` (sampling params) and
     ``task_mode`` (echoed back) alongside the raw model presets.
+    Recommendations account for: model family, task mode, machine RAM,
+    engine type, and the server's configured max_tokens ceiling.
     """
     if not model_id.strip():
         raise HTTPException(status_code=400, detail="model_id is required")
@@ -568,16 +615,39 @@ def model_presets(
     try:
         presets = mm.get_model_presets(model_id.strip())
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        logger.warning("get_model_presets failed for %r: %s", model_id, exc)
+        presets = {}
 
+    # Build hint: prefer HF metadata, fall back to parsing the model_id string.
+    # Including the model_id in hint means ds4:deepseek-v4-flash → "deepseek" family
+    # even when HuggingFace lookup fails (GGUF, Ollama, offline, etc.).
     model_type = presets.get("model_type_hint", "").lower()
     arch = presets.get("architecture", "").lower()
-    hint = model_type + " " + arch
-    max_tokens = presets.get("max_tokens", 2048)
+    id_family = _model_family_from_id(model_id.strip())
+    hint = (model_type + " " + arch + " " + id_family).strip()
 
-    recommended = _compute_optimal_params(hint, task_mode, max_tokens)
+    # Use the model's actual context window; fall back to a sensible default.
+    context_length = presets.get("context_length") or presets.get("max_tokens") or 8192
 
-    return {**presets, "recommended": recommended, "task_mode": task_mode}
+    # Server's configured ceiling — never recommend more output tokens than this.
+    try:
+        cfg = sm.load_config()
+        server_max_tokens = int(cfg.get("max_tokens") or cfg.get("max_request_tokens") or 32768)
+    except Exception:
+        server_max_tokens = 32768
+
+    # Machine RAM for hardware-aware token caps.
+    try:
+        mem = sm.get_memory_stats()
+        ram_gb = float(mem.get("total_gb", 16))
+    except Exception:
+        ram_gb = 16.0
+
+    recommended = _compute_optimal_params(hint, task_mode, context_length, server_max_tokens, ram_gb)
+
+    return {**presets, "recommended": recommended, "task_mode": task_mode,
+            "model_family": id_family or hint.split()[0] if hint.strip() else "unknown",
+            "ram_gb": round(ram_gb, 1)}
 
 
 @app.post("/server/load")

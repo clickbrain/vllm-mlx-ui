@@ -21,7 +21,7 @@ import { useModelsStore } from '@/stores/models'
 import { useChatStore } from '@/stores/chat'
 import AppButton from '@/components/shared/AppButton.vue'
 import MarkdownMessage from '@/components/chat/MarkdownMessage.vue'
-import { getBase } from '@/api/client'
+import { getBase, api } from '@/api/client'
 
 defineOptions({ name: 'ChatView' })
 
@@ -30,6 +30,12 @@ const modelsStore = useModelsStore()
 const chatStore = useChatStore()
 
 // ── Types ────────────────────────────────────────────────────────────────────
+
+interface EngineInfo {
+  id: string
+  name: string
+  installed: boolean
+}
 
 interface Message {
   role: 'user' | 'assistant'
@@ -88,7 +94,7 @@ function loadParams(model: string | null): ChatParams {
     const raw = localStorage.getItem(paramsKey(model))
     if (raw) return JSON.parse(raw) as ChatParams
   } catch {}
-  return { temperature: 0.7, topP: 0.9, topK: 0, minP: 0.0, maxTokens: 2048, repetitionPenalty: 1.0, seed: 0, stream: true }
+  return { temperature: 0.7, topP: 0.9, topK: 0, minP: 0.0, maxTokens: 8192, repetitionPenalty: 1.0, seed: 0, stream: true }
 }
 function saveParams(model: string | null, params: ChatParams) {
   localStorage.setItem(paramsKey(model), JSON.stringify(params))
@@ -114,6 +120,66 @@ const showSystemPrompt = ref(false)
 
 const modelId = computed(() => serverStore.modelId)
 const p       = ref<ChatParams>(loadParams(modelId.value))
+
+// ── Engine selector ───────────────────────────────────────────────────────────
+const engines          = ref<EngineInfo[]>([])
+const selectedEngine   = ref(serverStore.engineId)
+const switchingEngine  = ref(false)
+const enginesLoadError = ref('')
+
+async function loadEngines() {
+  try {
+    const result = await api.get<{ engines: EngineInfo[] } | EngineInfo[]>('/engines')
+    const all: EngineInfo[] = Array.isArray(result) ? result : (result as any).engines ?? []
+    engines.value = all.filter(e => e.installed)
+  } catch (e: any) {
+    enginesLoadError.value = `${e?.message ?? 'unknown error'}`
+  }
+}
+
+async function switchEngine(id: string) {
+  if (id === serverStore.engineId || switchingEngine.value || modelsStore.serverRestartingFor) return
+  selectedEngine.value = id
+  switchingEngine.value = true
+  try {
+    await api.post('/config', { engine_id: id })
+    await serverStore.restart()
+    // Phase 1: wait for server to go offline (max 10 s)
+    let downElapsed = 0
+    await new Promise<void>(resolve => {
+      const downPoll = setInterval(async () => {
+        downElapsed += 1
+        await serverStore.fetchStatus()
+        if (!serverStore.isRunning || downElapsed >= 10) { clearInterval(downPoll); resolve() }
+      }, 1000)
+    })
+    // Phase 2: wait for server to come back with target engine (max 90 s)
+    let upElapsed = 0
+    await new Promise<void>(resolve => {
+      const upPoll = setInterval(async () => {
+        upElapsed += 2
+        await serverStore.fetchStatus()
+        await serverStore.fetchConfig()
+        if ((serverStore.engineId === id && serverStore.isRunning) || upElapsed >= 90) {
+          clearInterval(upPoll)
+          await serverStore.fetchMetrics()
+          await modelsStore.fetchModels()
+          resolve()
+        }
+      }, 2000)
+    })
+  } catch (e: any) {
+    enginesLoadError.value = `Engine switch failed: ${e?.message ?? 'unknown error'}`
+    selectedEngine.value = serverStore.engineId  // revert on failure
+  } finally {
+    switchingEngine.value = false
+  }
+}
+
+// Keep selectedEngine in sync if something else changes the engine externally
+watch(() => serverStore.engineId, (id) => {
+  if (!switchingEngine.value) selectedEngine.value = id
+})
 
 // Active chat title for the header (set when loading a saved chat)
 const activeTitle = ref<string | null>(null)
@@ -213,10 +279,18 @@ async function applyOptimalSettings() {
   if (!modelId.value) return
   loadingOptimal.value = true
   try {
-    const url = `${getBase()}/models/presets?model_id=${encodeURIComponent(modelId.value)}&task_mode=${taskMode.value}`
-    const resp = await fetch(url)
+    const params = new URLSearchParams({
+      model_id:  modelId.value,
+      task_mode: taskMode.value,
+      engine_id: serverStore.engineId || '',
+    })
+    const resp = await fetch(`${getBase()}/models/presets?${params}`)
     if (!resp.ok) throw new Error(`${resp.status}`)
-    const data = await resp.json() as { recommended?: Record<string, number> }
+    const data = await resp.json() as {
+      recommended?: Record<string, number>
+      model_family?: string
+      ram_gb?: number
+    }
     const rec = data.recommended
     if (rec) {
       // API returns snake_case; map to camelCase ChatParams
@@ -230,6 +304,13 @@ async function applyOptimalSettings() {
       showParams.value = true
       optimalApplied.value = true
       setTimeout(() => { optimalApplied.value = false }, 1800)
+      const family = data.model_family ? ` (${data.model_family})` : ''
+      const ram    = data.ram_gb       ? `, ${data.ram_gb} GB RAM` : ''
+      error.value  = ''
+      // Brief info banner — clears after 4 s
+      const msg = `Optimal applied for ${taskMode.value} mode${family}${ram}: temp=${rec.temperature?.toFixed(2)} max_tokens=${rec.max_tokens}`
+      error.value = msg
+      setTimeout(() => { if (error.value === msg) error.value = '' }, 4000)
     }
   } catch (e) {
     error.value = `Could not fetch optimal settings: ${e}`
@@ -527,6 +608,7 @@ function useStarterPrompt(prompt: string) {
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 onMounted(() => {
   nextTick(() => scrollToBottom(true))
+  loadEngines()
 })
 
 // When user returns to the Chat tab, scroll to bottom so the latest message is visible
@@ -547,17 +629,32 @@ onUnmounted(() => {
       <div class="chat-header">
         <div class="header-left">
           <h1 class="page-title">{{ activeTitle ?? 'Chat' }}</h1>
-          <span v-if="!modelsStore.serverRestartingFor" class="model-tag" :class="{ offline: !modelId }">
+          <span v-if="!modelsStore.serverRestartingFor && !switchingEngine" class="model-tag" :class="{ offline: !modelId }">
             {{ modelId?.split('/').pop() ?? 'No model loaded' }}
           </span>
+          <span v-else-if="switchingEngine" class="model-tag switching">Restarting…</span>
           <span v-else class="model-tag switching">Switching…</span>
         </div>
         <div class="header-actions">
+          <!-- Engine selector — only shown when multiple engines are installed -->
+          <select
+            v-if="engines.length > 1"
+            class="model-select-inline engine-select-inline"
+            :value="selectedEngine"
+            :disabled="switchingEngine || !!modelsStore.serverRestartingFor || serverStore.loading"
+            :title="enginesLoadError || 'Switch inference engine (requires server restart)'"
+            @change="(e) => switchEngine((e.target as HTMLSelectElement).value)"
+          >
+            <option v-for="eng in engines" :key="eng.id" :value="eng.id">
+              {{ eng.name }}
+            </option>
+          </select>
+
           <select
             v-if="modelsStore.models.length"
             class="model-select-inline"
             :value="modelId ?? ''"
-            :disabled="!!modelsStore.serverRestartingFor || serverStore.loading"
+            :disabled="switchingEngine || !!modelsStore.serverRestartingFor || serverStore.loading"
             @change="(e) => modelsStore.loadModel((e.target as HTMLSelectElement).value)"
           >
             <option value="" disabled>Switch model…</option>
@@ -786,7 +883,7 @@ onUnmounted(() => {
 
             <div class="params-row">
               <label class="param-item">
-                <span class="param-label">Max tokens</span>
+                <span class="param-label" title="Max output tokens per response. For reasoning models (DeepSeek, Qwen3) set this high (16K+) to allow full thinking chains.">Max output tokens</span>
                 <input type="number" v-model.number="p.maxTokens" min="64" max="131072" step="64" class="param-number" />
               </label>
               <label class="param-item">
@@ -1004,6 +1101,13 @@ onUnmounted(() => {
 }
 .model-select-inline:focus    { outline: none; border-color: var(--bd-focus); }
 .model-select-inline:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Engine selector — same shape as model selector but accented differently */
+.engine-select-inline {
+  color: var(--si-300);
+  border-color: var(--ac-border);
+  max-width: 130px;
+}
 
 /* Small icon button (system prompt toggle) */
 .icon-btn {

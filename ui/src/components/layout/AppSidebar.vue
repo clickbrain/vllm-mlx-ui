@@ -14,7 +14,7 @@
   Subscribes to updatesStore.checkUpdates() on mount.
 -->
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
@@ -36,6 +36,63 @@ const scanning = ref(false)
 const discoveredMachines = ref<import('@/stores/machines').Machine[]>([])
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 
+// ── Engine switcher ────────────────────────────────────────────────────────────
+interface EngineInfo { id: string; name: string; installed: boolean }
+const engines           = ref<EngineInfo[]>([])
+const selectedEngine    = ref(serverStore.engineId)
+const switchingEngine   = ref(false)
+
+async function loadEngines() {
+  try {
+    const result = await api.get<{ engines: EngineInfo[] } | EngineInfo[]>('/engines')
+    const all: EngineInfo[] = Array.isArray(result) ? result : (result as any).engines ?? []
+    engines.value = all.filter(e => e.installed)
+  } catch { /* best-effort */ }
+}
+
+async function switchEngine(id: string) {
+  if (id === serverStore.engineId || switchingEngine.value) return
+  selectedEngine.value = id
+  switchingEngine.value = true
+  try {
+    await api.post('/config', { engine_id: id })
+    await serverStore.restart()
+    // Phase 1: wait for server to go offline (max 10 s)
+    let downElapsed = 0
+    await new Promise<void>(resolve => {
+      const downPoll = setInterval(async () => {
+        downElapsed += 1
+        await serverStore.fetchStatus()
+        if (!serverStore.isRunning || downElapsed >= 10) { clearInterval(downPoll); resolve() }
+      }, 1000)
+    })
+    // Phase 2: wait for server to come back with the target engine (max 90 s)
+    let upElapsed = 0
+    await new Promise<void>(resolve => {
+      const upPoll = setInterval(async () => {
+        upElapsed += 2
+        await serverStore.fetchStatus()
+        await serverStore.fetchConfig()
+        if ((serverStore.engineId === id && serverStore.isRunning) || upElapsed >= 90) {
+          clearInterval(upPoll)
+          await serverStore.fetchMetrics()
+          await modelsStore.fetchModels()
+          resolve()
+        }
+      }, 2000)
+    })
+  } catch (e) {
+    selectedEngine.value = serverStore.engineId  // revert on failure
+    console.error('Engine switch failed', e)
+  } finally {
+    switchingEngine.value = false
+  }
+}
+
+watch(() => serverStore.engineId, (id) => {
+  if (!switchingEngine.value) selectedEngine.value = id
+})
+
 const memAvailPct = computed(() => {
   const mem = serverStore.memory
   if (!mem || !mem.total_gb) return 0
@@ -56,6 +113,7 @@ onMounted(() => {
   machinesStore.refreshOnlineStatus()
   refreshInterval = setInterval(() => machinesStore.refreshOnlineStatus(), 30000)
   if (!modelsStore.models.length) modelsStore.fetchModels().catch(() => {})
+  loadEngines()
 })
 
 onUnmounted(() => {
@@ -172,6 +230,27 @@ async function doShutdown() {
       </RouterLink>
     </nav>
 
+    <!-- Engine Selector (only shown when multiple engines are installed) -->
+    <div v-if="engines.length > 1" class="sidebar-section engine-section">
+      <div class="section-label" id="engine-selector-label">Engine</div>
+      <div v-if="switchingEngine" class="model-switching" aria-live="polite">
+        <span class="switch-spinner" />
+        <span class="switch-text">Restarting…</span>
+      </div>
+      <select
+        v-else
+        class="model-select"
+        :value="selectedEngine"
+        :disabled="serverStore.loading || !!modelsStore.serverRestartingFor"
+        aria-labelledby="engine-selector-label"
+        @change="(e) => switchEngine((e.target as HTMLSelectElement).value)"
+      >
+        <option v-for="eng in engines" :key="eng.id" :value="eng.id">
+          {{ eng.name }}
+        </option>
+      </select>
+    </div>
+
     <!-- Model Selector -->
     <div class="sidebar-section model-section">
       <div class="section-label" id="model-selector-label">Model</div>
@@ -183,7 +262,7 @@ async function doShutdown() {
         v-else
         class="model-select"
         :value="serverStore.modelId ?? ''"
-        :disabled="serverStore.loading || !modelsStore.models.length"
+        :disabled="switchingEngine || serverStore.loading || !modelsStore.models.length"
         aria-labelledby="model-selector-label"
         @change="(e) => modelsStore.loadModel((e.target as HTMLSelectElement).value)"
       >

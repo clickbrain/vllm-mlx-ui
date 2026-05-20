@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.6.27 — 2026-05-20
+
+- **Fix: Optimal button now works for all engines and models** — Previously the Optimal button defaulted to 2048 max output tokens for any model that isn't on HuggingFace (ds4/DeepSeek GGUF, Ollama, local models), because the HF metadata fetch failed silently and the fallback ignored the model ID string. Now the model family (deepseek, qwen3, llama, etc.) is inferred directly from the model_id string, so `ds4:deepseek-v4-flash` correctly resolves to the DeepSeek family even when offline.
+- **Fix: Optimal button accounts for reasoning models** — DeepSeek and Qwen3 generate `<think>...</think>` tokens that count against max_tokens before the actual answer begins. A complex coding question can consume 10,000+ thinking tokens. The Optimal button now sets max output tokens to 16,384 for reasoning models (chat/code) and 32,768 for analysis mode, instead of the previous 2,048.
+- **Fix: Optimal button uses machine RAM** — Token recommendations are now tiered by available memory: <16 GB → capped at 4,096; <32 GB → capped at 8,192; ≥32 GB → full caps. Prevents context pressure degrading generation quality on smaller machines.
+- **Fix: Optimal button respects server ceiling** — Recommended max output tokens never exceed the server's configured `max_tokens` limit.
+- **Fix: Default max output tokens raised** — The default for new model sessions was 2,048; raised to 8,192 to avoid truncating responses from modern models.
+- **UX: Parameters panel label clarified** — "Max tokens" renamed to "Max output tokens" with a tooltip explaining the difference between output tokens and the model's context window, and noting that reasoning models need 16K+.
+- **UX: Optimal button shows what was applied** — A 4-second info banner appears after clicking Optimal showing the model family, machine RAM, temperature, and max_tokens that were set.
+
 ## v0.6.26 — 2026-05-20
 
 - **Fix: Selecting a DeepSeek model now auto-switches engine** — on the Serve page, picking a model that belongs to a specific engine (e.g. the ds4 GGUF discovered by the ds4-m5 engine) now automatically switches the Engine dropdown to that engine and shows the "Apply & Restart" button. Previously the engine stayed unchanged and the model couldn't load. The `Model` interface now carries `engine` and `source` fields so the frontend can act on engine-ownership metadata returned by the backend.
