@@ -30,6 +30,7 @@ from . import benchmark_runner as br
 from . import model_manager as mm
 from . import quality_runner as qr
 from . import server_manager as sm
+from . import chat_store as cs
 import logging
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,11 @@ def _start_background_scheduler() -> None:
     )
     t.start()
     _update_scheduler_thread = t
+    # Initialize chat history DB
+    try:
+        cs.init_db()
+    except Exception as exc:
+        logger.warning("chat_store.init_db failed: %s", exc, exc_info=True)
 
 
 @app.on_event("shutdown")
@@ -2445,6 +2451,112 @@ if _os.path.isdir(_UI_DIST):
         # (asset filenames are content-hashed so they can be cached indefinitely).
         index = _os.path.join(_UI_DIST, "index.html")
         return FileResponse(index, headers={"Cache-Control": "no-store"})
+
+
+# ── Chat history ──────────────────────────────────────────────────────────────
+
+class SaveMessageModel(BaseModel):
+    role: str
+    content: str
+    reasoning: str | None = None
+
+
+class SaveChatRequest(BaseModel):
+    id: str
+    title: str
+    model: str = ""
+    engine: str = ""
+    is_draft: bool = False
+    created_at: int | None = None
+    messages: list[SaveMessageModel] = []
+
+
+@app.get("/chats")
+def list_chats(_: None = Depends(_check_auth)) -> dict:
+    """Return all saved conversation summaries (no message content)."""
+    try:
+        convs = cs.list_conversations()
+        return {"conversations": convs}
+    except Exception as exc:
+        logger.warning("list_chats failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/chats")
+def upsert_chat(req: SaveChatRequest, _: None = Depends(_check_auth)) -> dict:
+    """Save or update a conversation and its messages."""
+    if not req.id.strip():
+        raise HTTPException(status_code=400, detail="id is required")
+    try:
+        cs.save_conversation(
+            id=req.id.strip(),
+            title=req.title,
+            model=req.model,
+            engine=req.engine,
+            messages=[m.model_dump() for m in req.messages],
+            is_draft=req.is_draft,
+            created_at=req.created_at,
+        )
+        return {"ok": True}
+    except Exception as exc:
+        logger.warning("upsert_chat failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/chats/draft")
+def get_draft_chat(_: None = Depends(_check_auth)) -> dict:
+    """Return the most recently updated draft conversation (active session), or 404."""
+    try:
+        draft = cs.get_latest_draft()
+        if not draft:
+            raise HTTPException(status_code=404, detail="No draft found")
+        return draft
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("get_draft_chat failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/chats/{chat_id}")
+def get_chat(chat_id: str, _: None = Depends(_check_auth)) -> dict:
+    """Return a full conversation with all messages."""
+    try:
+        conv = cs.get_conversation(chat_id)
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return conv
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("get_chat failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.delete("/chats")
+def delete_all_chats(_: None = Depends(_check_auth)) -> dict:
+    """Delete all saved conversations and messages."""
+    try:
+        count = cs.delete_all_conversations()
+        return {"ok": True, "deleted": count}
+    except Exception as exc:
+        logger.warning("delete_all_chats failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.delete("/chats/{chat_id}")
+def delete_chat(chat_id: str, _: None = Depends(_check_auth)) -> dict:
+    """Delete a single conversation."""
+    try:
+        found = cs.delete_conversation(chat_id)
+        if not found:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("delete_chat failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ── Server startup ────────────────────────────────────────────────────────────

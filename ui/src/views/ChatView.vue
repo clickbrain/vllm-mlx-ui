@@ -50,8 +50,11 @@ interface Message {
 interface SavedChat {
   id: string
   title: string
-  savedAt: number
-  messages: Message[]
+  savedAt: number      // created_at (ms)
+  messages: Message[]  // may be empty for server-only chats (lazy-loaded)
+  model?: string
+  engine?: string
+  serverSaved?: boolean
 }
 
 interface ChatParams {
@@ -75,6 +78,7 @@ interface TokenUsage {
 const LS_CHATS_KEY    = 'vmui_saved_chats'
 const LS_PARAMS_PFX   = 'vmui_chat_params_'
 const LS_SYSTEM_KEY   = 'vmui_system_prompt'
+const LS_DRAFT_ID_KEY = 'vmui_draft_id'   // stable server-side draft conversation ID
 
 // ── Saved chats ──────────────────────────────────────────────────────────────
 function loadSavedChats(): SavedChat[] {
@@ -455,6 +459,8 @@ async function sendRequest() {
     } else {
       await sendNonStreaming(body)
     }
+    // Save active session as server-side draft after every completed response
+    saveDraft()
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') {
       // User stopped — partial message already in store; finalize it as stopped
@@ -462,6 +468,8 @@ async function sendRequest() {
       await scrollToBottom()
       sending.value = false
       abortCtrl = null
+      // Still save draft so stopped responses are not lost
+      saveDraft()
       return
     }
     const msg = String(e)
@@ -546,6 +554,87 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 // ── Chat management ───────────────────────────────────────────────────────────
+
+// ── Server-side chat sync ────────────────────────────────────────────────────
+
+/** Get or create a stable ID for the current draft (active) session. */
+function getDraftId(): string {
+  let id = localStorage.getItem(LS_DRAFT_ID_KEY)
+  if (!id) {
+    id = crypto.randomUUID()
+    localStorage.setItem(LS_DRAFT_ID_KEY, id)
+  }
+  return id
+}
+
+/** Save a conversation to the server. Silently ignores network errors. */
+async function serverSaveChat(
+  id: string, title: string, messages: Message[], isDraft: boolean, createdAt?: number
+) {
+  try {
+    const body = {
+      id,
+      title,
+      model: modelId.value ?? '',
+      engine: serverStore.engineId ?? '',
+      is_draft: isDraft,
+      created_at: createdAt,
+      messages: messages.map(m => ({
+        role: m.role,
+        content: m.content,
+        reasoning: m.reasoning ?? null,
+      })),
+    }
+    await api.post('/chats', body)
+  } catch {
+    // Server may be offline — localStorage already has the data
+  }
+}
+
+/** Delete a conversation from the server. Silently ignores network errors. */
+async function serverDeleteChat(id: string) {
+  try { await api.delete(`/chats/${id}`) } catch {}
+}
+
+/** Fetch all server conversations and merge into savedChats, deduplicating by ID. */
+async function loadServerChats() {
+  try {
+    const data = await api.get('/chats') as { conversations: Array<{
+      id: string; title: string; model?: string; engine?: string;
+      is_draft: number; created_at: number; updated_at: number; message_count: number
+    }> }
+    const serverChats: SavedChat[] = (data.conversations ?? [])
+      .filter(c => !c.is_draft)  // exclude draft — handled separately
+      .map(c => ({
+        id: c.id,
+        title: c.title,
+        savedAt: c.created_at,
+        messages: [],            // lazy-loaded on click
+        model: c.model,
+        engine: c.engine,
+        serverSaved: true,
+      }))
+    // Merge: server is authoritative; keep any localStorage-only chats not on server
+    const serverIds = new Set(serverChats.map(c => c.id))
+    const localOnly = savedChats.value.filter(c => !serverIds.has(c.id))
+    savedChats.value = [...serverChats, ...localOnly]
+      .sort((a, b) => b.savedAt - a.savedAt)
+    persistSavedChats(savedChats.value)
+  } catch {
+    // Server offline — use localStorage only
+  }
+}
+
+/** Save current active messages as the server draft (called after each completion). */
+async function saveDraft() {
+  const msgs = chatStore.messages.filter(m => !m.streaming)
+  if (!msgs.length) return
+  const draftId = getDraftId()
+  const firstUser = msgs.find(m => m.role === 'user')?.content ?? ''
+  const title = firstUser.length > 60 ? firstUser.slice(0, 57) + '…' : firstUser || 'Draft'
+  await serverSaveChat(draftId, title, msgs, true)
+}
+
 function clear() {
   chatStore.clearMessages()
   tokenUsage.value  = null
@@ -554,39 +643,61 @@ function clear() {
 }
 
 /** Save current chat to the saved panel. Returns the generated title. */
-function saveChat(): string {
+async function saveChat(): Promise<string> {
   if (!chatStore.messages.length) return ''
   const firstUser = chatStore.messages.find(m => m.role === 'user')?.content ?? 'Chat'
   const title = firstUser.length > 60 ? firstUser.slice(0, 60) + '…' : firstUser
-  // Don't save a duplicate of the currently active chat
+  // Check if there is already a saved entry with the same title (avoid duplicates from auto-save)
   const chat: SavedChat = {
-    id:       crypto.randomUUID(),
+    id:          crypto.randomUUID(),
     title,
-    savedAt:  Date.now(),
-    messages: chatStore.messages.filter(m => !m.streaming).map(m => ({ ...m })),
+    savedAt:     Date.now(),
+    messages:    chatStore.messages.filter(m => !m.streaming).map(m => ({ ...m })),
+    model:       modelId.value ?? undefined,
+    engine:      serverStore.engineId ?? undefined,
+    serverSaved: true,
   }
   savedChats.value.unshift(chat)
   persistSavedChats(savedChats.value)
+  await serverSaveChat(chat.id, chat.title, chat.messages, false, chat.savedAt)
   return title
 }
 
 /** Start a new chat, auto-saving current if it has messages. */
-function newChat() {
-  if (chatStore.messages.length) saveChat()
+async function newChat() {
+  if (chatStore.messages.length) await saveChat()
+  // Delete the old draft from server and issue a new draft ID
+  try { await serverDeleteChat(getDraftId()) } catch {}
+  localStorage.removeItem(LS_DRAFT_ID_KEY)
   clear()
 }
 
-function loadChat(chat: SavedChat) {
-  chatStore.setMessages(chat.messages)
+async function loadChat(chat: SavedChat) {
+  let messages = chat.messages
+  // Lazy-load from server if we only have the summary (no messages cached locally)
+  if (!messages.length && chat.serverSaved) {
+    try {
+      const full = await api.get(`/chats/${chat.id}`) as { messages: Message[] }
+      messages = full.messages ?? []
+      // Cache locally so repeat clicks don't need a network round-trip
+      chat.messages = messages
+      persistSavedChats(savedChats.value)
+    } catch {
+      error.value = 'Could not load chat from server.'
+      return
+    }
+  }
+  chatStore.setMessages(messages)
   activeTitle.value = chat.title
   tokenUsage.value  = null
   error.value = ''
   nextTick(() => scrollToBottom(true))
 }
 
-function deleteChat(id: string) {
+async function deleteChat(id: string) {
   savedChats.value = savedChats.value.filter(c => c.id !== id)
   persistSavedChats(savedChats.value)
+  await serverDeleteChat(id)
 }
 
 // ── Starter prompts ───────────────────────────────────────────────────────────
@@ -606,9 +717,28 @@ function useStarterPrompt(prompt: string) {
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
-onMounted(() => {
+onMounted(async () => {
   nextTick(() => scrollToBottom(true))
   loadEngines()
+
+  // Load saved chats from server and merge with localStorage
+  await loadServerChats()
+
+  // Offer to restore the server-side draft if localStorage active session is empty
+  if (!chatStore.messages.length) {
+    const draftId = localStorage.getItem(LS_DRAFT_ID_KEY)
+    if (draftId) {
+      try {
+        const draft = await api.get(`/chats/${draftId}`) as { messages: Message[]; title: string }
+        if (draft.messages?.length) {
+          chatStore.setMessages(draft.messages)
+          activeTitle.value = null  // treat as continuation, not a named save
+        }
+      } catch {
+        // Draft not on server yet (e.g. fresh install) — that's fine
+      }
+    }
+  }
 })
 
 // When user returns to the Chat tab, scroll to bottom so the latest message is visible

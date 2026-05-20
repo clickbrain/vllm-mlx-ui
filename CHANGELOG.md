@@ -1,5 +1,12 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.6.28 — 2026-05-20
+
+- **Feature: Chat history is now persisted server-side** — Chat conversations are saved to a SQLite database (`~/.vllm_mlx_ui/chats.db`). History survives browser data clears, private-mode sessions, Safari eviction, and app upgrades. Previously all history was stored only in `localStorage` and could be silently wiped.
+- **Feature: Active session auto-saved as draft** — After every completed response (including stopped streams), the current conversation is saved as a server-side draft. If `localStorage` is empty when you return (e.g., after a browser restart), the active session is automatically restored from the draft.
+- **Feature: Saved chats lazy-load from server** — The saved chat list loads summaries from the server on mount and merges with any local-only entries. Full message content is fetched on demand when you click a saved chat (avoiding unnecessary data transfer for long chats).
+- **Feature: Delete syncs to server** — Deleting a saved chat from the sidebar now removes it from the server database as well as `localStorage`.
+
 ## v0.6.27 — 2026-05-20
 
 - **Fix: Optimal button now works for all engines and models** — Previously the Optimal button defaulted to 2048 max output tokens for any model that isn't on HuggingFace (ds4/DeepSeek GGUF, Ollama, local models), because the HF metadata fetch failed silently and the fallback ignored the model ID string. Now the model family (deepseek, qwen3, llama, etc.) is inferred directly from the model_id string, so `ds4:deepseek-v4-flash` correctly resolves to the DeepSeek family even when offline.
