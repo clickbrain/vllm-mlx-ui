@@ -254,16 +254,26 @@ def main() -> None:
     except Exception as _exc:
         print(f"[vllm-mlx] ⚠️  Auto-start check failed: {_exc}", file=sys.stderr)
 
-    # Open the browser after a short delay so uvicorn has time to bind
+    # Open the browser after a short delay so uvicorn has time to bind.
+    # Skip on relaunch (after upgrade/restart) — the existing page reloads itself.
     _ui_url = f"http://{ui_host}:{mgmt_port}/"
     if ui_host in ("0.0.0.0", ""):
         _ui_url = f"http://127.0.0.1:{mgmt_port}/"
+
+    _no_browser_flag = Path.home() / ".vllm_mlx_ui" / "no_browser.flag"
+    _skip_browser = _no_browser_flag.exists()
+    if _skip_browser:
+        try:
+            _no_browser_flag.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     def _open_browser():
         _time.sleep(1.2)
         webbrowser.open(_ui_url)
 
-    threading.Thread(target=_open_browser, daemon=True).start()
+    if not _skip_browser:
+        threading.Thread(target=_open_browser, daemon=True).start()
 
     print(f"[vllm-mlx] ✅ Dashboard → {_ui_url}  (Ctrl+C to quit)")
 
@@ -289,6 +299,9 @@ def main() -> None:
                 )
                 log_path = STATE_DIR / "mgmt.log"
                 STATE_DIR.mkdir(parents=True, exist_ok=True)
+                # Signal the new process to skip opening a browser tab —
+                # the existing page will reload itself once the server is back.
+                (STATE_DIR / "no_browser.flag").touch()
                 # Delay ensures this process fully exits and port 8502 is free
                 # before the new process attempts to bind.
                 with open(log_path, "a") as _lf:
