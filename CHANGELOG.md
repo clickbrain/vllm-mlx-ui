@@ -1,5 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.6.29 — 2026-05-20
+
+- **Fix: Chat history was being wiped on reload** — Critical route ordering bug: `GET /chats` and `GET /chats/{id}` were registered AFTER the SPA catch-all (`/{full_path:path}`), so FastAPI returned `index.html` for all chat API requests. `JSON.parse(html)` silently threw SyntaxError and the frontend fell back to empty state. All 6 `/chats` endpoints are now registered before the catch-all.
+- **Fix: Cannot navigate to non-Serve tabs from Chat page** — `ModelsView.vue` was missing `defineOptions({ name: 'ModelsView' })`, causing a KeepAlive component name mismatch that blocked tab navigation when Chat was active. All KeepAlive-included views now have explicit component names.
+- **Fix: Engine/Model selectors inconsistent between Chat and other pages** — Chat header now uses the same `model-picker-wrap` + `model-picker-label` + `model-select` CSS pattern as the Serve page, with Engine listed first then Model everywhere (Chat, Serve, sidebar all consistent).
+
 ## v0.6.28 — 2026-05-20
 
 - **Feature: Chat history is now persisted server-side** — Chat conversations are saved to a SQLite database (`~/.vllm_mlx_ui/chats.db`). History survives browser data clears, private-mode sessions, Safari eviction, and app upgrades. Previously all history was stored only in `localStorage` and could be silently wiped.

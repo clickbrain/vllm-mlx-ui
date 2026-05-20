@@ -10,7 +10,9 @@
   helping users choose models before downloading.
 -->
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated, watch } from 'vue'
+import { ref, computed, onMounted, onActivated, watch, defineOptions } from 'vue'
+
+defineOptions({ name: 'ModelsView' })
 import { useModelsStore } from '@/stores/models'
 import { useServerStore } from '@/stores/server'
 import { useRouter } from 'vue-router'

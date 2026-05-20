@@ -264,6 +264,22 @@ async function doClearCache(type: string) {
         <StatusPill :status="status" />
       </div>
       <div class="header-actions">
+        <!-- Engine picker -->
+        <div class="model-picker-wrap">
+          <div class="model-picker-label">Engine</div>
+          <div class="model-picker-control">
+            <select
+              class="model-select"
+              v-model="selectedEngine"
+              aria-label="Select inference engine"
+            >
+              <option v-for="e in engines" :key="e.id" :value="e.id">
+                {{ e.name }}
+              </option>
+            </select>
+          </div>
+        </div>
+
         <!-- Model picker -->
         <div class="model-picker-wrap">
           <div class="model-picker-label">Model</div>
@@ -290,22 +306,6 @@ async function doClearCache(type: string) {
               </select>
               <div v-if="switchingModel" class="picker-spinner" />
             </template>
-          </div>
-        </div>
-
-        <!-- Engine picker -->
-        <div class="model-picker-wrap">
-          <div class="model-picker-label">Engine</div>
-          <div class="model-picker-control">
-            <select
-              class="model-select"
-              v-model="selectedEngine"
-              aria-label="Select inference engine"
-            >
-              <option v-for="e in engines" :key="e.id" :value="e.id">
-                {{ e.name }}
-              </option>
-            </select>
           </div>
         </div>
 

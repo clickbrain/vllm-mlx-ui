@@ -2440,20 +2440,10 @@ async def _list_docs() -> dict:
     return {"sections": sections}
 
 
-if _os.path.isdir(_UI_DIST):
-    app.mount("/assets", StaticFiles(directory=_os.path.join(_UI_DIST, "assets")), name="assets")
-
-    @app.get("/", include_in_schema=False)
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def _serve_spa(full_path: str = "") -> FileResponse:
-        # Don't intercept API paths — they're matched before this catch-all.
-        # no-store prevents browsers caching the old index.html after an upgrade
-        # (asset filenames are content-hashed so they can be cached indefinitely).
-        index = _os.path.join(_UI_DIST, "index.html")
-        return FileResponse(index, headers={"Cache-Control": "no-store"})
-
-
 # ── Chat history ──────────────────────────────────────────────────────────────
+# NOTE: These routes MUST be registered before the SPA catch-all below.
+# FastAPI matches routes in definition order; /{full_path:path} would intercept
+# GET /chats and GET /chats/{id} if they were defined after it.
 
 class SaveMessageModel(BaseModel):
     role: str
@@ -2557,6 +2547,23 @@ def delete_chat(chat_id: str, _: None = Depends(_check_auth)) -> dict:
     except Exception as exc:
         logger.warning("delete_chat failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── SPA catch-all — MUST remain last ─────────────────────────────────────────
+# This catch-all serves index.html for all unmatched GET paths, enabling
+# Vue Router's history mode. It MUST be the last route registered so it does
+# not intercept API routes defined above (e.g. /chats, /chats/{id}).
+
+if _os.path.isdir(_UI_DIST):
+    app.mount("/assets", StaticFiles(directory=_os.path.join(_UI_DIST, "assets")), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def _serve_spa(full_path: str = "") -> FileResponse:
+        # no-store prevents browsers caching the old index.html after an upgrade
+        # (asset filenames are content-hashed so they can be cached indefinitely).
+        index = _os.path.join(_UI_DIST, "index.html")
+        return FileResponse(index, headers={"Cache-Control": "no-store"})
 
 
 # ── Server startup ────────────────────────────────────────────────────────────

@@ -759,39 +759,43 @@ onUnmounted(() => {
       <div class="chat-header">
         <div class="header-left">
           <h1 class="page-title">{{ activeTitle ?? 'Chat' }}</h1>
-          <span v-if="!modelsStore.serverRestartingFor && !switchingEngine" class="model-tag" :class="{ offline: !modelId }">
-            {{ modelId?.split('/').pop() ?? 'No model loaded' }}
-          </span>
-          <span v-else-if="switchingEngine" class="model-tag switching">Restarting…</span>
-          <span v-else class="model-tag switching">Switching…</span>
         </div>
         <div class="header-actions">
-          <!-- Engine selector — only shown when multiple engines are installed -->
-          <select
-            v-if="engines.length > 1"
-            class="model-select-inline engine-select-inline"
-            :value="selectedEngine"
-            :disabled="switchingEngine || !!modelsStore.serverRestartingFor || serverStore.loading"
-            :title="enginesLoadError || 'Switch inference engine (requires server restart)'"
-            @change="(e) => switchEngine((e.target as HTMLSelectElement).value)"
-          >
-            <option v-for="eng in engines" :key="eng.id" :value="eng.id">
-              {{ eng.name }}
-            </option>
-          </select>
+          <!-- Engine picker — only shown when multiple engines are installed -->
+          <div v-if="engines.length > 1" class="model-picker-wrap">
+            <div class="model-picker-label">Engine</div>
+            <div class="model-picker-control">
+              <select
+                class="model-select"
+                :value="selectedEngine"
+                :disabled="switchingEngine || !!modelsStore.serverRestartingFor || serverStore.loading"
+                :title="enginesLoadError || 'Switch inference engine (requires server restart)'"
+                @change="(e) => switchEngine((e.target as HTMLSelectElement).value)"
+              >
+                <option v-for="eng in engines" :key="eng.id" :value="eng.id">
+                  {{ eng.name }}
+                </option>
+              </select>
+            </div>
+          </div>
 
-          <select
-            v-if="modelsStore.models.length"
-            class="model-select-inline"
-            :value="modelId ?? ''"
-            :disabled="switchingEngine || !!modelsStore.serverRestartingFor || serverStore.loading"
-            @change="(e) => modelsStore.loadModel((e.target as HTMLSelectElement).value)"
-          >
-            <option value="" disabled>Switch model…</option>
-            <option v-for="m in modelsStore.models" :key="m.id" :value="m.id">
-              {{ m.id.split('/').pop() }}
-            </option>
-          </select>
+          <!-- Model picker -->
+          <div v-if="modelsStore.models.length" class="model-picker-wrap">
+            <div class="model-picker-label">Model</div>
+            <div class="model-picker-control">
+              <select
+                class="model-select"
+                :value="modelId ?? ''"
+                :disabled="switchingEngine || !!modelsStore.serverRestartingFor || serverStore.loading"
+                @change="(e) => modelsStore.loadModel((e.target as HTMLSelectElement).value)"
+              >
+                <option value="" disabled>Switch model…</option>
+                <option v-for="m in modelsStore.models" :key="m.id" :value="m.id">
+                  {{ m.id.split('/').pop() }}
+                </option>
+              </select>
+            </div>
+          </div>
 
           <!-- System prompt toggle -->
           <button
@@ -1196,48 +1200,52 @@ onUnmounted(() => {
 
 .header-actions {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  align-items: flex-end;
+  gap: var(--space-3);
   flex-shrink: 0;
 }
 
-.model-tag {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--si-300);
-  background: var(--ac-bg);
-  border: 1px solid var(--ac-border);
-  border-radius: var(--r-pill);
-  padding: 2px 9px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 220px;
+/* Model/Engine picker — same pattern as Serve page */
+.model-picker-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
-.model-tag.offline   { color: var(--tx-muted); background: var(--bg-elevated); border-color: var(--bd-default); }
-.model-tag.switching { color: var(--cu-400); background: rgba(245,158,11,.08); border-color: rgba(245,158,11,.25); }
 
-.model-select-inline {
+.model-picker-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--tx-muted);
+}
+
+.model-picker-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.model-select {
   background: var(--bg-elevated);
   border: 1px solid var(--bd-default);
   border-radius: var(--r-md);
-  color: var(--tx-secondary);
+  color: var(--tx-primary);
   font-family: var(--font-mono);
   font-size: 13px;
-  padding: 3px 8px;
+  padding: 4px 24px 4px 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7280'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
   cursor: pointer;
-  max-width: 160px;
   transition: border-color var(--transition-fast);
+  min-width: 120px;
+  max-width: 220px;
 }
-.model-select-inline:focus    { outline: none; border-color: var(--bd-focus); }
-.model-select-inline:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* Engine selector — same shape as model selector but accented differently */
-.engine-select-inline {
-  color: var(--si-300);
-  border-color: var(--ac-border);
-  max-width: 130px;
-}
+.model-select:focus    { outline: none; border-color: var(--bd-focus); box-shadow: 0 0 0 3px rgba(91, 106, 208, .12); }
+.model-select:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* Small icon button (system prompt toggle) */
 .icon-btn {
