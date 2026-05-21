@@ -192,6 +192,16 @@ interface ScoringInput {
   size_gb?: number
 }
 
+// Minimum affinity required to win a given use case.
+// Vision requires explicit vision signal — a text model should never win "Best for Vision".
+// Code and Reasoning have lower gates since instruct models have partial capability.
+const MIN_AFFINITY: Record<UseCase, number> = {
+  vision:    0.80,  // must match VISION_RE
+  code:      0.40,  // must have at least some code signal
+  reasoning: 0.35,  // must have at least some reasoning signal
+  chat:      0.30,  // broad default — instruct models qualify easily
+}
+
 function scoreModel(
   model: ScoringInput,
   scores: BenchmarkScores,
@@ -203,6 +213,13 @@ function scoreModel(
   if (affinity.disqualified) return 0
 
   const af = affinity[useCase]
+
+  // Gate: model must have meaningful affinity for this use case
+  if (af < MIN_AFFINITY[useCase]) return 0
+
+  // Gate: do not recommend models that cannot fit in hardware RAM
+  if (model.size_gb && totalRamGb > 0 && model.size_gb / totalRamGb >= 0.92) return 0
+
   const bq = computeBenchmarkQuality(scores, useCase)
   const rc = computeRecencyScore(model.last_modified, maxAgeMonths)
   const ut = computeUtilizationScore(model.size_gb, totalRamGb)

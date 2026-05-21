@@ -1,5 +1,12 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.7.4 — 2026-05-21
+
+- **Fix: Vision badge gate** — Non-vision text models can no longer win "Best for Vision". Added per-use-case minimum affinity gates: Vision requires affinity ≥ 0.80 (must match vision model patterns), Code ≥ 0.40, Reasoning ≥ 0.35, Chat ≥ 0.30. Previously, a well-benchmarked recent text model could win a Vision badge simply because no actual vision model was in the result set.
+- **Fix: Too-large models excluded from Best Choice** — Models where `size_gb / total_ram ≥ 0.92` are now hard-disqualified from all Best Choice badges. Previously they could receive a badge despite the card simultaneously showing "Too large" fit status.
+- **Fix: Scores fetched after sort/filter changes** — `fetchModelScores()` is now called after `applyFilters()`, `toggleSortDir()`, and `onSortChange()`. Previously, changing sort order or applying filters without re-fetching left new models with neutral (no-data) scores, degrading badge accuracy.
+- **Fix: Compound model suffix normalization** — `normalize_model_id()` now loops suffix stripping until stable (max 6 passes). `Qwen2.5-7B-Instruct-MLX-4bit` → `qwen2.5-7b` (was incorrectly `qwen2.5-7b-instruct`). Affects any model with stacked suffixes like `-instruct-mlx-4bit` or `-chat-hf-4bit`.
+
 ## v0.7.3 — 2026-05-21
 
 - **Feature: Multi-signal Best Choice scoring engine** — Replaced the old "most downloads that fits" heuristic with a full multi-signal scoring system. Each model is scored on five dimensions: (1) name/tag affinity to the use case (35%), (2) empirical benchmark quality from a curated database (30%), (3) recency — punishes stale models (25%), (4) hardware utilization — peaks at 55–72% RAM fill (10%), (5) popularity via log-scaled download count (10%). Score threshold 0.35 required for a badge.

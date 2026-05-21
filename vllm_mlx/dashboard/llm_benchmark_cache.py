@@ -126,18 +126,24 @@ def normalize_model_id(hf_id: str) -> str:
     """Strip org prefix and quantization/variant suffixes, return family+size key.
 
     Examples:
-      mlx-community/Qwen3-72B-4bit           → qwen3-72b
-      mlx-community/Llama-3.3-70B-Instruct-4bit → llama-3.3-70b
-      Qwen/Qwen3-72B-Instruct                → qwen3-72b
-      meta-llama/Llama-3.1-8B-Instruct       → llama-3.1-8b
-      mlx-community/Meta-Llama-3-8B-Instruct-4bit → llama-3-8b
+      mlx-community/Qwen3-72B-4bit                  → qwen3-72b
+      mlx-community/Llama-3.3-70B-Instruct-4bit      → llama-3.3-70b
+      Qwen/Qwen3-72B-Instruct                        → qwen3-72b
+      meta-llama/Llama-3.1-8B-Instruct               → llama-3.1-8b
+      mlx-community/Meta-Llama-3-8B-Instruct-4bit    → llama-3-8b
+      mlx-community/Qwen2.5-7B-Instruct-MLX-4bit     → qwen2.5-7b
       mlx-community/deepseek-r1-distill-qwen-32b-4bit → deepseek-r1-distill-qwen-32b
     """
     name = hf_id.split("/")[-1].lower()
     # Strip org-name prefixes embedded in the filename (e.g. "Meta-Llama" → "Llama")
     name = _FILENAME_ORG_PREFIXES.sub("", name)
-    for pat in _STRIP_PATTERNS:
-        name = re.sub(pat, "", name)
+    # Loop until no more suffixes are stripped (handles compound chains like -instruct-mlx-4bit)
+    for _ in range(6):  # max 6 passes prevents infinite loops
+        prev = name
+        for pat in _STRIP_PATTERNS:
+            name = re.sub(pat, "", name)
+        if name == prev:
+            break
     return name.strip("-_")
 
 

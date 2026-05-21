@@ -77,6 +77,7 @@ function markFiltersDirty() {
 async function applyFilters() {
   const serverSort = SERVER_SORT_COLS.has(sortCol.value) ? sortCol.value : 'last_modified'
   await modelsStore.searchHF(searchInput.value.trim(), true, 0, serverSort, false, 100, sortDir.value)
+  modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
   filtersPending.value = false
 }
 
@@ -125,14 +126,18 @@ const SERVER_SORT_COLS = new Set<SortCol>(['downloads', 'likes', 'last_modified'
 function toggleSortDir() {
   sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc'
   if (SERVER_SORT_COLS.has(sortCol.value as SortCol)) {
-    modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value as string, false, 50, sortDir.value)
+    modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value as string, false, 50, sortDir.value).then(() => {
+      modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
+    })
   }
 }
 
 function onSortChange() {
   sortDir.value = 'desc'
   if (SERVER_SORT_COLS.has(sortCol.value as SortCol)) {
-    modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value as string, false, 50, sortDir.value)
+    modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value as string, false, 50, sortDir.value).then(() => {
+      modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
+    })
   }
 }
 
