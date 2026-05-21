@@ -24,10 +24,14 @@ import DownloadQueueCard from '@/components/models/DownloadQueueCard.vue'
 import HFSearchResult from '@/components/models/HFSearchResult.vue'
 import AppButton from '@/components/shared/AppButton.vue'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
+import { usePreferences } from '@/composables/usePreferences'
+import { findBestChoices, type ModelBadge } from '@/composables/useModelScoring'
 
 const modelsStore = useModelsStore()
 const serverStore = useServerStore()
 const router = useRouter()
+
+const { selectedUseCase, maxAgeMonths } = usePreferences()
 
 const tabs = ['Library', 'Find'] as const
 type TabName = typeof tabs[number]
@@ -108,7 +112,9 @@ function searchCompany(query: string) {
   searchInput.value = query
   sortCol.value = 'last_modified'
   sortDir.value = 'desc'
-  modelsStore.searchHF(query, true, 0, 'last_modified', false, 50, 'desc')
+  modelsStore.searchHF(query, true, 0, 'last_modified', false, 50, 'desc').then(() => {
+    modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
+  })
 }
 
 const isRestarting = computed(() => modelsStore.serverRestartingFor)
@@ -189,30 +195,19 @@ const displayedSearchResults = computed(() => {
 const preFilterCount = computed(() => modelsStore.searchResults.filter(r => r.is_mlx).length)
 
 /**
- * Pick the single "best choice" model from the displayed results.
- * Returns { id, isInstruct } so the banner subtitle reflects the actual reason.
- * Criteria (in priority order):
- *   1. Fits in total RAM (perfect or good) — hardware-safe
- *   2. Is an Instruct / Chat model (useful for typical Q&A usage)
- *   3. Isn't a tiny embed/tokenizer stub (size_gb > 0.5 or not detectable)
- *   4. Among qualifying candidates, the one with the most downloads
- *
- * Falls back to best fit-only match if no instruct models qualify.
+ * Multi-signal Best Choice badges: one winner per use case.
+ * Returns Map<modelId, ModelBadge[]> — each badge is a distinct use-case win.
  */
-const recommended = computed((): { id: string; isInstruct: boolean } | null => {
-  const fits = displayedSearchResults.value.filter(r =>
-    (r.fit_level === 'perfect' || r.fit_level === 'good') &&
-    (r.size_gb == null || r.size_gb > 0.5),
+const bestChoices = computed((): Map<string, ModelBadge[]> => {
+  if (modelsStore.searching) return new Map()
+  const totalRam = serverStore.memory?.total_gb ?? 0
+  return findBestChoices(
+    displayedSearchResults.value,
+    modelsStore.modelScores,
+    totalRam,
+    maxAgeMonths.value,
+    selectedUseCase.value,
   )
-  if (fits.length === 0) return null
-
-  const instructPool = fits.filter(r =>
-    /instruct|chat|assistant/.test(r.id.toLowerCase()),
-  )
-  const isInstruct = instructPool.length > 0
-  const pool = isInstruct ? instructPool : fits
-  const best = pool.reduce((a, r) => (r.downloads > a.downloads ? r : a))
-  return { id: best.id, isInstruct }
 })
 
 async function doSearch() {
@@ -220,11 +215,13 @@ async function doSearch() {
   sortDir.value = 'desc'
   filtersPending.value = false
   await modelsStore.searchHF(searchInput.value.trim(), true, 0, 'last_modified', false, 50, 'desc')
+  modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
 }
 
 async function loadMore() {
   const serverSort = SERVER_SORT_COLS.has(sortCol.value) ? sortCol.value : 'last_modified'
   await modelsStore.searchHFMore(serverSort, sortDir.value)
+  modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
 }
 
 // Preload newest mlx-community models when Find tab is opened for the first time
@@ -234,7 +231,9 @@ function onFindTabActivated() {
     trendingLoaded.value = true
     sortCol.value = 'last_modified'
     sortDir.value = 'desc'
-    modelsStore.searchHF('', true, 0, 'last_modified', false, 50, 'desc')
+    modelsStore.searchHF('', true, 0, 'last_modified', false, 50, 'desc').then(() => {
+      modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
+    })
   }
 }
 
@@ -469,6 +468,39 @@ watch(activeTab, (tab) => {
         >{{ c.label }}</button>
       </div>
 
+      <!-- Use-case selector bar (always visible) -->
+      <div class="use-case-bar" role="group" aria-label="Filter Best Choice by use case">
+        <span class="use-case-bar-label">Best for:</span>
+        <button
+          v-for="uc in (['chat', 'code', 'reasoning', 'vision'] as const)"
+          :key="uc"
+          class="use-case-pill"
+          :class="[`uc-${uc}`, { active: selectedUseCase === uc }]"
+          :aria-pressed="selectedUseCase === uc"
+          @click="selectedUseCase = selectedUseCase === uc ? null : uc"
+        >
+          {{ { chat: '💬 Chat', code: '💻 Code', reasoning: '🧠 Reasoning', vision: '🖼️ Vision' }[uc] }}
+        </button>
+        <button
+          v-if="selectedUseCase"
+          class="use-case-clear"
+          aria-label="Clear use case filter"
+          @click="selectedUseCase = null"
+        >✕ All</button>
+        <div class="uc-spacer" />
+        <label class="uc-age-label" title="Hide models older than this">
+          <span class="uc-age-text">Max age:</span>
+          <select v-model="maxAgeMonths" class="uc-age-select">
+            <option :value="0">Any age</option>
+            <option :value="6">6 months</option>
+            <option :value="12">12 months</option>
+            <option :value="18">18 months (default)</option>
+            <option :value="24">24 months</option>
+            <option :value="36">3 years</option>
+          </select>
+        </label>
+      </div>
+
       <!-- Collapsible filters + sort toolbar -->
       <div class="find-toolbar">
         <button class="filter-toggle" @click="showFilters = !showFilters">
@@ -585,7 +617,7 @@ watch(activeTab, (tab) => {
           :last_modified="r.last_modified"
           :total_ram_gb="serverStore.memory?.total_gb ?? 0"
           :available_ram_gb="serverStore.memory?.available_gb ?? 0"
-          :is_recommended="r.id === recommended?.id"
+          :badges="bestChoices.get(r.id) ?? []"
           @download="handleDownload(r.id)"
         />
         <div v-if="modelsStore.searchHasMore" class="load-more-row">
@@ -1258,6 +1290,103 @@ watch(activeTab, (tab) => {
   height: 100%;
   overflow-y: auto;
 }
+
+/* ── Use-case selector bar ──────────────────────────────────── */
+.use-case-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) 0;
+}
+.use-case-bar-label {
+  font-size: 12px;
+  color: var(--tx-tertiary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  flex-shrink: 0;
+}
+.use-case-pill {
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--bd-subtle);
+  background: var(--bg-elevated);
+  color: var(--tx-secondary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+.use-case-pill:hover:not(.active) {
+  border-color: var(--bd-emphasis);
+  color: var(--tx-primary);
+}
+.use-case-pill.uc-chat.active {
+  background: var(--badge-chat-bg);
+  border-color: var(--badge-chat);
+  color: var(--badge-chat);
+  font-weight: 600;
+}
+.use-case-pill.uc-code.active {
+  background: var(--badge-code-bg);
+  border-color: var(--badge-code);
+  color: var(--badge-code);
+  font-weight: 600;
+}
+.use-case-pill.uc-reasoning.active {
+  background: var(--badge-reasoning-bg);
+  border-color: var(--badge-reasoning);
+  color: var(--badge-reasoning);
+  font-weight: 600;
+}
+.use-case-pill.uc-vision.active {
+  background: var(--badge-vision-bg);
+  border-color: var(--badge-vision);
+  color: var(--badge-vision);
+  font-weight: 600;
+}
+.use-case-pill:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 2px;
+}
+.use-case-clear {
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--bd-subtle);
+  background: transparent;
+  color: var(--tx-tertiary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.use-case-clear:hover { color: var(--tx-secondary); border-color: var(--bd-emphasis); }
+.uc-spacer { flex: 1; }
+.uc-age-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.uc-age-text {
+  font-size: 12px;
+  color: var(--tx-tertiary);
+  white-space: nowrap;
+}
+.uc-age-select {
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-subtle);
+  border-radius: var(--r-md);
+  color: var(--tx-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 2px 6px;
+  cursor: pointer;
+  outline: none;
+}
+.uc-age-select:focus-visible { outline: 2px solid var(--si-500); outline-offset: 2px; }
 
 </style>
 

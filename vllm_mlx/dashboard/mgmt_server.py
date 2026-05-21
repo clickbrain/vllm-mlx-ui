@@ -31,6 +31,7 @@ from pydantic import BaseModel
 
 from . import benchmark_runner as br
 from . import chat_store as cs
+from . import llm_benchmark_cache as lbc
 from . import model_manager as mm
 from . import quality_runner as qr
 from . import server_manager as sm
@@ -126,6 +127,11 @@ def _start_background_scheduler() -> None:
         cs.init_db()
     except Exception as exc:
         logger.warning("chat_store.init_db failed: %s", exc, exc_info=True)
+    # Start benchmark score cache
+    try:
+        lbc.start_background_refresh()
+    except Exception as exc:
+        logger.warning("llm_benchmark_cache start failed: %s", exc, exc_info=True)
 
 
 @app.on_event("shutdown")
@@ -134,6 +140,11 @@ def _stop_background_tasks() -> None:
     _update_scheduler_stop.set()
     if _update_scheduler_thread is not None:
         _update_scheduler_thread.join(timeout=2)
+    # Stop benchmark score cache refresh
+    try:
+        lbc.stop_background_refresh()
+    except Exception as exc:
+        logger.warning("llm_benchmark_cache stop failed: %s", exc, exc_info=True)
     # Signal running benchmarks to stop
     with _benchmark_lock:
         if _benchmark_stop_event is not None:
@@ -678,7 +689,29 @@ def model_presets(
             "ram_gb": round(ram_gb, 1)}
 
 
-@app.post("/server/load")
+class _ModelScoresRequest(BaseModel):
+    ids: list[str]
+
+
+@app.post("/models/scores")
+def model_scores(req: _ModelScoresRequest, _: None = Depends(_check_auth)) -> dict:
+    """Return cached benchmark scores for a list of HF model IDs.
+
+    Request body: ``{"ids": ["mlx-community/Qwen3-72B-4bit", ...]}``
+
+    Each key in the response maps to either a benchmark scores dict or
+    ``{"source": "none"}`` when no data is available.
+    """
+    if not req.ids:
+        return {}
+    try:
+        return lbc.get_scores(req.ids)
+    except Exception as exc:
+        logger.warning("model_scores lookup failed: %s", exc, exc_info=True)
+        return {hf_id: {"source": "none"} for hf_id in req.ids}
+
+
+
 def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
     """Update the configured model and start (or restart) the server."""
     model_id = req.model_id.strip()

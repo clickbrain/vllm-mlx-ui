@@ -111,10 +111,14 @@ export interface BenchmarkHistoryEntry {
   hardware?: HardwareFingerprint
 }
 
-export interface BenchmarkConfig {
-  prompt: string
-  runs: number
-  max_tokens: number
+export interface BenchmarkScores {
+  mmlu?: number
+  humaneval?: number
+  math?: number
+  gpqa?: number
+  ifeval?: number
+  source: 'fallback' | 'leaderboard' | 'none'
+  matched_key?: string
 }
 
 function deriveQuantization(modelId: string): string {
@@ -166,6 +170,7 @@ export const useModelsStore = defineStore('models', () => {
   const loadingModelId = ref<string | null>(null)
   const actionError = ref<string | null>(null)
   const serverRestartingFor = ref<string | null>(null)
+  const modelScores = ref<Record<string, BenchmarkScores>>({})
 
   async function fetchModels() {
     loading.value = true
@@ -487,6 +492,16 @@ export const useModelsStore = defineStore('models', () => {
     benchmarkHistory.value = []
   }
 
+  async function fetchModelScores(ids: string[]) {
+    if (!ids.length) return
+    try {
+      const raw = await api.post<Record<string, BenchmarkScores>>('/models/scores', { ids })
+      modelScores.value = { ...modelScores.value, ...raw }
+    } catch (e) {
+      // Non-fatal: badges just won't appear
+    }
+  }
+
   function clearAllDownloadPolls() {
     for (const id of Object.keys(pollIntervals)) {
       window.clearInterval(pollIntervals[id])
@@ -511,10 +526,12 @@ export const useModelsStore = defineStore('models', () => {
     downloadQueue,
     benchmarkResults, benchmarkHistory, benchmarking, benchmarkRunning,
     bestBenchmarkPerModel,
+    modelScores,
     loadingModelId, actionError, serverRestartingFor,
     fetchModels, downloadModel, pollDownloadStatus, resumeActiveDownloadPolls, clearAllDownloadPolls,
     loadModel, deleteModel,
     searchHF, searchHFMore,
+    fetchModelScores,
     runBenchmark, fetchBenchmarkResults, deleteBenchmarkResult, clearAllBenchmarks,
   }
 })

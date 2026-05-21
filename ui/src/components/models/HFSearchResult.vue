@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import AppBadge from '@/components/shared/AppBadge.vue'
 import AppButton from '@/components/shared/AppButton.vue'
+import type { ModelBadge } from '@/composables/useModelScoring'
 
 const props = defineProps<{
   id: string
@@ -15,8 +16,8 @@ const props = defineProps<{
   total_ram_gb?: number
   /** Currently available (free) unified memory in GB */
   available_ram_gb?: number
-  /** True when this is the single "best choice" recommendation in the current results */
-  is_recommended?: boolean
+  /** Best-choice badges for this model — one per use case won */
+  badges?: ModelBadge[]
 }>()
 
 const emit = defineEmits<{
@@ -76,27 +77,17 @@ const fitPercent = computed(() => {
 
 /**
  * Warn when the model fits the hardware (total RAM) but won't load right now
- * because there isn't enough free memory. Only relevant when the server is
- * not the one holding the RAM (i.e., no model is loaded / available_gb is low).
+ * because there isn't enough free memory.
  */
 const availableWarning = computed(() => {
   if (!props.size_gb || !props.available_ram_gb) return null
-  if (props.fit_level === 'too_tight') return null  // already flagged as too large
+  if (props.fit_level === 'too_tight') return null
   const free = props.available_ram_gb
-  if (props.size_gb <= free) return null  // loads fine right now
+  if (props.size_gb <= free) return null
   return `${free.toFixed(1)} GB free now — close apps to load`
 })
 
-/** Dynamic subtitle for the "Best Choice" banner, derived from this card's own tags. */
-const recommendedSub = computed(() => {
-  const parts = ['Fits your hardware', 'popular']
-  const labels = capabilityTags.value.map(t => t.label)
-  if (labels.includes('Instruct')) parts.push('Instruct')
-  else if (labels.includes('Vision')) parts.push('Vision')
-  else if (labels.includes('Code')) parts.push('Code')
-  else if (labels.includes('Thinking')) parts.push('Reasoning')
-  return parts.join(' · ')
-})
+const hasBadges = computed(() => props.badges && props.badges.length > 0)
 
 /** Extract human-readable capability tags from model ID and HF tags */
 const capabilityTags = computed(() => {
@@ -104,14 +95,12 @@ const capabilityTags = computed(() => {
   const hfTags = props.tags.map(t => t.toLowerCase())
   const caps: Array<{ label: string; style: string }> = []
 
-  // Param count — extract like "7b", "13b", "70b", "0.5b", "1.5b", "72b"
   const paramMatch = id.match(/[._\-/](\d+(?:\.\d+)?)\s*b(?:[._\-/]|$)/) ??
                      id.match(/^(\d+(?:\.\d+)?)\s*b(?:[._\-/]|$)/)
   if (paramMatch) {
     caps.push({ label: `${paramMatch[1]}B`, style: 'param' })
   }
 
-  // Quantization — look for common MLX quant patterns
   const quantPatterns = [
     [/\b(bf16|bfloat16)\b/, 'bf16'],
     [/\b(fp16|float16)\b/, 'fp16'],
@@ -128,7 +117,6 @@ const capabilityTags = computed(() => {
     }
   }
 
-  // Capabilities from model name and HF tags
   const allText = id + ' ' + hfTags.join(' ')
   if (/instruct|chat|assistant/.test(allText)) caps.push({ label: 'Instruct', style: 'cap' })
   if (/vision|vl\b|vlm|multimodal|image/.test(allText)) caps.push({ label: 'Vision', style: 'vision' })
@@ -142,11 +130,20 @@ const capabilityTags = computed(() => {
 </script>
 
 <template>
-  <div class="hf-result" :class="{ 'hf-result--recommended': is_recommended }">
-    <div v-if="is_recommended" class="recommended-banner">
-      <span class="recommended-icon">✦</span> Best Choice
-      <span class="recommended-sub">{{ recommendedSub }}</span>
+  <div class="hf-result" :class="{ 'hf-result--badged': hasBadges }">
+    <!-- Best Choice badges — one stripe per use case won -->
+    <div v-if="hasBadges" class="badge-banners">
+      <div
+        v-for="badge in badges"
+        :key="badge.useCase"
+        class="badge-banner"
+        :style="{ '--badge-color': badge.color }"
+      >
+        <span class="badge-label">{{ badge.label }}</span>
+        <span class="badge-reason">{{ badge.reason }}</span>
+      </div>
     </div>
+
     <div class="result-body">
       <!-- Top row: model name + MLX badge + download button -->
       <div class="result-top">
@@ -230,33 +227,41 @@ const capabilityTags = computed(() => {
   box-shadow: 0 1px 4px rgba(0,0,0,.08);
 }
 
-/* Recommended highlight */
-.hf-result--recommended {
-  border-color: var(--cu-400, #4ade80);
-  box-shadow: 0 0 0 1px var(--cu-400, #4ade80), 0 2px 8px rgba(74, 222, 128, 0.15);
+/* Card with at least one badge gets a subtle accent border */
+.hf-result--badged {
+  border-color: rgba(91, 106, 208, 0.35);
+  box-shadow: 0 0 0 1px rgba(91, 106, 208, 0.15);
 }
-.hf-result--recommended:hover {
-  box-shadow: 0 0 0 1px var(--cu-400, #4ade80), 0 3px 12px rgba(74, 222, 128, 0.25);
+.hf-result--badged:hover {
+  box-shadow: 0 0 0 1px rgba(91, 106, 208, 0.25), 0 2px 8px rgba(0,0,0,.10);
 }
 
-.recommended-banner {
+/* Badge banners — one row per use-case win */
+.badge-banners {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.badge-banner {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 6px var(--space-4);
-  background: linear-gradient(90deg, rgba(74, 222, 128, 0.12), rgba(74, 222, 128, 0.05));
-  border-bottom: 1px solid var(--cu-400, #4ade80);
+  padding: 5px var(--space-4);
+  background: color-mix(in srgb, var(--badge-color) 10%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--badge-color) 30%, transparent);
   font-size: 12px;
-  font-weight: 700;
-  color: var(--cu-400, #4ade80);
-  letter-spacing: 0.03em;
 }
-.recommended-icon { font-size: 14px; }
-.recommended-sub {
+.badge-label {
+  font-weight: 700;
+  color: var(--badge-color);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.badge-reason {
   font-size: 11px;
-  font-weight: 400;
   color: var(--tx-tertiary);
   margin-left: auto;
+  text-align: right;
 }
 
 .result-body {
@@ -405,7 +410,6 @@ const capabilityTags = computed(() => {
   flex-wrap: wrap;
   gap: 4px;
 }
-
 .cap-tag {
   display: inline-block;
   padding: 1px 7px;
@@ -415,39 +419,33 @@ const capabilityTags = computed(() => {
   letter-spacing: 0.02em;
   line-height: 18px;
 }
-
 .cap-tag--param {
   background: var(--bg-subtle);
   color: var(--tx-secondary);
   border: 1px solid var(--bd-subtle);
   font-family: var(--font-mono);
 }
-
 .cap-tag--quant {
   background: rgba(91, 106, 208, 0.12);
   color: var(--si-300);
   border: 1px solid rgba(91, 106, 208, 0.25);
   font-family: var(--font-mono);
 }
-
 .cap-tag--cap {
   background: var(--bg-elevated);
   color: var(--tx-secondary);
   border: 1px solid var(--bd-default);
 }
-
 .cap-tag--vision {
   background: rgba(147, 112, 219, 0.12);
   color: #9370db;
   border: 1px solid rgba(147, 112, 219, 0.3);
 }
-
 .cap-tag--code {
   background: rgba(32, 178, 170, 0.12);
   color: #20b2aa;
   border: 1px solid rgba(32, 178, 170, 0.3);
 }
-
 .cap-tag--think {
   background: rgba(255, 165, 0, 0.12);
   color: #e69500;

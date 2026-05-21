@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.7.3 — 2026-05-21
+
+- **Feature: Multi-signal Best Choice scoring engine** — Replaced the old "most downloads that fits" heuristic with a full multi-signal scoring system. Each model is scored on five dimensions: (1) name/tag affinity to the use case (35%), (2) empirical benchmark quality from a curated database (30%), (3) recency — punishes stale models (25%), (4) hardware utilization — peaks at 55–72% RAM fill (10%), (5) popularity via log-scaled download count (10%). Score threshold 0.35 required for a badge.
+- **Feature: Per-use-case Best Choice badges** — Four separate Best Choice winners computed simultaneously — one each for Chat, Code, Reasoning, and Vision. A single model can win multiple categories. Badges appear as colored stripes at the top of the winning model card with the label and a one-line reason string (size fit, quality score, age).
+- **Feature: Use-case selector bar** — Always-visible bar above search results showing 💬 Chat / 💻 Code / 🧠 Reasoning / 🖼️ Vision pills. Click to focus badge competition on one category. Click again to deselect. "Max age" dropdown (default 18 months) provides a hard cutoff to exclude outdated models from winning.
+- **Feature: ~80-family benchmark fallback database** — Covers Qwen3, Qwen2.5, Llama 3.x, Gemma 3, Mistral, DeepSeek R1/V3, Phi-4, Yi-1.5, Command-R, and more. Instantly available at startup with no network dependency. Optional HF Open LLM Leaderboard enrichment runs in background 20s after startup, refreshes every 24h.
+- **Fix: Model name normalization** — `Meta-Llama-3-8B-Instruct-4bit` now correctly maps to the `llama-3-8b` benchmark family (was returning no-score due to `meta-` prefix not being stripped from the model filename component).
+- **Fix: BenchmarkConfig orphan code** — Removed 4-line TypeScript fragment left over from the `BenchmarkConfig` interface insertion that caused an esbuild parse error (`Unexpected "}"` at models.ts:128).
+- **UX: Improved model cards** — Capability tags (parameter count, quantization level, Instruct/Vision/Code/Thinking) now extracted from model ID and HF tags and shown as chips on every search result card.
+
 ## v0.7.2 — 2026-05-21
 
 - **Perf: Hot-path imports moved to module level** — `psutil`, `get_engine`, and `ENGINES` no longer re-imported inside every health-check/build-command call in `server_manager.py`. rglob TTL cache added to `get_partial_download_bytes()` in `model_manager.py` (2s TTL, eliminates repetitive I/O from polling thread).

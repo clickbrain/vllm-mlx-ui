@@ -40,6 +40,16 @@
   --purple-300: #C4B5FD;
   --cyan-300: #67E8F9;
 
+  /* ─── Best Choice badge colors ─── */
+  --badge-chat:      #5B6AD0;   /* silicon blue */
+  --badge-code:      #22C55E;   /* phosphor green */
+  --badge-reasoning: #A855F7;   /* purple */
+  --badge-vision:    #F59E0B;   /* copper/amber */
+  --badge-chat-bg:   rgba( 91, 106, 208, .12);
+  --badge-code-bg:   rgba( 34, 197,  94, .12);
+  --badge-reasoning-bg: rgba(168,  85, 247, .12);
+  --badge-vision-bg: rgba(245, 158,  11, .12);
+
   /* ─── Semantic Tokens — Dark mode defaults ─── */
 
   /* Backgrounds */
