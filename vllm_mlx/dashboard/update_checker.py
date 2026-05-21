@@ -12,6 +12,7 @@ Results are cached in a module-level dict for 1 hour to avoid hammering GitHub/P
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import threading
@@ -19,7 +20,7 @@ import time
 from typing import NamedTuple
 
 import requests
-import logging
+
 logger = logging.getLogger(__name__)
 
 _CACHE_TTL = 3600  # seconds
@@ -61,8 +62,8 @@ def _installed_version(package: str) -> str:
     installed version (a known footgun when both vllm-mlx and vllm-mlx-ui share
     the same top-level `vllm_mlx` namespace).
     """
-    import sys
     import importlib.metadata as _meta
+    import sys
     normalized = package.lower().replace("-", "_")
     try:
         # Prefer a distribution whose metadata lives inside the running venv,
@@ -296,8 +297,8 @@ def _homebrew_formula_version() -> str | None:
         logger.warning("Operation failed", exc_info=True)
 
     # Fallback: parse from sys.prefix (only works when process runs inside cellar)
-    import sys
     import re
+    import sys
     prefix = sys.prefix
     m = re.search(r"[Cc]ellar/vllm-mlx-ui/([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)", prefix)
     if m:
@@ -632,7 +633,10 @@ def relaunch() -> None:
 
     try:
         from vllm_mlx.dashboard.server_manager import (
-            get_server_status, AUTO_START_FLAG, RELAUNCH_FLAG, STATE_DIR,
+            AUTO_START_FLAG,
+            RELAUNCH_FLAG,
+            STATE_DIR,
+            get_server_status,
         )
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         status = get_server_status()

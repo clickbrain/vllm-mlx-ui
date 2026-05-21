@@ -6,7 +6,9 @@ Handles starting, stopping, and monitoring the inference server subprocess.
 State (PID, config, logs) is persisted to ~/.vllm_mlx_ui/.
 """
 
+import contextlib
 import json
+import logging
 import os
 import secrets
 import signal
@@ -15,13 +17,16 @@ import subprocess
 import sys
 import threading
 import time
-from types import MappingProxyType
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
+import psutil
 import requests
 from requests.adapters import HTTPAdapter
-import logging
+
+from vllm_mlx.dashboard.engines.registry import ENGINES, get_engine
+
 logger = logging.getLogger(__name__)
 
 STATE_DIR = Path.home() / ".vllm_mlx_ui"
@@ -96,28 +101,7 @@ def _mgmt_url(base: str) -> str:
         _resolved_urls[base] = ipv4_url
     return ipv4_url
 
-TOOL_CALL_PARSERS = [
-    "",
-    "auto",
-    "mistral",
-    "qwen",
-    "qwen3_coder",
-    "llama",
-    "hermes",
-    "harmony",
-    "gpt-oss",
-    "deepseek",
-    "kimi",
-    "granite",
-    "nemotron",
-    "xlam",
-    "functionary",
-    "gemma4",
-    "glm47",
-    "minimax",
-]
 
-REASONING_PARSERS = ["", "qwen3", "deepseek_r1", "gemma4", "harmony", "gpt_oss", "glm4"]
 
 _DEFAULT_CONFIG: dict[str, Any] = {
     # ── Schema versioning ───────────────────────────────────────────────────
@@ -309,7 +293,6 @@ def _migrate_config(saved: dict[str, Any]) -> dict[str, Any]:
     migrated.setdefault("engine_id", "vllm-mlx")
     migrated.setdefault("engine_settings", {})
     try:
-        from vllm_mlx.dashboard.engines.registry import ENGINES
         for eid, engine in ENGINES.items():
             if eid not in migrated["engine_settings"]:
                 migrated["engine_settings"][eid] = engine.default_engine_settings()
@@ -646,7 +629,6 @@ def check_health(config: dict[str, Any] | None = None) -> tuple[bool, dict]:
         url = get_server_url(config)
 
         # Determine the primary health endpoint from the engine adapter.
-        from vllm_mlx.dashboard.engines.registry import get_engine
         engine_id = config.get("engine_id", "vllm-mlx")
         try:
             health_path = getattr(get_engine(engine_id), "health_path", "/health")
@@ -760,7 +742,6 @@ def _build_command(config: dict[str, Any]) -> list[str]:
     The engine is determined by ``config["engine_id"]``.  Falls back to
     "vllm-mlx" if the configured engine is unknown.
     """
-    from vllm_mlx.dashboard.engines.registry import get_engine
     engine_id = config.get("engine_id", "vllm-mlx")
     try:
         engine = get_engine(engine_id)
@@ -777,7 +758,6 @@ def _build_env(config: dict[str, Any]) -> dict | None:
     it on top of ``os.environ`` so the subprocess inherits all current vars
     plus the engine-specific overrides.  Returns ``None`` if no overrides.
     """
-    from vllm_mlx.dashboard.engines.registry import get_engine
     engine_id = config.get("engine_id", "vllm-mlx")
     try:
         engine = get_engine(engine_id)
@@ -795,7 +775,6 @@ def _build_cwd(config: dict[str, Any]) -> str | None:
     Delegates to the selected engine's ``get_working_directory()``.
     Returns ``None`` meaning "inherit the parent's CWD".
     """
-    from vllm_mlx.dashboard.engines.registry import get_engine
     engine_id = config.get("engine_id", "vllm-mlx")
     try:
         engine = get_engine(engine_id)
@@ -828,16 +807,12 @@ def kill_stale_server(port: int, host: str = "127.0.0.1") -> tuple[bool, str]:
             _clear_server_state()
             return True, f"Port {port} is no longer in use."
         for pid in pids:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
         time.sleep(1.5)
         for pid in pids:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
         _clear_server_state()
         return True, f"Killed stale server process(es) {pids} on port {port}."
     except Exception as e:
@@ -869,7 +844,6 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
     if not config.get("model", "").strip():
         engine_id = config.get("engine_id", "vllm-mlx")
         try:
-            from vllm_mlx.dashboard.engines.registry import get_engine
             eng = get_engine(engine_id)
             discovered = eng.get_discovered_models()
             if discovered:
@@ -1134,7 +1108,6 @@ def get_memory_stats() -> dict:
         return {"total_gb": 0, "available_gb": 0, "used_gb": 0, "percent": 0, "pressure": "unknown"}
 
     try:
-        import psutil
         vm = psutil.virtual_memory()
         total = vm.total / (1024 ** 3)
         available = vm.available / (1024 ** 3)
@@ -1345,11 +1318,10 @@ def force_release_memory() -> dict:
 
     # Protect the full parent-process chain (app.py, shell, etc.)
     try:
-        import psutil as _ps
-        _p = _ps.Process(own_pid)
+        _p = psutil.Process(own_pid)
         while _p.ppid() not in (0, 1):
             _protected_pids.add(_p.ppid())
-            _p = _ps.Process(_p.ppid())
+            _p = psutil.Process(_p.ppid())
     except Exception:
         logger.warning("Operation failed", exc_info=True)
 
@@ -1367,7 +1339,6 @@ def force_release_memory() -> dict:
     )
 
     try:
-        import psutil
         for proc in psutil.process_iter(["pid", "name", "cmdline", "memory_info"]):
             try:
                 pid = proc.info["pid"]
@@ -1390,10 +1361,8 @@ def force_release_memory() -> dict:
         if procs_killed:
             time.sleep(1.5)
             for p in procs_killed:
-                try:
+                with contextlib.suppress(ProcessLookupError, PermissionError):
                     _os.kill(p["pid"], signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
-                    pass
     except ImportError:
         warnings.append("psutil not available — cannot scan for orphaned processes")
     except Exception as e:

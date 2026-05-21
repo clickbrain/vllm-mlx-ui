@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import threading
 import time as _time
+from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -462,9 +463,8 @@ def grade_ifeval(response: str, constraint: IFEvalConstraint) -> bool:
         return all(len(_sentences(p)) >= min_sent for p in paragraphs)
 
     if ctype == "json_array":
-        import json as _json
         try:
-            arr = _json.loads(text.strip())
+            arr = json.loads(text.strip())
             return isinstance(arr, list) and len(arr) >= constraint.get("min_items", 1)
         except Exception:
             return False
@@ -485,9 +485,8 @@ def grade_ifeval(response: str, constraint: IFEvalConstraint) -> bool:
         return all(w.lower() in text.lower() for w in constraint["value"])
 
     if ctype == "json_object":
-        import json as _json
         try:
-            obj = _json.loads(text.strip())
+            obj = json.loads(text.strip())
             return all(k in obj for k in constraint["keys"])
         except Exception:
             return False
@@ -604,9 +603,8 @@ def grade_ifeval(response: str, constraint: IFEvalConstraint) -> bool:
         return True
 
     if ctype == "json_structure":
-        import json as _json
         try:
-            obj = _json.loads(text.strip())
+            obj = json.loads(text.strip())
             parts = constraint["path"].split(".")
             for part in parts:
                 obj = obj[part]
@@ -625,8 +623,7 @@ def grade_ifeval(response: str, constraint: IFEvalConstraint) -> bool:
         words = [w for w in text.split() if w]
         if not words:
             return False
-        from collections import Counter as _Counter
-        first_letters = _Counter(w[0].lower() for w in words)
+        first_letters = Counter(w[0].lower() for w in words)
         return any(c >= constraint["count"] for c in first_letters.values())
 
     if ctype == "dialogue":
@@ -679,7 +676,6 @@ def _stream_completion(
     t_start = _time.monotonic()
     t_first: float | None = None
     chunks: list[str] = []
-    token_count = 0
 
     with requests.post(
         f"{server_url}/v1/chat/completions",
@@ -718,7 +714,6 @@ def _stream_completion(
                     if t_first is None:
                         t_first = _time.monotonic()
                     chunks.append(content)
-                    token_count += 1
             except Exception:
                 logger.warning("Operation failed", exc_info=True)
 

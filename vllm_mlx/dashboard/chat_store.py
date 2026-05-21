@@ -12,7 +12,7 @@ Schema version tracked in PRAGMA user_version for future migrations.
 import logging
 import sqlite3
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, Generator
 
@@ -95,10 +95,8 @@ def init_db() -> None:
 
     # Restrict file permissions — chats may contain sensitive prompts
     db_file = _db_path()
-    try:
+    with suppress(Exception):
         os.chmod(db_file, stat.S_IRUSR | stat.S_IWUSR)
-    except Exception:
-        pass
 
 
 def list_conversations(limit: int = 200) -> list[dict[str, Any]]:

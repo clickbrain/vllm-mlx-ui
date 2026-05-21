@@ -59,8 +59,8 @@ class LlamaCppEngine(BaseEngine):
         On macOS: ``brew install llama.cpp``
         On Linux: clone + cmake build (not automated here).
         """
-        import shutil
         import platform
+        import shutil
         if platform.system() == "Darwin" and shutil.which("brew"):
             return ["brew", "install", "llama.cpp"]
         # On Linux or without brew, user must build from source.

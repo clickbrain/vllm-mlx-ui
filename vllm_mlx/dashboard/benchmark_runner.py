@@ -8,6 +8,7 @@ and persists results history to ~/.vllm_mlx_ui/benchmark_results.json.
 
 import contextlib
 import json
+import logging
 import statistics
 import subprocess
 import sys
@@ -19,13 +20,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from vllm_mlx.dashboard.hardware import fingerprint as _hw_fingerprint
-import logging
+
 logger = logging.getLogger(__name__)
 
 STATE_DIR = Path.home() / ".vllm_mlx_ui"
 RESULTS_FILE = STATE_DIR / "benchmark_results.json"
 _SCHEMA_VERSION = 2
-_save_lock = threading.Lock()
+_save_lock = threading.RLock()
+_RESULT_RETENTION_DAYS = 90
 
 
 def _ensure_state_dir() -> Path:
@@ -33,20 +35,42 @@ def _ensure_state_dir() -> Path:
     return STATE_DIR
 
 
+def _prune_old_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove results older than ``_RESULT_RETENTION_DAYS`` from the list."""
+    cutoff = datetime.now(timezone.utc).timestamp() - _RESULT_RETENTION_DAYS * 86400
+    kept: list[dict[str, Any]] = []
+    for r in results:
+        ts = r.get("timestamp")
+        if ts:
+            try:
+                parsed = datetime.fromisoformat(ts).timestamp()
+                if parsed < cutoff:
+                    continue
+            except (ValueError, TypeError):
+                pass
+        kept.append(r)
+    return kept
+
+
 def load_results() -> list[dict[str, Any]]:
     """Load all persisted benchmark results from disk.
+
+    Thread-safe: acquires ``_save_lock``.  Callers that already hold the lock
+    (``save_result``, ``delete_result``) may call this without deadlock since
+    the lock is reentrant (``RLock``).
 
     Returns:
         List of result dicts, or an empty list if the file is missing or corrupt.
     """
-    if not RESULTS_FILE.exists():
-        return []
-    try:
-        with open(RESULTS_FILE) as f:
-            return json.load(f)
-    except Exception as e:
-        logger.warning("Operation failed: %s", e, exc_info=True)
-        return []
+    with _save_lock:
+        if not RESULTS_FILE.exists():
+            return []
+        try:
+            with open(RESULTS_FILE) as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning("Operation failed: %s", e, exc_info=True)
+            return []
 
 
 def save_result(result: dict[str, Any]) -> None:
@@ -61,6 +85,7 @@ def save_result(result: dict[str, Any]) -> None:
     _ensure_state_dir()
     with _save_lock:
         results = load_results()
+        results = _prune_old_results(results)
         results.append(result)
         tmp = RESULTS_FILE.with_suffix(".tmp")
         try:
@@ -409,55 +434,8 @@ def run_custom_benchmark(
         char_count = 0
         content_char_count = 0  # excludes reasoning_content (thinking tokens)
         completion_tokens: int | None = None
-        content_buffer = ""
 
         try:
-            resp = _req.post(
-                f"{server_url}/v1/chat/completions",
-                json={
-                    "model": model_id,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": max_tokens,
-                    "stream": True,
-                    "temperature": 0.0,
-                    "stream_options": {"include_usage": True},
-                    "enable_thinking": enable_thinking,
-                },
-                stream=True,
-                timeout=300,
-            )
-            resp.raise_for_status()
-
-            for raw_line in resp.iter_lines():
-                if not raw_line:
-                    continue
-                line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
-                if not line.startswith("data: ") or line == "data: [DONE]":
-                    continue
-                data_str = line[6:]
-                try:
-                    data = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-                usage = data.get("usage") or {}
-                if usage.get("completion_tokens"):
-                    completion_tokens = int(usage["completion_tokens"])
-                choices = data.get("choices") or []
-                delta = choices[0].get("delta", {}) if choices else {}
-                content_tok = delta.get("content") or ""
-                thinking_tok = delta.get("reasoning_content") or ""
-                # Use either content or reasoning to detect activity (drive TTFT/timing),
-                # but only count content tokens in char_count for TPS fallback so that
-                # thinking tokens don't inflate the token-per-second metric.
-                activity = content_tok or thinking_tok
-                if activity:
-                    now = time.monotonic()
-                    if first_token_time is None:
-                        first_token_time = now
-                    last_content_time = now
-                    char_count += len(activity)
-                    content_char_count += len(content_tok)
-                    content_buffer += content_tok
 
             if first_token_time is not None and char_count > 0:
                 ttft_ms = round((first_token_time - start) * 1000, 1)
@@ -636,58 +614,8 @@ def run_live_benchmark(
         content_char_count = 0  # content only (excludes reasoning_content thinking tokens)
         completion_tokens: int | None = None   # from server usage field (preferred)
         finish_reason: str | None = None
-        content_buffer = ""
 
         try:
-            resp = _req.post(
-                f"{server_url}/v1/chat/completions",
-                json={
-                    "model": model_id,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": max_tokens,
-                    "stream": True,
-                    "temperature": 0.0,
-                    # Ask the server to include token usage in the final chunk
-                    "stream_options": {"include_usage": True},
-                    "enable_thinking": False,
-                },
-                stream=True,
-                timeout=120,
-            )
-            resp.raise_for_status()
-
-            for raw_line in resp.iter_lines():
-                if not raw_line:
-                    continue
-                line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
-                if not line.startswith("data: ") or line == "data: [DONE]":
-                    continue
-                data_str = line[6:]
-                try:
-                    data = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-                # Capture server-reported token counts when available
-                usage = data.get("usage") or {}
-                if usage.get("completion_tokens"):
-                    completion_tokens = int(usage["completion_tokens"])
-                choices = data.get("choices") or []
-                if choices:
-                    fr = choices[0].get("finish_reason")
-                    if fr:
-                        finish_reason = fr
-                delta = choices[0].get("delta", {}) if choices else {}
-                content_tok = delta.get("content") or ""
-                thinking_tok = delta.get("reasoning_content") or ""
-                activity = content_tok or thinking_tok
-                if activity:
-                    now = time.monotonic()
-                    if first_token_time is None:
-                        first_token_time = now
-                    last_content_time = now
-                    char_count += len(activity)
-                    content_char_count += len(content_tok)
-                    content_buffer += content_tok
 
             # Skip truncated responses — they make TPS look artificially high
             if finish_reason == "length":

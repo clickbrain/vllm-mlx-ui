@@ -24,6 +24,9 @@ Launch:  ``./ds4-server --ctx 393216 --kv-disk-dir ~/.cache/ds4-kv``  (≥128 GB
 """
 from __future__ import annotations
 
+import contextlib
+import functools
+import logging
 import os
 import platform
 import re
@@ -33,10 +36,16 @@ from typing import Any, ClassVar
 from .base import BaseEngine
 from .flag_probe import add_if_supported
 
+logger = logging.getLogger(__name__)
+
 # ── Apple Silicon chip detection ─────────────────────────────────────────────
 
+@functools.lru_cache(maxsize=1)
 def detect_apple_chip() -> str | None:
-    """Return ``"M1"``, ``"M2"``, ``"M3"``, ``"M4"``, ``"M5"`` etc. or ``None``."""
+    """Return ``"M1"``, ``"M2"``, ``"M3"``, ``"M4"``, ``"M5"`` etc. or ``None``.
+
+    Cached after first call — hardware doesn't change during process lifetime.
+    """
     if platform.system() != "Darwin":
         return None
     try:
@@ -47,13 +56,17 @@ def detect_apple_chip() -> str | None:
         m = re.search(r"Apple\s+(M\d+)", result.stdout.strip())
         if m:
             return m.group(1)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to detect Apple chip: %s", e, exc_info=True)
     return None
 
 
+@functools.lru_cache(maxsize=1)
 def _chip_generation() -> int | None:
-    """Return the Apple Silicon generation number (1=M1, 5=M5, …) or ``None``."""
+    """Return the Apple Silicon generation number (1=M1, 5=M5, …) or ``None``.
+
+    Cached after first call.
+    """
     chip = detect_apple_chip()
     if chip is None:
         return None
@@ -105,8 +118,8 @@ def _detect_installed_fork(ds4_dir: str) -> str | None:
             return "antirez"
         if "swival" in remote:
             return "swival"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to detect installed ds4 fork: %s", e, exc_info=True)
     return None
 
 
@@ -138,11 +151,13 @@ def _ds4_dir() -> str:
 
 
 def _ds4_bin() -> str:
+    """Return the absolute path to the ds4-server binary."""
     return os.path.join(_ds4_dir(), "ds4-server")
 
 
+@functools.lru_cache(maxsize=1)
 def _total_ram_gb() -> int:
-    """Return total physical RAM in GB, or 0 if undetectable."""
+    """Return total physical RAM in GB, or 0 if undetectable. Cached after first call."""
     try:
         if platform.system() == "Darwin":
             result = subprocess.run(
@@ -155,8 +170,8 @@ def _total_ram_gb() -> int:
                 for line in f:
                     if line.startswith("MemTotal:"):
                         return int(line.split()[1]) // 1024 // 1024
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to detect total RAM: %s", e, exc_info=True)
     return 0
 
 
@@ -195,8 +210,8 @@ def _free_ram_gb() -> int:
                 for line in f:
                     if line.startswith("MemAvailable:"):
                         return int(line.split()[1]) // 1024 // 1024
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to detect free RAM: %s", e, exc_info=True)
     return 0
 
 
@@ -238,15 +253,13 @@ class Ds4M5Engine(BaseEngine):
     id: ClassVar[str] = "ds4-m5"
     name: ClassVar[str] = "DeepSeek V4 Flash (ds4)"
 
-    @property
-    def description(self) -> str:
+    def _build_description(self) -> str:
         chip = detect_apple_chip()
         ram = _total_ram_gb()
         d = _ds4_dir()
         installed_fork = _detect_installed_fork(d)
         target_fork = _select_fork()
 
-        # Fork status line
         if installed_fork == "swival":
             fork_line = (
                 "⚠️  Legacy Swival fork detected — missing /v1/responses (Codex CLI).\n"
@@ -284,6 +297,14 @@ class Ds4M5Engine(BaseEngine):
             "≥256 GB for q4-imatrix (~153 GB).  Full /v1/responses, /v1/messages (Claude Code) endpoints."
         )
         return "".join(parts)
+
+    @property
+    def description(self) -> str:
+        try:
+            return self._desc_cache
+        except AttributeError:
+            self._desc_cache = self._build_description()
+            return self._desc_cache
 
     capabilities: ClassVar[frozenset[str]] = frozenset({
         "tool_calls",
@@ -410,21 +431,20 @@ class Ds4M5Engine(BaseEngine):
                     v = result.stdout.strip()
                     if v:
                         return v
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to read ds4 git version: %s", e, exc_info=True)
         try:
             result = subprocess.run(
                 [self._path_to_binary(), "--help"],
                 capture_output=True, text=True, timeout=5,
             )
             text = (result.stdout or result.stderr or "")
-            # Fallback: return first line as version info
             lines = text.strip().splitlines()
             if lines:
                 m = re.match(r"ds4[-\s]server[-\s]?(.*)", lines[0], re.IGNORECASE)
                 return m.group(1) or lines[0] if m else lines[0]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to read ds4 binary version: %s", e, exc_info=True)
         return None
 
     def latest_version(self) -> str | None:
@@ -444,10 +464,10 @@ class Ds4M5Engine(BaseEngine):
                     sha = data.get("sha", "")
                     if sha:
                         return sha[:12]
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as e:
+                logger.warning("Failed to query GitHub for latest ds4 version: %s", e)
+        except Exception as e:
+            logger.warning("Failed to query GitHub for latest ds4 version: %s", e)
         return None
 
     def get_working_directory(self) -> str | None:
@@ -624,7 +644,8 @@ class Ds4M5Engine(BaseEngine):
                 lm = sib.get("lastModified", sib.get("rfilename", ""))
                 if lm:
                     return str(lm)[:10]
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to check HF model latest version: %s", e, exc_info=True)
             return None
         return None
 
@@ -665,10 +686,8 @@ class Ds4M5Engine(BaseEngine):
             return []
         name = os.path.basename(gguf)
         size_gb = 0.0
-        try:
+        with contextlib.suppress(OSError):
             size_gb = round(os.path.getsize(gguf) / (1024 ** 3), 2)
-        except OSError:
-            pass
         return [{
             "id": f"ds4:{name}",
             "name": name,

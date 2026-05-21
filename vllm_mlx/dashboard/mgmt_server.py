@@ -14,11 +14,14 @@ local dashboard uses.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import threading
 import time
 from typing import Any
 
+import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,12 +30,22 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import benchmark_runner as br
+from . import chat_store as cs
 from . import model_manager as mm
 from . import quality_runner as qr
 from . import server_manager as sm
-from . import chat_store as cs
-import logging
+
 logger = logging.getLogger(__name__)
+
+
+_httpx_client: httpx.AsyncClient | None = None
+
+
+def _get_httpx_client() -> httpx.AsyncClient:
+    global _httpx_client
+    if _httpx_client is None:
+        _httpx_client = httpx.AsyncClient()
+    return _httpx_client
 
 app = FastAPI(
     title="vllm-mlx Management API",
@@ -460,7 +473,7 @@ def delete_model(model_id: str, _: None = Depends(_check_auth)) -> dict:
         ok, msg = mm.delete_model(model_id)
         return {"ok": ok, "message": msg}
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/models/search")
@@ -1256,9 +1269,6 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
     For requests that do NOT require a model switch the proxy passes through
     verbatim, respecting the client's stream preference.
     """
-    import asyncio
-    import httpx
-
     requested_model = request.get("model", "").strip()
     cfg_check = sm.load_config()
     auto_switch = cfg_check.get("auto_model_switch", False)
@@ -1326,13 +1336,12 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
                 req2 = {**request, "stream": True}
 
                 try:
-                    async with httpx.AsyncClient(timeout=300) as _client:
-                        async with _client.stream(
-                            "POST", f"{target2}/v1/chat/completions",
-                            json=req2, headers=req_headers,
-                        ) as resp:
-                            async for chunk in resp.aiter_bytes():
-                                yield chunk
+                    async with _get_httpx_client().stream(
+                        "POST", f"{target2}/v1/chat/completions",
+                        timeout=300, json=req2, headers=req_headers,
+                    ) as resp:
+                        async for chunk in resp.aiter_bytes():
+                            yield chunk
                 except Exception as exc:
                     yield _sse_delta(f"\n\n❌ Request failed after model switch: {exc}")
                     yield "data: [DONE]\n\n"
@@ -1346,20 +1355,19 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
             try:
                 await asyncio.to_thread(_hot_swap_if_needed, requested_model)
             except Exception as exc:
-                raise HTTPException(status_code=503, detail=f"Model switch failed: {exc}")
+                raise HTTPException(status_code=503, detail=f"Model switch failed: {exc}") from exc
 
             cfg2 = sm.load_config()
             target2 = sm.get_server_url(cfg2)
             try:
-                async with httpx.AsyncClient(timeout=300) as client:
-                    resp = await client.post(
-                        f"{target2}/v1/chat/completions",
-                        json=request, headers=req_headers,
-                    )
-                    return resp.json()
+                resp = await _get_httpx_client().post(
+                    f"{target2}/v1/chat/completions",
+                    timeout=300, json=request, headers=req_headers,
+                )
+                return resp.json()
             except Exception as exc:
                 logger.warning("Non-streaming request to inference server failed: %s", exc, exc_info=True)
-                raise HTTPException(status_code=502, detail="Inference server request failed")
+                raise HTTPException(status_code=502, detail="Inference server request failed") from exc
 
     # ── Normal path (no model switch needed) ────────────────────────────────
     # If the inference server is currently starting up (model loading from a
@@ -1383,32 +1391,28 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
             from fastapi.responses import StreamingResponse
 
             async def _stream():
-                async with httpx.AsyncClient(timeout=300) as _client:
-                    async with _client.stream(
-                        "POST", f"{target}/v1/chat/completions",
-                        json=request, headers=req_headers,
-                    ) as resp:
-                        async for chunk in resp.aiter_bytes():
-                            yield chunk
+                client = _get_httpx_client()
+                async with client.stream(
+                    "POST", f"{target}/v1/chat/completions",
+                    timeout=300, json=request, headers=req_headers,
+                ) as resp:
+                    async for chunk in resp.aiter_bytes():
+                        yield chunk
 
             return StreamingResponse(_stream(), media_type="text/event-stream")
         else:
-            async with httpx.AsyncClient(timeout=300) as client:
-                resp = await client.post(
-                    f"{target}/v1/chat/completions",
-                    json=request, headers=req_headers,
-                )
-                return resp.json()
+            resp = await _get_httpx_client().post(
+                f"{target}/v1/chat/completions",
+                timeout=300, json=request, headers=req_headers,
+            )
+            return resp.json()
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/v1/completions")
 async def proxy_completions(request: dict[str, Any], _: None = Depends(_check_auth)) -> Any:
     """Proxy for /v1/completions with the same auto model-switch behaviour as /v1/chat/completions."""
-    import asyncio
-    import httpx
-
     requested_model = request.get("model", "").strip()
     cfg_check = sm.load_config()
     auto_switch = cfg_check.get("auto_model_switch", False)
@@ -1425,19 +1429,18 @@ async def proxy_completions(request: dict[str, Any], _: None = Depends(_check_au
         try:
             await asyncio.to_thread(_hot_swap_if_needed, requested_model)
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Model switch failed: {exc}")
+            raise HTTPException(status_code=503, detail=f"Model switch failed: {exc}") from exc
         cfg = sm.load_config()
         target = sm.get_server_url(cfg)
 
     try:
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(
-                f"{target}/v1/completions",
-                json=request, headers=req_headers,
-            )
-            return resp.json()
+        resp = await _get_httpx_client().post(
+            f"{target}/v1/completions",
+            timeout=300, json=request, headers=req_headers,
+        )
+        return resp.json()
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.get("/auto_switch_enabled")
@@ -1487,8 +1490,6 @@ async def proxy_v1_passthrough(path: str, request: Request) -> _FRsp:
     Makes the dashboard proxy base URL fully OpenAI-compatible:
     clients can point at http://<host>:8502/v1 and use any standard endpoint.
     """
-    import httpx
-
     cfg = sm.load_config()
     target = sm.get_server_url(cfg)
 
@@ -1501,14 +1502,12 @@ async def proxy_v1_passthrough(path: str, request: Request) -> _FRsp:
     body = await request.body()
 
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.request(
-                method=request.method,
-                url=f"{target}/v1/{path}",
-                headers=headers,
-                content=body if body else None,
-                params=dict(request.query_params),
-            )
+        resp = await _get_httpx_client().request(
+            request.method, f"{target}/v1/{path}",
+            timeout=120, headers=headers,
+            content=body if body else None,
+            params=dict(request.query_params),
+        )
         # Filter out hop-by-hop headers that must not be forwarded
         excluded = {"transfer-encoding", "connection", "keep-alive", "upgrade", "proxy-authenticate", "proxy-authorization", "te", "trailers"}
         fwd_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
@@ -1519,13 +1518,21 @@ async def proxy_v1_passthrough(path: str, request: Request) -> _FRsp:
             media_type=resp.headers.get("content-type", "application/json"),
         )
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Inference server unreachable: {exc}")
+        raise HTTPException(status_code=502, detail=f"Inference server unreachable: {exc}") from exc
 
 
 # ── Quality benchmarks ────────────────────────────────────────────────────────
 
 _quality_runs: dict[str, dict[str, Any]] = {}
 _quality_lock = threading.Lock()
+
+
+def _prune_quality_runs() -> None:
+    """Remove completed quality benchmark runs older than 30 minutes to prevent unbounded dict growth."""
+    cutoff = time.time() - 1800
+    stale = [k for k, v in _quality_runs.items() if not v.get("running") and v.get("ts", 0) < cutoff]
+    for k in stale:
+        _quality_runs.pop(k, None)
 
 
 @app.post("/quality-benchmark/run")
@@ -1544,9 +1551,11 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
 
     run_id = str(uuid.uuid4())[:8]
     stop_event = threading.Event()
+    _prune_quality_runs()
     _quality_runs[run_id] = {
         "running": True, "lines": [], "results": None,
         "all_results": [], "error": None, "stop_event": stop_event, "label": label,
+        "ts": time.time(),
     }
 
     def _run() -> None:
@@ -1685,6 +1694,14 @@ _custom_runs: dict[str, dict[str, Any]] = {}
 _custom_lock = threading.Lock()
 
 
+def _prune_custom_runs() -> None:
+    """Remove completed custom benchmark runs older than 30 minutes to prevent unbounded dict growth."""
+    cutoff = time.time() - 1800
+    stale = [k for k, v in _custom_runs.items() if not v.get("running") and v.get("ts", 0) < cutoff]
+    for k in stale:
+        _custom_runs.pop(k, None)
+
+
 @app.post("/custom-benchmark/run")
 def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
     """Start a custom-prompt benchmark run. Returns run_id to poll for output/results."""
@@ -1701,6 +1718,7 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
     enable_thinking: bool = bool(req.get("enable_thinking", False))
 
     stop_event = threading.Event()
+    _prune_custom_runs()
     run_state: dict[str, Any] = {
         "running": True,
         "lines": [],
@@ -1708,6 +1726,7 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
         "all_results": [],
         "error": None,
         "stop_event": stop_event,
+        "ts": time.time(),
     }
     with _custom_lock:
         _custom_runs[run_id] = run_state
@@ -1717,8 +1736,8 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
             _custom_runs[run_id]["lines"].append(text)
 
     def _run() -> None:
-        from vllm_mlx.dashboard import benchmark_runner as br
         from vllm_mlx.dashboard import __version__ as _dash_ver
+        from vllm_mlx.dashboard import benchmark_runner as br
         all_results: list[dict[str, Any]] = []
         models_to_run = model_ids if model_ids else [model_id]
         original_model = sm.load_config().get("model", "")
@@ -1828,8 +1847,8 @@ def stop_custom_benchmark(run_id: str, _: None = Depends(_check_auth)) -> dict:
 
 
 import os as _os_mod
-import signal as _signal_mod
 import re as _re_mod
+import signal as _signal_mod
 
 
 def _find_restart_cmd() -> list[str]:
@@ -1864,14 +1883,15 @@ def reload_engines(_: None = Depends(_check_auth)) -> dict:
     Returns the updated engine list.  Use this after installing a new engine
     plugin to surface it in the UI without restarting the server.
     """
-    from vllm_mlx.dashboard.engines.registry import reload as _reload_registry, list_engines as _list_engines
+    from vllm_mlx.dashboard.engines.registry import list_engines as _list_engines
+    from vllm_mlx.dashboard.engines.registry import reload as _reload_registry
     try:
         _reload_registry()
         engines = _list_engines()
         return {"ok": True, "engines": engines}
     except Exception as exc:
         logger.warning("Engine registry reload failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Registry reload failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"Registry reload failed: {exc}") from exc
 
 
 @app.get("/engines/{engine_id}/config-schema")
@@ -1881,7 +1901,7 @@ def get_engine_config_schema(engine_id: str, _: None = Depends(_check_auth)) -> 
     try:
         engine = _get_engine(engine_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Unknown engine: {engine_id}")
+        raise HTTPException(status_code=404, detail=f"Unknown engine: {engine_id}") from None
     return {
         "engine_id": engine_id,
         "name": engine.name,
@@ -1899,13 +1919,15 @@ async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
     """
     import asyncio as _asyncio
     import subprocess as _sp
+
     from fastapi.responses import StreamingResponse
+
     from vllm_mlx.dashboard.engines.registry import get_engine as _get_engine
 
     try:
         engine = _get_engine(engine_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Unknown engine: {engine_id}")
+        raise HTTPException(status_code=404, detail=f"Unknown engine: {engine_id}") from None
     if engine.install_method == "bundled":
         raise HTTPException(status_code=400, detail=f"Engine {engine_id!r} is bundled and cannot be installed.")
 
@@ -1947,7 +1969,10 @@ async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
                 discovered = engine.get_discovered_models()
                 if discovered:
                     m = discovered[0]
-                    from vllm_mlx.dashboard.server_manager import load_config, save_config
+                    from vllm_mlx.dashboard.server_manager import (
+                        load_config,
+                        save_config,
+                    )
                     cfg = load_config()
                     engine_settings = dict(cfg.get("engine_settings", {}))
                     engine_settings.setdefault(engine_id, {})
@@ -1969,13 +1994,15 @@ async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
 async def uninstall_engine(engine_id: str, _: None = Depends(_check_auth)):
     """Uninstall the specified engine (SSE stream of output)."""
     import asyncio as _asyncio
+
     from fastapi.responses import StreamingResponse
+
     from vllm_mlx.dashboard.engines.registry import get_engine as _get_engine
 
     try:
         engine = _get_engine(engine_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Unknown engine: {engine_id}")
+        raise HTTPException(status_code=404, detail=f"Unknown engine: {engine_id}") from None
 
     try:
         cmd = engine.uninstall_command()
@@ -2023,15 +2050,16 @@ def shutdown(_: None = Depends(_check_auth)) -> dict:
 @app.post("/restart")
 def restart_app(_: None = Depends(_check_auth)) -> dict:
     """Restart the vllm-mlx-ui process (re-reads config, picks up code changes)."""
+    import subprocess as _sp
     import sys as _sys
     import threading as _thr
-    import subprocess as _sp
 
     def _do_restart():
         import time as _t
         _t.sleep(0.3)
         try:
-            from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG, STATE_DIR as _sd
+            from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG
+            from vllm_mlx.dashboard.server_manager import STATE_DIR as _sd
             _sd.mkdir(parents=True, exist_ok=True)
             RELAUNCH_FLAG.write_text("1")
         except Exception:
@@ -2066,9 +2094,10 @@ def check_for_updates(force: bool = False, _: None = Depends(_check_auth)) -> di
 @app.post("/updates/install")
 def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
     """Start an upgrade and self-restart after it completes."""
+    import subprocess as _sp
     import sys as _sys
     import threading as _thr
-    import subprocess as _sp
+
     from vllm_mlx.dashboard import update_checker as _uc
     cmd = _uc.upgrade_command()
     engine_cmds = _uc.engine_upgrade_commands(_uc._resolve_pip_bin(_sys.executable))
@@ -2107,7 +2136,9 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
         _uc.bust_cache()
         # Invalidate flag probe cache so newly-upgraded binaries are re-probed
         try:
-            from vllm_mlx.dashboard.engines.flag_probe import invalidate as _fp_invalidate
+            from vllm_mlx.dashboard.engines.flag_probe import (
+                invalidate as _fp_invalidate,
+            )
             _fp_invalidate()
         except Exception:
             logger.warning("Failed to invalidate flag probe cache after upgrade", exc_info=True)
@@ -2115,7 +2146,11 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
         _t.sleep(2)
         try:
             from vllm_mlx.dashboard.server_manager import (
-                RELAUNCH_FLAG, STATE_DIR as _sd, AUTO_START_FLAG,
+                AUTO_START_FLAG,
+                RELAUNCH_FLAG,
+            )
+            from vllm_mlx.dashboard.server_manager import (
+                STATE_DIR as _sd,
             )
             _sd.mkdir(parents=True, exist_ok=True)
             RELAUNCH_FLAG.write_text("1")
@@ -2375,6 +2410,7 @@ def fleet_discover(_: None = Depends(_check_auth)) -> list:
 # first. The catch-all "/" route returns index.html for SPA client-side routing.
 
 import os as _os
+
 from fastapi.responses import PlainTextResponse
 
 # Prefer the bundled ui_dist/ (pip-installed / Homebrew), fall back to dev repo ui/dist/
@@ -2403,7 +2439,7 @@ def browse_directory(_: None = Depends(_check_auth)) -> dict:
             return {"path": path}
         raise HTTPException(status_code=204, detail="No directory selected")
     except _sp.TimeoutExpired:
-        raise HTTPException(status_code=408, detail="Folder dialog timed out")
+        raise HTTPException(status_code=408, detail="Folder dialog timed out") from None
 
 
 @app.get("/api/docs/{doc_path:path}", include_in_schema=False)
@@ -2420,14 +2456,16 @@ async def _serve_doc(doc_path: str) -> PlainTextResponse:
         raise HTTPException(status_code=400, detail="Invalid path")
     if not _os.path.isfile(full):
         raise HTTPException(status_code=404, detail="Doc not found")
-    with open(full, encoding="utf-8") as fh:
-        content = fh.read()
+    content = await asyncio.to_thread(_read_doc_file, full)
     return PlainTextResponse(content, media_type="text/plain; charset=utf-8")
 
 
-@app.get("/api/docs", include_in_schema=False)
-async def _list_docs() -> dict:
-    """Return a structured table of contents for the docs directory."""
+def _read_doc_file(path: str) -> str:
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _build_docs_toc() -> dict:
     toc: dict[str, list[dict]] = {}
     if not _os.path.isdir(_DOCS_ROOT):
         return {"sections": []}
@@ -2447,6 +2485,12 @@ async def _list_docs() -> dict:
             toc[section].append({"path": rel.replace("\\", "/"), "title": title})
     sections = [{"section": k, "items": v} for k, v in sorted(toc.items())]
     return {"sections": sections}
+
+
+@app.get("/api/docs", include_in_schema=False)
+async def _list_docs() -> dict:
+    """Return a structured table of contents for the docs directory."""
+    return await asyncio.to_thread(_build_docs_toc)
 
 
 # ── Chat history ──────────────────────────────────────────────────────────────
@@ -2478,28 +2522,7 @@ def list_chats(_: None = Depends(_check_auth)) -> dict:
         return {"conversations": convs}
     except Exception as exc:
         logger.warning("list_chats failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/chats")
-def upsert_chat(req: SaveChatRequest, _: None = Depends(_check_auth)) -> dict:
-    """Save or update a conversation and its messages."""
-    if not req.id.strip():
-        raise HTTPException(status_code=400, detail="id is required")
-    try:
-        cs.save_conversation(
-            id=req.id.strip(),
-            title=req.title,
-            model=req.model,
-            engine=req.engine,
-            messages=[m.model_dump() for m in req.messages],
-            is_draft=req.is_draft,
-            created_at=req.created_at,
-        )
-        return {"ok": True}
-    except Exception as exc:
-        logger.warning("upsert_chat failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/chats/draft")
@@ -2514,7 +2537,7 @@ def get_draft_chat(_: None = Depends(_check_auth)) -> dict:
         raise
     except Exception as exc:
         logger.warning("get_draft_chat failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/chats/{chat_id}")
@@ -2529,7 +2552,7 @@ def get_chat(chat_id: str, _: None = Depends(_check_auth)) -> dict:
         raise
     except Exception as exc:
         logger.warning("get_chat failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.delete("/chats")
@@ -2540,7 +2563,7 @@ def delete_all_chats(_: None = Depends(_check_auth)) -> dict:
         return {"ok": True, "deleted": count}
     except Exception as exc:
         logger.warning("delete_all_chats failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.delete("/chats/{chat_id}")
@@ -2555,7 +2578,7 @@ def delete_chat(chat_id: str, _: None = Depends(_check_auth)) -> dict:
         raise
     except Exception as exc:
         logger.warning("delete_chat failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 # ── SPA catch-all — MUST remain last ─────────────────────────────────────────

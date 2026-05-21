@@ -21,13 +21,20 @@ Port handling:
 """
 from __future__ import annotations
 
+import base64
+import json
+import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
+import urllib.request
 from typing import Any, ClassVar
 
 from .base import BaseEngine
+
+logger = logging.getLogger(__name__)
 
 
 class OllamaEngine(BaseEngine):
@@ -96,13 +103,11 @@ class OllamaEngine(BaseEngine):
 
     def latest_version(self) -> str | None:
         try:
-            import json as _json
-            import urllib.request
             with urllib.request.urlopen(
                 "https://api.github.com/repos/ollama/ollama/releases/latest",
                 timeout=5,
             ) as resp:
-                tag = _json.loads(resp.read()).get("tag_name", "")
+                tag = json.loads(resp.read()).get("tag_name", "")
                 return tag.lstrip("v") or None
         except Exception:
             return None
@@ -118,7 +123,6 @@ class OllamaEngine(BaseEngine):
         Base64-encodes the script so it's a single shell-safe argument
         (multi-line scripts break inside ``sh -c`` strings).
         """
-        import base64 as _base64
         version = self.latest_version()
         if not version:
             return None
@@ -244,22 +248,21 @@ else:
 
 shutil.rmtree(tmp_dir, ignore_errors=True)
 """
-        encoded = _base64.b64encode(script.encode()).decode()
+        encoded = base64.b64encode(script.encode()).decode()
         return [
-            sys.executable, "-c",
+            "sh", "-c",
             f"import base64; exec(base64.b64decode({encoded!r}).decode())",
         ]
 
     def uninstall_command(self) -> list[str]:
         """Remove the Ollama binary, preferring the local install path."""
-        import shutil as _shutil
-        binary = _shutil.which("ollama")
+        binary = shutil.which("ollama")
         fallback = os.path.expanduser("~/.local/bin/ollama")
         if not binary and os.path.isfile(fallback):
             binary = fallback
         if not binary:
             # Try brew as last resort
-            if _shutil.which("brew"):
+            if shutil.which("brew"):
                 return ["brew", "uninstall", "ollama"]
             raise NotImplementedError(
                 "Ollama binary not found. Uninstall manually: https://ollama.com/download"

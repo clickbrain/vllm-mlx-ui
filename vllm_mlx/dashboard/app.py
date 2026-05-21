@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """CLI entry point — launches the Vue dashboard (mgmt API + static UI)."""
 
+import contextlib
+import logging
 import os
 import signal
 import subprocess
@@ -8,7 +10,7 @@ import sys
 import threading
 import webbrowser
 from pathlib import Path
-import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -92,16 +94,12 @@ def stop_all() -> None:
         return
     print(f"Stopping {len(pids)} vllm-mlx-ui process(es): {pids}")
     for pid in pids:
-        try:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.kill(pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
     _t.sleep(2.0)
     for pid in pids:
-        try:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.kill(pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
     _t.sleep(1.0)
     # Clean up PID file
     try:
@@ -119,10 +117,8 @@ def _kill_stale_ui(ui_pid_file: Path) -> bool:
         os.kill(old_pid, signal.SIGTERM)
         import time as _t
         _t.sleep(1.5)
-        try:
+        with contextlib.suppress(ProcessLookupError):
             os.kill(old_pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
         ui_pid_file.unlink(missing_ok=True)
         return True
     except (ValueError, ProcessLookupError, FileNotFoundError):
@@ -154,7 +150,11 @@ def main() -> None:
 
     # Read network settings from persisted config (if present)
     try:
-        from vllm_mlx.dashboard.server_manager import _load_local_config, UI_PID_FILE, STATE_DIR
+        from vllm_mlx.dashboard.server_manager import (
+            STATE_DIR,
+            UI_PID_FILE,
+            _load_local_config,
+        )
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         cfg = _load_local_config()
         ui_host = cfg.get("ui_host", "127.0.0.1")
@@ -171,16 +171,12 @@ def main() -> None:
     if _stale_pids:
         print(f"[vllm-mlx] Stopping previous instance(s): {_stale_pids}", file=sys.stderr)
         for _pid in _stale_pids:
-            try:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.kill(_pid, signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
-                pass
         _time.sleep(2.0)
         for _pid in _stale_pids:
-            try:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.kill(_pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
         _time.sleep(0.5)
 
     if UI_PID_FILE.exists():
@@ -234,7 +230,9 @@ def main() -> None:
     # Auto-start inference server if configured
     try:
         from vllm_mlx.dashboard.server_manager import (
-            AUTO_START_FLAG, load_config, start_server,
+            AUTO_START_FLAG,
+            load_config,
+            start_server,
         )
         if AUTO_START_FLAG.exists():
             AUTO_START_FLAG.unlink(missing_ok=True)
@@ -263,10 +261,8 @@ def main() -> None:
     _no_browser_flag = Path.home() / ".vllm_mlx_ui" / "no_browser.flag"
     _skip_browser = _no_browser_flag.exists()
     if _skip_browser:
-        try:
+        with contextlib.suppress(Exception):
             _no_browser_flag.unlink(missing_ok=True)
-        except Exception:
-            pass
 
     def _open_browser():
         _time.sleep(1.2)

@@ -10,14 +10,17 @@ When remote_mgmt_url is configured in server_manager, model operations
 management API, so models are stored on the server, not on this machine.
 """
 
+import contextlib
+import logging
 import os
 import re
 import threading
+import time as _time
 from pathlib import Path
 from typing import Any, Callable
 
 import requests as _requests
-import logging
+
 logger = logging.getLogger(__name__)
 
 # ── Fit-level constants (llmfit-inspired) ─────────────────────────────────────
@@ -268,21 +271,34 @@ def download_model_local(
             os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
 
 
+_partial_bytes_cache: dict[str, tuple[int, float]] = {}
+_PARTIAL_CACHE_TTL = 2.0  # seconds
+
+
 def get_partial_download_bytes(model_id: str) -> int:
-    """Return bytes currently present in HF cache for a model (partial or complete)."""
+    """Return bytes currently present in HF cache for a model (partial or complete).
+
+    Results are cached for ``_PARTIAL_CACHE_TTL`` seconds to avoid repetitive
+    ``rglob`` I/O from the polling monitor thread.
+    """
+    now = _time.monotonic()
+    cached = _partial_bytes_cache.get(model_id)
+    if cached is not None and (now - cached[1]) < _PARTIAL_CACHE_TTL:
+        return cached[0]
+
     try:
         cache_dir = Path(get_hf_cache_dir())
         folder_name = "models--" + model_id.replace("/", "--")
         model_dir = Path(cache_dir) / folder_name
         if not model_dir.exists():
+            _partial_bytes_cache[model_id] = (0, now)
             return 0
         total = 0
         for f in model_dir.rglob("*"):
             if f.is_file() and not f.is_symlink():
-                try:
+                with contextlib.suppress(OSError):
                     total += f.stat().st_size
-                except OSError:
-                    pass
+        _partial_bytes_cache[model_id] = (total, now)
         return total
     except Exception as e:
         logger.warning("Operation failed: %s", e, exc_info=True)
@@ -372,8 +388,6 @@ class DownloadManager:
 
             # Monitor bytes-in-cache while downloading
             def _monitor(it: dict) -> None:
-                import time as _t
-
                 while True:
                     with self._lock:
                         if it["status"] != "downloading":
@@ -383,7 +397,7 @@ class DownloadManager:
                         it["bytes_dl"] = partial
                         if it["total_bytes"] > 0 and partial > 0:
                             it["pct"] = min(partial / it["total_bytes"], 0.99)
-                    _t.sleep(2)
+                    _time.sleep(2)
 
                 # Self-unregister when done
                 with self._lock:
@@ -818,38 +832,6 @@ def check_model_fit(
     }
 
 
-def _estimate_model_gb(model_id: str) -> float | None:
-    """Estimate model size in GB from model ID name patterns."""
-    id_lower = model_id.lower()
-
-    # Try to extract parameter count
-    param_match = re.search(r'(\d+(?:\.\d+)?)\s*[bB](?![a-z])', id_lower)
-    if not param_match:
-        return None
-
-    params_b = float(param_match.group(1))
-
-    # Estimate bits per parameter from quantization hints
-    if any(q in id_lower for q in ['8bit', '8-bit', 'q8', 'int8']):
-        bits = 8
-    elif any(q in id_lower for q in ['6bit', '6-bit', 'q6']):
-        bits = 6
-    elif any(q in id_lower for q in ['4bit', '4-bit', 'q4']):
-        bits = 4
-    elif any(q in id_lower for q in ['3bit', '3-bit', 'q3']):
-        bits = 3
-    elif any(q in id_lower for q in ['2bit', '2-bit', 'q2']):
-        bits = 2
-    elif any(q in id_lower for q in ['fp16', 'float16', 'bf16', 'bfloat16']):
-        bits = 16
-    else:
-        bits = 4  # default assumption for mlx-community models
-
-    # bytes = params * bits / 8, plus ~10% overhead
-    size_gb = (params_b * 1e9 * bits / 8) / (1024**3) * 1.1
-    return round(size_gb, 1)
-
-
 def search_hf_models(
     query: str = "",
     tags: list[str] | None = None,
@@ -917,7 +899,7 @@ def search_hf_models(
             if not model_id:
                 continue
             model_tags = list(m.get("tags") or [])
-            size_gb = _estimate_model_gb(model_id)
+            size_gb = estimate_size_from_name(model_id)
             fit_level = None
             if size_gb is not None and total_gb > 0:
                 fit_level = _score_fit(size_gb, total_gb)

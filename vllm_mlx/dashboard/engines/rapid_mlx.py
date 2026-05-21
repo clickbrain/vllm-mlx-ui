@@ -28,7 +28,6 @@ from typing import Any, ClassVar
 from .base import BaseEngine
 from .flag_probe import add_if_supported
 
-
 # Curated alias → canonical HF repo ID map for the Quick Start section.
 RAPID_MLX_ALIASES: dict[str, str] = {
     "qwen3-0.6b":    "mlx-community/Qwen3-0.6B-4bit",

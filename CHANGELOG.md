@@ -1,5 +1,18 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.7.2 — 2026-05-21
+
+- **Perf: Hot-path imports moved to module level** — `psutil`, `get_engine`, and `ENGINES` no longer re-imported inside every health-check/build-command call in `server_manager.py`. rglob TTL cache added to `get_partial_download_bytes()` in `model_manager.py` (2s TTL, eliminates repetitive I/O from polling thread).
+- **Perf: Shared httpx client** — `mgmt_server.py` now uses a single module-level `httpx.AsyncClient` instead of creating a new connection per proxy request (6 sites fixed). Blocking `open()`/`os.walk()` offloaded to `asyncio.to_thread()`.
+- **Perf: ds4 description cached** — `Ds4M5Engine.description` property now caches the full description string (including fork selection, hardware detection, subprocess calls) per-instance instead of recomputing on every access.
+- **Perf: Benchmark results retention** — `benchmark_runner.py` now prunes results older than 90 days on each save. `load_results()` made thread-safe via reentrant `RLock`.
+- **Fix: B904 exception chaining** — 18 `raise HTTPException()` in `except` blocks in `mgmt_server.py` now use `from exc`/`from None` to prevent misleading tracebacks.
+- **Fix: _ps.Process() stale alias** — `server_manager.py` health checks were referencing an undefined `_ps` name; fixed to `psutil.Process()`.
+- **Refactor: SIM105 contextlib.suppress** — 13 `try/except: pass` blocks replaced with `contextlib.suppress` across 6 files (`app.py`, `chat_store.py`, `server_manager.py`, `ds4_m5.py`, `registry.py`, `model_manager.py`).
+- **Refactor: Inner imports cleaned up** — `quality_runner.py`, `engines/ollama.py`, `model_manager.py` moved lazy imports to module level. Dead `token_count` variable removed from `quality_runner.py`.
+- **Refactor: Engine UI ordering** — Engine list in Settings now sorts installed engines first, not-installed after. DeepSeek V4 Flash (ds4) sinks to bottom on non-M5 hardware.
+- **Chore: Import ordering** — ruff I001 auto-fixed across 10+ dashboard files.
+
 ## v0.7.1 — 2026-05-21
 
 - **Feature: Available RAM warning on model cards** — When a model fits the machine's total hardware RAM but cannot load right now due to insufficient free memory, a yellow inline warning appears on that card showing the exact amount of free memory and suggesting closing apps. The warning does not appear when the server is not running (no memory data available) or when a model is already flagged as too large for the hardware.

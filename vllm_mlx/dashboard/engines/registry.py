@@ -21,11 +21,12 @@ Thread safety:
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from typing import TYPE_CHECKING
 
-from .ds4_m5 import Ds4M5Engine
+from .ds4_m5 import Ds4M5Engine, is_m5_or_newer
 from .llama_cpp import LlamaCppEngine
 from .lmstudio import LmStudioEngine
 from .ollama import OllamaEngine
@@ -173,10 +174,8 @@ def list_engines() -> list[dict]:
             logger.warning("Engine probe failed for %s: %s", engine.id, e)
         # Get latest version (may be None if network unavailable)
         latest = None
-        try:
+        with contextlib.suppress(Exception):
             latest = engine.latest_version()
-        except Exception:
-            pass
         req_errors: list[str] = []
         try:
             req_errors = engine.check_requirements()
@@ -203,6 +202,14 @@ def list_engines() -> list[dict]:
             "requirements_errors": req_errors,
             "requirements_warnings": req_warnings,
         })
+    # Sort: installed first, then not-installed.
+    # DeepSeek V4 Flash (ds4-m5) sinks to the bottom on non-M5 hardware
+    # so users on M1-M4 see it last (it's designed for M5+).
+    _m5_hw = is_m5_or_newer()
+    result.sort(key=lambda e: (
+        2 if e["id"] == "ds4-m5" and not _m5_hw else 0 if e["installed"] else 1,
+        e["id"],
+    ))
     return result
 
 
