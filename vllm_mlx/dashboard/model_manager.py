@@ -696,22 +696,75 @@ def estimate_size_from_name(model_id: str) -> float | None:
     """
     name = model_id.lower()
 
-    # Parameter count
-    param_b: float | None = None
-    m = re.search(r"(\d+(?:\.\d+)?)\s*b(?:[^a-z]|$)", name)
-    if m:
-        param_b = float(m.group(1))
-    else:
-        # Smaller models often listed in millions
-        m = re.search(r"(\d+(?:\.\d+)?)\s*m(?:[^a-z]|$)", name)
-        if m:
-            param_b = float(m.group(1)) / 1000.0
+    # Known model sizes by name fragment (lookup table for models whose names
+    # don't follow the standard NB convention — e.g. "mini", "nano", "small").
+    _KNOWN_SIZES: list[tuple[str, float]] = [
+        ("phi-4-mini",       3.8),
+        ("phi-3-mini",       3.8),
+        ("phi-3.5-mini",     3.8),
+        ("phi-3-small",      7.0),
+        ("phi-3-medium",    14.0),
+        ("phi-4",           14.0),
+        ("gemma-2b",         2.0),
+        ("gemma-7b",         7.0),
+        ("gemma-2-2b",       2.6),
+        ("gemma-2-9b",       9.2),
+        ("gemma-2-27b",     27.0),
+        ("gemma-3-1b",       1.0),
+        ("gemma-3-4b",       4.0),
+        ("gemma-3-12b",     12.0),
+        ("gemma-3-27b",     27.0),
+        ("gemma-3n-e2b",     2.0),
+        ("gemma-3n-e4b",     4.0),
+        ("smollm2-135m",     0.14),
+        ("smollm2-360m",     0.36),
+        ("smollm2-1.7b",     1.7),
+        ("smollm-135m",      0.14),
+        ("smollm-360m",      0.36),
+        ("smollm-1.7b",      1.7),
+        ("qwen3-0.6b",       0.6),
+        ("qwen3-1.7b",       1.7),
+        ("qwen3-4b",         4.0),
+        ("qwen3-8b",         8.0),
+        ("qwen3-14b",       14.0),
+        ("qwen3-30b",       30.0),
+        ("qwen3-32b",       32.0),
+    ]
+    for fragment, param_b_lookup in _KNOWN_SIZES:
+        if fragment in name:
+            param_b = param_b_lookup
+            bpp: float = 0.50
+            for pat, b in _BITS_PER_QUANT.items():
+                if pat in name:
+                    bpp = b
+                    break
+            return param_b * bpp * 1.10
 
-    if param_b is None:
-        return None
+    # Mixture-of-Experts pattern FIRST — must run before the generic NB regex
+    # so that "8x7B" is parsed as 8 experts × 7B = 56B, not 7B.
+    moe = re.search(r"(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*b(?:[^a-z]|$)", name)
+    if moe:
+        num_experts = int(moe.group(1))
+        expert_b = float(moe.group(2))
+        # Active params ≈ 2 experts per token; use full param count for memory estimate
+        param_b = num_experts * expert_b
+    else:
+        # Standard NB pattern (e.g. 7B, 13B, 72B, 0.5B)
+        param_b = None
+        m = re.search(r"(\d+(?:\.\d+)?)\s*b(?:[^a-z]|$)", name)
+        if m:
+            param_b = float(m.group(1))
+        else:
+            # Smaller models listed in millions
+            m = re.search(r"(\d+(?:\.\d+)?)\s*m(?:[^a-z]|$)", name)
+            if m:
+                param_b = float(m.group(1)) / 1000.0
+
+        if param_b is None:
+            return None
 
     # Bytes per parameter from quantization
-    bpp: float = 0.50  # default to 4-bit if unknown
+    bpp = 0.50  # default to 4-bit if unknown
     for pat, b in _BITS_PER_QUANT.items():
         if pat in name:
             bpp = b

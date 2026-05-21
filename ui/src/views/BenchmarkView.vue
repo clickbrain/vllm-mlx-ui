@@ -59,9 +59,9 @@ const {
 defineOptions({ name: 'BenchmarkView' })
 
 // ── Tab state ─────────────────────────────────────────────────────────────
-const tabs = ['Live', 'Run Tests', 'History', 'Advisor'] as const
+const tabs = ['Advisor', 'Live', 'Run Tests', 'History'] as const
 type Tab = typeof tabs[number]
-const activeTab = ref<Tab>('Live')
+const activeTab = ref<Tab>('Advisor')
 
 // ── Live tab — polling ─────────────────────────────────────────────────────
 let stopPoll: (() => void) | null = null

@@ -35,6 +35,7 @@ from . import llm_benchmark_cache as lbc
 from . import model_manager as mm
 from . import quality_runner as qr
 from . import server_manager as sm
+from . import __version__ as _dashboard_version
 
 logger = logging.getLogger(__name__)
 
@@ -796,6 +797,7 @@ def poll(_: None = Depends(_check_auth)) -> dict:
             "started_at": server_state.get("started_at"),
         },
         "updates": updates_payload,
+        "dashboard_version": _dashboard_version,
     }
 
 

@@ -109,6 +109,7 @@ const messages     = computed(() => chatStore.messages)
 const input        = ref('')
 const sending      = ref(false)
 const error        = ref('')
+const autoStarting = ref(false)
 const savedChats   = ref<SavedChat[]>(loadSavedChats())
 const showParams   = ref(false)
 const showAdvanced = ref(false)
@@ -492,10 +493,41 @@ async function send() {
   const text = input.value.trim()
   const images = [...attachedImages.value]
   if (!text && !images.length) return
-  if (sending.value) return
+  if (sending.value || autoStarting.value) return
   if (!serverStore.isRunning) {
-    error.value = 'The inference server is not running. Start it on the Serve page first.'
-    return
+    const configModel = serverStore.config?.model ?? serverStore.modelId
+    if (!configModel && !modelsStore.models.length) {
+      error.value = 'No model loaded. Download and select a model on the Models page first.'
+      return
+    }
+    // Auto-start the inference server then send
+    autoStarting.value = true
+    error.value = ''
+    try {
+      await serverStore.startServer()
+      // Poll for healthy status up to 90 s
+      const TIMEOUT = 90_000
+      const POLL_MS = 1_500
+      const start = Date.now()
+      await new Promise<void>((resolve, reject) => {
+        const iv = setInterval(async () => {
+          await serverStore.fetchStatus()
+          if (serverStore.isRunning && serverStore.status?.healthy) {
+            clearInterval(iv)
+            resolve()
+          } else if (Date.now() - start > TIMEOUT) {
+            clearInterval(iv)
+            reject(new Error('Server did not become ready in time'))
+          }
+        }, POLL_MS)
+      })
+    } catch (e) {
+      error.value = `Could not start server: ${e instanceof Error ? e.message : String(e)}`
+      autoStarting.value = false
+      return
+    } finally {
+      autoStarting.value = false
+    }
   }
   chatStore.addMessage({ role: 'user', content: text, images: images.length ? images : undefined })
   input.value = ''
@@ -1092,12 +1124,18 @@ onUnmounted(() => {
               v-model="input"
               class="chat-input"
               :class="{ 'with-attach': serverStore.isMultimodal }"
-              placeholder="Message… (Enter to send, Shift+Enter for newline)"
+              :placeholder="autoStarting ? 'Starting server…' : 'Message… (Enter to send, Shift+Enter for newline)'"
               rows="1"
-              :disabled="sending"
+              :disabled="sending || autoStarting"
               @keydown="onKeydown"
               @input="autoResize"
             />
+            <!-- Auto-start spinner -->
+            <div v-if="autoStarting" class="autostart-indicator" title="Starting inference server…">
+              <svg class="autostart-spinner" viewBox="0 0 16 16" fill="none" width="14" height="14">
+                <circle cx="8" cy="8" r="6" stroke="var(--tx-muted)" stroke-width="2" stroke-dasharray="28" stroke-dashoffset="10" />
+              </svg>
+            </div>
             <!-- Stop button while streaming; Send button otherwise -->
             <button v-if="sending" class="stop-btn" title="Stop generating" @click="stopStreaming">
               <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
@@ -1814,6 +1852,18 @@ onUnmounted(() => {
   box-shadow: 0 0 0 3px rgba(91, 106, 208, .12);
 }
 .chat-input:disabled { opacity: 0.65; cursor: not-allowed; }
+
+.autostart-indicator {
+  position: absolute;
+  right: var(--space-3);
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+}
+.autostart-spinner {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .send-btn, .stop-btn {
   position: absolute;

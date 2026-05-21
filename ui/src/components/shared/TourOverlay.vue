@@ -45,7 +45,7 @@ const steps = [
 }
 
 .tour-card {
-  background: var(--bg1);
+  background: var(--bg-surface);
   border: 1px solid var(--bd);
   border-radius: 12px;
   padding: 24px;

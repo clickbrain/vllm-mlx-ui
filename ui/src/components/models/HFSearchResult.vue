@@ -34,12 +34,13 @@ const downloadsFormatted = computed(() => abbreviate(props.downloads))
 const likesFormatted = computed(() => abbreviate(props.likes))
 
 const dateFormatted = computed(() => {
-  if (!props.last_modified) return null
+  if (!props.last_modified) return 'Date unknown'
   try {
     const date = new Date(props.last_modified)
+    if (Number.isNaN(date.getTime())) return 'Date unknown'
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
   } catch {
-    return null
+    return 'Date unknown'
   }
 })
 
@@ -56,7 +57,7 @@ const orgName = computed(() => {
 })
 
 const sizeLabel = computed(() => {
-  if (!props.size_gb) return null
+  if (!props.size_gb) return '—'
   return `${props.size_gb.toFixed(1)} GB`
 })
 
@@ -208,7 +209,7 @@ const capabilityTags = computed(() => {
           <svg class="meta-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M8 1.5l1.76 3.57 3.94.57-2.85 2.78.67 3.93L8 10.46l-3.52 1.85.67-3.93L2.3 5.64l3.94-.57L8 1.5z"/></svg>
           {{ likesFormatted }}
         </span>
-        <span v-if="dateFormatted" class="meta-stat">{{ dateFormatted }}</span>
+        <span class="meta-stat">Updated: {{ dateFormatted }}</span>
       </div>
     </div>
   </div>

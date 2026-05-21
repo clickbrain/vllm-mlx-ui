@@ -81,6 +81,8 @@ export const useServerStore = defineStore('server', () => {
     time: string; active: number; queued: number; total: number; memory_gb: number
   }>>([])
   const MAX_HISTORY = 120
+  /** Dashboard version string returned by /poll — shown in the sidebar footer */
+  const dashboardVersion = ref<string | null>(null)
 
   /**
    * The active inference engine id (e.g. 'vllm-mlx' or 'rapid-mlx').
@@ -243,6 +245,7 @@ export const useServerStore = defineStore('server', () => {
         config: ServerConfig;
         runtime?: { engine_id?: string; model?: string; started_at?: string };
         updates?: Array<{ name: string; installed: string; latest: string; update_available: boolean; url: string }> | null;
+        dashboard_version?: string | null;
       }>('/poll')
 
       // Status
@@ -281,6 +284,11 @@ export const useServerStore = defineStore('server', () => {
       // Only process when updates is non-null (null = cache is cold, scheduler hasn't run yet).
       if (r.updates != null) {
         _handlePollUpdates(r.updates)
+      }
+
+      // Dashboard version — only update once (avoids flicker)
+      if (r.dashboard_version && !dashboardVersion.value) {
+        dashboardVersion.value = r.dashboard_version
       }
     } catch {
       // Fallback: if /poll doesn't exist (old server), do individual fetches
@@ -380,7 +388,7 @@ export const useServerStore = defineStore('server', () => {
   return {
     status, metrics, memory, config, loading, error, crashLog, metricsError, metricsHistory,
     isRunning, memoryPercent, underPressure, isMultimodal, engineId,
-    modelId, uptimeSeconds, tps, baseUrl,
+    modelId, uptimeSeconds, tps, baseUrl, dashboardVersion,
     numRunning, numWaiting, totalRequests, totalPromptTokens, totalCompletionTokens,
     metalMemoryGb, peakMemoryGb,
     fetchStatus, fetchMetrics, fetchConfig, fetchMemory, fetchCacheStats,

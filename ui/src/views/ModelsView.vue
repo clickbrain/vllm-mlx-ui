@@ -75,7 +75,7 @@ function markFiltersDirty() {
 }
 
 async function applyFilters() {
-  const serverSort = SERVER_SORT_COLS.has(sortCol.value) ? sortCol.value : 'last_modified'
+  const serverSort = SERVER_SORT_COLS.has(sortCol.value) ? sortCol.value : 'downloads'
   await modelsStore.searchHF(searchInput.value.trim(), true, 0, serverSort, false, 100, sortDir.value)
   modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
   filtersPending.value = false
@@ -86,7 +86,7 @@ async function applyFilters() {
 // client-sort: model (name), size — sorts displayedSearchResults locally
 type SortCol = 'model' | 'size' | 'downloads' | 'likes' | 'last_modified'
 type SortDir = 'asc' | 'desc'
-const sortCol = ref<SortCol>('last_modified')
+const sortCol = ref<SortCol>('downloads')
 const sortDir = ref<SortDir>('desc')
 
 // Client-side filters
@@ -111,9 +111,9 @@ const COMPANY_FILTERS = [
 
 function searchCompany(query: string) {
   searchInput.value = query
-  sortCol.value = 'last_modified'
+  sortCol.value = 'downloads'
   sortDir.value = 'desc'
-  modelsStore.searchHF(query, true, 0, 'last_modified', false, 50, 'desc').then(() => {
+  modelsStore.searchHF(query, true, 0, 'downloads', false, 50, 'desc').then(() => {
     modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
   })
 }
@@ -215,16 +215,35 @@ const bestChoices = computed((): Map<string, ModelBadge[]> => {
   )
 })
 
+// Best Choice winners: models with at least one badge, ordered by badge count desc
+const bestChoiceWinners = computed(() => {
+  const entries = [...bestChoices.value.entries()]
+  if (!entries.length) return []
+  return entries
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([id, badges]) => ({
+      result: displayedSearchResults.value.find(r => r.id === id)!,
+      badges,
+    }))
+    .filter(w => w.result != null)
+})
+
+// Regular results — exclude Best Choice winners to avoid duplication
+const regularResults = computed(() => {
+  const winnerIds = new Set(bestChoiceWinners.value.map(w => w.result.id))
+  return displayedSearchResults.value.filter(r => !winnerIds.has(r.id))
+})
+
 async function doSearch() {
-  sortCol.value = 'last_modified'
+  sortCol.value = 'downloads'
   sortDir.value = 'desc'
   filtersPending.value = false
-  await modelsStore.searchHF(searchInput.value.trim(), true, 0, 'last_modified', false, 50, 'desc')
+  await modelsStore.searchHF(searchInput.value.trim(), true, 0, 'downloads', false, 100, 'desc')
   modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
 }
 
 async function loadMore() {
-  const serverSort = SERVER_SORT_COLS.has(sortCol.value) ? sortCol.value : 'last_modified'
+  const serverSort = SERVER_SORT_COLS.has(sortCol.value) ? sortCol.value : 'downloads'
   await modelsStore.searchHFMore(serverSort, sortDir.value)
   modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
 }
@@ -234,9 +253,9 @@ const trendingLoaded = ref(false)
 function onFindTabActivated() {
   if (!trendingLoaded.value && modelsStore.searchResults.length === 0) {
     trendingLoaded.value = true
-    sortCol.value = 'last_modified'
+    sortCol.value = 'downloads'
     sortDir.value = 'desc'
-    modelsStore.searchHF('', true, 0, 'last_modified', false, 50, 'desc').then(() => {
+    modelsStore.searchHF('', true, 0, 'downloads', false, 100, 'desc').then(() => {
       modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
     })
   }
@@ -249,6 +268,23 @@ const loadError = ref<string | null>(null)
 // Show crash log as error when it appears after a model switch
 watch(() => serverStore.crashLog, (log) => {
   if (log) loadError.value = `Server crashed: ${log}`
+})
+
+// When the use-case filter changes, auto-search with use-case-specific terms
+const USE_CASE_QUERY: Record<string, string> = {
+  chat:      '',
+  code:      'code',
+  reasoning: 'thinking',
+  vision:    'vision',
+}
+watch(selectedUseCase, (uc) => {
+  const query = uc != null ? (USE_CASE_QUERY[uc] ?? '') : ''
+  sortCol.value = 'downloads'
+  sortDir.value = 'desc'
+  filtersPending.value = false
+  modelsStore.searchHF(query, true, 0, 'downloads', false, 100, 'desc').then(() => {
+    modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
+  })
 })
 
 // LibCard action handlers
@@ -463,7 +499,7 @@ watch(activeTab, (tab) => {
 
       <!-- Company quick-search chips -->
       <div class="company-filter-row" role="group" aria-label="Browse models by company">
-        <span class="company-row-label">Browse:</span>
+        <span class="company-row-label">Quick Search:</span>
         <button
           v-for="c in COMPANY_FILTERS"
           :key="c.query"
@@ -607,10 +643,37 @@ watch(activeTab, (tab) => {
         <span class="empty-label">Searching HuggingFace…</span>
       </div>
 
+      <!-- Best Choice Elevated Section -->
+      <div v-if="bestChoiceWinners.length > 0 && !modelsStore.searching" class="best-choice-section">
+        <div class="best-choice-header">
+          <span class="best-choice-title">⭐ Best Choices</span>
+          <span class="best-choice-sub">Top-scored models for your hardware and use case</span>
+        </div>
+        <div class="best-choice-list">
+          <HFSearchResult
+            v-for="w in bestChoiceWinners"
+            :key="w.result.id"
+            :id="w.result.id"
+            :downloads="w.result.downloads"
+            :likes="w.result.likes"
+            :is_mlx="w.result.is_mlx"
+            :tags="w.result.tags"
+            :size_gb="w.result.size_gb"
+            :fit_level="w.result.fit_level"
+            :last_modified="w.result.last_modified"
+            :total_ram_gb="serverStore.memory?.total_gb ?? 0"
+            :available_ram_gb="serverStore.memory?.available_gb ?? 0"
+            :badges="w.badges"
+            class="best-choice-card"
+            @download="handleDownload(w.result.id)"
+          />
+        </div>
+      </div>
+
       <!-- Results -->
-      <div v-else-if="displayedSearchResults.length > 0" class="find-results">
+      <div v-if="displayedSearchResults.length > 0" class="find-results">
         <HFSearchResult
-          v-for="r in displayedSearchResults"
+          v-for="r in regularResults"
           :key="r.id"
           :id="r.id"
           :downloads="r.downloads"
@@ -1103,6 +1166,40 @@ watch(activeTab, (tab) => {
 .link-btn:hover { opacity: 0.8; }
 
 /* Results list */
+/* Best Choice elevated section */
+.best-choice-section {
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd-subtle);
+  border-left: 3px solid var(--si-500);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.best-choice-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.best-choice-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tx-primary);
+}
+.best-choice-sub {
+  font-size: 12px;
+  color: var(--tx-muted);
+}
+.best-choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.best-choice-card {
+  border-left: 2px solid var(--si-400);
+}
+
 .find-results {
   display: flex;
   flex-direction: column;

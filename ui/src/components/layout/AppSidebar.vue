@@ -15,7 +15,7 @@
 -->
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
 import { useMachinesStore } from '@/stores/machines'
@@ -24,6 +24,7 @@ import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 import { api } from '@/api/client'
 
 const route = useRoute()
+const router = useRouter()
 const serverStore = useServerStore()
 const modelsStore = useModelsStore()
 const machinesStore = useMachinesStore()
@@ -106,6 +107,15 @@ const arcDashOffset = computed(() => {
 const memAvailGb = computed(() => serverStore.memory?.available_gb.toFixed(1) ?? '—')
 const memTotalGb = computed(() => serverStore.memory?.total_gb.toFixed(0) ?? '—')
 const loadedModel = computed(() => serverStore.modelId)
+
+// Rough heuristic: 4-bit quantised models use ~0.55 GB per billion params
+const modelFitsHint = computed(() => {
+  const avail = serverStore.memory?.available_gb
+  if (!avail || avail < 1) return null
+  const paramB = Math.floor(avail / 0.55)
+  if (paramB < 1) return null
+  return `~${paramB}B param models fit`
+})
 
 onMounted(() => {
   // best-effort — don't block render
@@ -197,6 +207,14 @@ async function doShutdown() {
         <span>Models</span>
       </RouterLink>
 
+      <RouterLink to="/chat" class="nav-item" :class="{ active: isActive('/chat') }" data-tour="chat">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
+          <path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd" />
+          <path d="M15 7h1a2 2 0 012 2v5.5a.5.5 0 01-.5.5H15V7z" />
+        </svg>
+        <span>Chat</span>
+      </RouterLink>
+
       <RouterLink to="/benchmarks" class="nav-item" :class="{ active: isActive('/benchmarks') }" :aria-current="isActive('/benchmarks') ? 'page' : undefined">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
@@ -214,14 +232,6 @@ async function doShutdown() {
 
       <div class="nav-divider" role="separator" />
 
-      <RouterLink to="/chat" class="nav-item nav-item-util" :class="{ active: isActive('/chat') }" data-tour="chat">
-        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
-          <path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd" />
-          <path d="M15 7h1a2 2 0 012 2v5.5a.5.5 0 01-.5.5H15V7z" />
-        </svg>
-        <span>Chat</span>
-      </RouterLink>
-
       <RouterLink to="/docs" class="nav-item nav-item-util" :class="{ active: isActive('/docs') }" :aria-current="isActive('/docs') ? 'page' : undefined">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z" />
@@ -230,49 +240,17 @@ async function doShutdown() {
       </RouterLink>
     </nav>
 
-    <!-- Engine Selector (only shown when multiple engines are installed) -->
-    <div v-if="engines.length > 1" class="sidebar-section engine-section">
-      <div class="section-label" id="engine-selector-label">Engine</div>
-      <div v-if="switchingEngine" class="model-switching" aria-live="polite">
-        <span class="switch-spinner" />
-        <span class="switch-text">Restarting…</span>
-      </div>
-      <select
-        v-else
-        class="model-select"
-        :value="selectedEngine"
-        :disabled="serverStore.loading || !!modelsStore.serverRestartingFor"
-        aria-labelledby="engine-selector-label"
-        @change="(e) => switchEngine((e.target as HTMLSelectElement).value)"
-      >
-        <option v-for="eng in engines" :key="eng.id" :value="eng.id">
-          {{ eng.name }}
-        </option>
-      </select>
-    </div>
-
-    <!-- Model Selector -->
-    <div class="sidebar-section model-section">
-      <div class="section-label" id="model-selector-label">Model</div>
-      <div v-if="modelsStore.serverRestartingFor" class="model-switching" aria-live="polite">
-        <span class="switch-spinner" />
-        <span class="switch-text">Switching…</span>
-      </div>
-      <select
-        v-else
-        class="model-select"
-        :value="serverStore.modelId ?? ''"
-        :disabled="switchingEngine || serverStore.loading || !modelsStore.models.length"
-        aria-labelledby="model-selector-label"
-        @change="(e) => modelsStore.loadModel((e.target as HTMLSelectElement).value)"
-      >
-        <option value="" disabled>{{ modelsStore.models.length ? 'Select model…' : 'No models cached' }}</option>
-        <option v-for="m in modelsStore.models" :key="m.id" :value="m.id">
-          {{ m.id.split('/').pop() }}
-        </option>
-      </select>
-      <RouterLink to="/models" class="manage-models-link">Manage models</RouterLink>
-    </div>
+    <!-- Server Status Row (click to go to Serve) -->
+    <button
+      class="sidebar-status-row"
+      title="Go to Serve page"
+      @click="router.push('/serve')"
+    >
+      <span class="status-dot" :class="serverStore.isRunning ? 'running' : 'stopped'" />
+      <span class="status-engine">{{ serverStore.engineId ?? 'No engine' }}</span>
+      <span v-if="serverStore.modelId" class="status-model">· {{ (serverStore.modelId ?? '').split('/').pop() }}</span>
+      <span v-else class="status-model-none">· No model</span>
+    </button>
 
     <!-- Memory Arc Gauge -->
     <div class="sidebar-section gauge-section">
@@ -283,6 +261,7 @@ async function doShutdown() {
         <text x="60" y="62" text-anchor="middle" font-size="11.5" fill="var(--tx-muted)">available</text>
       </svg>
       <div v-if="loadedModel" class="gauge-model-name">{{ loadedModel }}</div>
+      <div v-if="modelFitsHint" class="gauge-fits-hint">{{ modelFitsHint }}</div>
       <button class="release-mem-btn" title="Clears MLX model cache and runs OS-level memory compaction. Server stays up — model weights remain loaded. Use to reclaim inactive/cached RAM without restarting." @click="releaseMemory">
         ↺ Release Memory
       </button>
@@ -336,7 +315,7 @@ async function doShutdown() {
       </div>
       <div v-if="scanning" class="fleet-hint">Scanning local network…</div>
       <div v-else-if="!scanning && discoveredMachines.length === 0 && machinesStore.machines.length <= 1" class="fleet-hint">
-        Click ↺ to find servers on your network
+        Use the scan button above to find servers on your network.
       </div>
     </div>
 
@@ -354,7 +333,7 @@ async function doShutdown() {
         <span>{{ shuttingDown ? 'Shutting down…' : 'Shut Down' }}</span>
       </button>
       <div class="footer-right">
-        <span class="footer-version">v0.1.0</span>
+        <span class="footer-version">v{{ serverStore.dashboardVersion ?? '—' }}</span>
         <span class="footer-dot" :class="serverStore.isRunning ? 'running' : 'stopped'" />
       </div>
     </div>
@@ -397,6 +376,37 @@ async function doShutdown() {
 .logo-accent { color: var(--si-400); }
 
 /* Sections */
+/* Server status row — compact read-only pill; click → /serve */
+.sidebar-status-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--bd-subtle);
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  color: var(--tx-secondary);
+  flex-shrink: 0;
+  transition: background .15s;
+}
+.sidebar-status-row:hover { background: var(--bg-hover); }
+.sidebar-status-row:focus-visible { outline: 2px solid var(--si-400); outline-offset: -2px; }
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.running  { background: var(--si-500); }
+.status-dot.stopped  { background: var(--tx-muted); }
+.status-engine { font-weight: 600; color: var(--tx-primary); max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-model { color: var(--tx-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-model-none { color: var(--tx-muted); flex: 1; }
+
 .sidebar-section {
   padding: var(--space-3) var(--space-3);
   border-bottom: 1px solid var(--bd-subtle);
@@ -596,6 +606,13 @@ async function doShutdown() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
+}
+
+.gauge-fits-hint {
+  margin-top: var(--space-1);
+  font-size: 11px;
+  color: var(--tx-muted);
   text-align: center;
 }
 

@@ -1,6 +1,32 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.7.4 — 2026-05-21
+## v0.7.5 — 2026-05-22
+
+### Model Finder — Bug Fixes
+- **Fix: Use-case pills now trigger search** — Clicking a use-case pill (Chat / Code / Reasoning / Vision) now automatically re-fetches HuggingFace results sorted by downloads using use-case-specific query terms (`code`, `thinking`, `vision`). Previously, clicking a pill did nothing because `bestChoices` scored a stale pool of recently-updated obscure models.
+- **Fix: Default sort changed from `last_modified` to `downloads`** — All 6 call sites (`doSearch`, `onFindTabActivated`, `searchCompany`, `applyFilters`, `loadMore`, initial `sortCol` ref) now default to `downloads` sort with `limit=100`. This ensures the pool is the most-popular 100 models rather than the most-recently-touched 50 obscure ones.
+- **Fix: Date field corrected** — Model cards now show "Updated: <date>" (previously "Released: <date>"). The HuggingFace `last_modified` field is the date of the last weight push, not the original release date. Invalid/missing dates now display "Date unknown" (validated with `Number.isNaN`).
+- **Fix: Missing sizes show `—`** — `sizeLabel` now returns `"—"` instead of `null` when no size is available, preventing blank size cells.
+- **New: Best Choice elevated section** — Models scoring as Best Choice winners are surfaced in a highlighted section above regular results (deduplicated from the main list). Section is hidden while searching and only shown when winners exist.
+- **UX: Company chips label** — "Browse:" renamed to "Quick Search:" for clarity.
+
+### Navigation — Changes
+- **Chat moved above Benchmarks** in the sidebar (P1.4 from UI audit).
+- **Sidebar engine/model selects removed** — Replaced with a compact read-only status row (running dot + engine + model name). Clicking it navigates to the Serve page where full controls live. Engine/model switching logic is preserved in the Serve page and Chat page.
+- **RAM gauge "models fit" hint** — Shows estimated max parameter count (`~NB param models fit`) below the available RAM gauge based on a 4-bit quantisation heuristic (~0.55 GB/billion params).
+- **Fleet hint copy fixed** — Changed "Click ↺ to find servers on your network" → "Use the scan button above to find servers on your network."
+
+### Chat — Auto-Start
+- **Auto-start inference server on send** (P1.3) — When a message is sent but the server isn't running, the Chat view now automatically starts the server and waits up to 90 seconds for it to become healthy before sending. Shows "Starting server…" placeholder and a spinner. Previously showed a static error pointing users to the Serve page.
+
+### Benchmarks — Tab Order
+- **Advisor tab is now first** — Tab order changed from `[Live, Run Tests, History, Advisor]` to `[Advisor, Live, Run Tests, History]`. Default active tab is now Advisor.
+
+### Other
+- **Dashboard version in footer** — Sidebar footer version now reads from the `/poll` endpoint response (`dashboard_version`) instead of the hardcoded `v0.1.0`.
+- **TourOverlay CSS token fix** — `var(--bg1)` (undefined token) replaced with `var(--bg-surface)`.
+- **`server.ts`** — `dashboardVersion` ref added to poll cycle and exported from store.
+
 
 - **Fix: Vision badge gate** — Non-vision text models can no longer win "Best for Vision". Added per-use-case minimum affinity gates: Vision requires affinity ≥ 0.80 (must match vision model patterns), Code ≥ 0.40, Reasoning ≥ 0.35, Chat ≥ 0.30. Previously, a well-benchmarked recent text model could win a Vision badge simply because no actual vision model was in the result set.
 - **Fix: Too-large models excluded from Best Choice** — Models where `size_gb / total_ram ≥ 0.92` are now hard-disqualified from all Best Choice badges. Previously they could receive a badge despite the card simultaneously showing "Too large" fit status.
