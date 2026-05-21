@@ -176,6 +176,8 @@ Run standardized benchmarks to measure model performance.
 | **Quality — GSM8K** | Math reasoning accuracy (grade-school math problems) |
 | **Quality — MMLU** | Multi-domain knowledge accuracy (57 academic subjects) |
 | **Quality — HumanEval** | Code generation accuracy (Python function completion) |
+| **Quality — MATH** | Competition math accuracy (50 problems from MATH dataset) |
+| **Quality — IFEval** | Instruction-following accuracy (38 verifiable tasks) |
 
 Quality tests run **without streaming** to ensure fair, reproducible accuracy measurements. Speed tests run with streaming to capture real-world latency.
 

@@ -60,15 +60,19 @@ const filteredModels = computed(() => {
 const searchInput = ref('')
 const hideDownloaded = ref(true)
 const showFilters = ref(false)
+
+// Client-side filters pending signal — set when filters need a deeper server re-fetch
+// (client-side filter changes apply instantly via computed; this only gates the
+// "Apply Filters" button which fetches a larger pool)
 const filtersPending = ref(false)
 
-// Client-side filters pending signal
 function markFiltersDirty() {
   filtersPending.value = true
 }
 
 async function applyFilters() {
-  await modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value === 'last_modified' ? 'last_modified' : 'downloads', false, 100)
+  const serverSort = SERVER_SORT_COLS.has(sortCol.value) ? sortCol.value : 'last_modified'
+  await modelsStore.searchHF(searchInput.value.trim(), true, 0, serverSort, false, 100, sortDir.value)
   filtersPending.value = false
 }
 
@@ -85,7 +89,7 @@ const filterFitLevels = ref<Set<string>>(new Set())  // empty set = all fit leve
 const filterSizeMin = ref<number>(0)
 const filterSizeMax = ref<number>(200)  // reasonable max for Apple Silicon
 const filterDownloadsMin = ref<number>(0)
-const filterDownloadsMax = ref<number>(1000000)
+const filterDownloadsMax = ref<number>(100_000_000)
 const filterFitOnly = ref(false)  // quick checkbox: only "perfect" and "good"
 
 // Quick-search by company/org
@@ -104,7 +108,7 @@ function searchCompany(query: string) {
   searchInput.value = query
   sortCol.value = 'last_modified'
   sortDir.value = 'desc'
-  modelsStore.searchHF(query, true, 0, 'last_modified')
+  modelsStore.searchHF(query, true, 0, 'last_modified', false, 50, 'desc')
 }
 
 const isRestarting = computed(() => modelsStore.serverRestartingFor)
@@ -115,14 +119,14 @@ const SERVER_SORT_COLS = new Set<SortCol>(['downloads', 'likes', 'last_modified'
 function toggleSortDir() {
   sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc'
   if (SERVER_SORT_COLS.has(sortCol.value as SortCol)) {
-    modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value as string)
+    modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value as string, false, 50, sortDir.value)
   }
 }
 
 function onSortChange() {
   sortDir.value = 'desc'
   if (SERVER_SORT_COLS.has(sortCol.value as SortCol)) {
-    modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value as string)
+    modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value as string, false, 50, sortDir.value)
   }
 }
 
@@ -188,12 +192,12 @@ async function doSearch() {
   sortCol.value = 'last_modified'
   sortDir.value = 'desc'
   filtersPending.value = false
-  await modelsStore.searchHF(searchInput.value.trim(), true, 0, 'last_modified')
+  await modelsStore.searchHF(searchInput.value.trim(), true, 0, 'last_modified', false, 50, 'desc')
 }
 
 async function loadMore() {
   const serverSort = SERVER_SORT_COLS.has(sortCol.value) ? sortCol.value : 'last_modified'
-  await modelsStore.searchHFMore(serverSort)
+  await modelsStore.searchHFMore(serverSort, sortDir.value)
 }
 
 // Preload newest mlx-community models when Find tab is opened for the first time
@@ -203,7 +207,7 @@ function onFindTabActivated() {
     trendingLoaded.value = true
     sortCol.value = 'last_modified'
     sortDir.value = 'desc'
-    modelsStore.searchHF('', true, 0, 'last_modified')
+    modelsStore.searchHF('', true, 0, 'last_modified', false, 50, 'desc')
   }
 }
 
@@ -461,7 +465,7 @@ watch(activeTab, (tab) => {
           </button>
         </div>
         <label class="hide-downloaded-toggle">
-          <input type="checkbox" v-model="hideDownloaded" @change="markFiltersDirty" />
+          <input type="checkbox" v-model="hideDownloaded" />
           <span>Hide downloaded</span>
         </label>
       </div>
@@ -503,9 +507,9 @@ watch(activeTab, (tab) => {
         <div class="filter-row">
           <span class="filter-label">Downloads:</span>
           <div class="range-inputs">
-            <input type="number" v-model.number="filterDownloadsMin" min="0" max="1000000" class="range-input" placeholder="min" @change="markFiltersDirty" />
+            <input type="number" v-model.number="filterDownloadsMin" min="0" class="range-input" placeholder="min" @input="filtersPending = true" />
             <span class="range-dash">–</span>
-            <input type="number" v-model.number="filterDownloadsMax" min="0" max="1000000" class="range-input" placeholder="max" @change="markFiltersDirty" />
+            <input type="number" v-model.number="filterDownloadsMax" min="0" class="range-input" placeholder="max" @input="filtersPending = true" />
           </div>
         </div>
         <div class="filter-apply-row">
@@ -516,8 +520,15 @@ watch(activeTab, (tab) => {
       </div>
 
       <!-- Filter summary -->
-      <div v-if="preFilterCount > 0 && preFilterCount !== displayedSearchResults.length" class="filter-summary">
-        Showing {{ displayedSearchResults.length }} of {{ preFilterCount }} results matching filters
+      <div v-if="preFilterCount > 0" class="filter-summary">
+        <span v-if="displayedSearchResults.length === preFilterCount">
+          {{ preFilterCount }} model{{ preFilterCount === 1 ? '' : 's' }} loaded
+          <span v-if="modelsStore.searchHasMore"> · more available</span>
+        </span>
+        <span v-else>
+          Showing {{ displayedSearchResults.length }} of {{ preFilterCount }} loaded models matching filters
+          <span v-if="modelsStore.searchHasMore"> · <button class="link-btn" @click="loadMore">load more to find additional matches</button></span>
+        </span>
       </div>
 
       <!-- Error -->
@@ -553,11 +564,21 @@ watch(activeTab, (tab) => {
             Load more…
           </AppButton>
         </div>
+        <!-- Hint when filters cut results significantly -->
+        <div v-if="modelsStore.searchHasMore && displayedSearchResults.length < 5" class="filter-hint">
+          ↑ Filters are hiding many results. <button class="link-btn" @click="loadMore">Load more</button> to find additional matches, or widen your filters.
+        </div>
       </div>
 
-      <!-- Empty -->
+      <!-- Empty: not yet searched -->
+      <div v-else-if="!trendingLoaded && !modelsStore.searching && !modelsStore.actionError" class="empty-state">
+        <span class="empty-label">Search above or browse by provider to discover models</span>
+      </div>
+
+      <!-- Empty: searched but no results or all filtered out -->
       <div v-else-if="!modelsStore.searching && !modelsStore.actionError" class="empty-state">
-        <span class="empty-label">No models found — try a different search</span>
+        <span v-if="preFilterCount > 0" class="empty-label">No models match the current filters — adjust filters or <button class="link-btn" @click="loadMore">load more</button></span>
+        <span v-else class="empty-label">No models found — try a different search or provider</span>
       </div>
     </div>
 
@@ -992,6 +1013,28 @@ watch(activeTab, (tab) => {
   text-align: center;
   padding: var(--space-1) 0;
 }
+
+.filter-hint {
+  font-size: 12px;
+  color: var(--tx-secondary);
+  text-align: center;
+  padding: var(--space-2);
+  background: var(--bg-subtle);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--bd-subtle);
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link-btn:hover { opacity: 0.8; }
 
 /* Results list */
 .find-results {

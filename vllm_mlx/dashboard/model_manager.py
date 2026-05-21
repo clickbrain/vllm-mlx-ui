@@ -856,6 +856,7 @@ def search_hf_models(
     limit: int = 50,
     offset: int = 0,
     sort: str = "downloads",
+    direction: str = "desc",
 ) -> list[dict]:
     """Search all of HuggingFace Hub (not just mlx-community) via REST API."""
     import urllib.parse
@@ -868,14 +869,17 @@ def search_hf_models(
     }
     hf_sort = hf_sort_map.get(sort, "lastModified")
 
-    # Fetch enough results to support offset slicing
-    # Always fetch at least 50 to avoid "just 1 model" problem
-    fetch_limit = max(offset + limit, 50)
-    fetch_limit = min(fetch_limit, 100)
+    # Normalize direction: accept "asc"/"desc" or "1"/"-1"
+    hf_direction = "1" if direction in ("asc", "1") else "-1"
+
+    # Overfetch by 1 to reliably detect whether more results exist beyond this page.
+    # Cap at 500 to stay within HF API limits while allowing deep pagination.
+    fetch_limit = max(offset + limit + 1, 50)
+    fetch_limit = min(fetch_limit, 500)
 
     params: dict[str, Any] = {
         "sort": hf_sort,
-        "direction": "-1",
+        "direction": hf_direction,
         "limit": str(fetch_limit),
         "full": "false",
         "config": "false",

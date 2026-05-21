@@ -1,5 +1,33 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.7.0 — 2026-05-21
+
+- **Feature: Quality benchmark audit — 11 bugs found and fixed** — A comprehensive audit of the quality benchmark pipeline (`quality_runner.py`) discovered and fixed 11 bugs that were silently corrupting results:
+  - **MATH runner crash**: `KeyError` on `q["problem"]` — dataset field is `"question"`. Every MATH benchmark run returned zero results.
+  - **IFEval runner crash**: `KeyError` on `q["instruction"]` — dataset field is `"question"`. Every IFEval benchmark run returned zero results.
+  - **IFEval score inflation**: `grade_ifeval()` returned `True` for any unrecognized constraint type (fail-open). Changed to fail-closed (`return False`) — 20+ constraint types were being auto-graded as correct.
+  - **20 missing IFEval constraint handlers** implemented: `min_chars`, `contains_punctuation`, `line_count`, `min_emojis`, `sentence_count_exact`, `contains_word_and_max_chars`, `exact_word_count_with_word`, `comma_list`, `word_count_min`, `every_sentence_contains`, `min_word_length`, `line_word_count`, `sentences_start_different`, `three_sentences_second_question`, `word_count_and_position`, `json_structure`, `alliteration`, `dialogue`.
+  - **2 ungradable IFEval questions removed** (`simple_sentences`, `rhymes_with`) — IFEval is now 38 questions instead of 40.
+  - **`json_structure` constraint had duplicate `type` key** in question data (`{"type": "json_structure", ..., "type": "dict"}`). Last duplicate silently overwrote the constraint type, causing all JSON-structure evaluations to parse incorrectly. Fixed to `expected_type`.
+  - **`grade_mmlu()` regex missed lowercase A-D** — only matched uppercase. Added `re.IGNORECASE`.
+  - **`_math_answer_match()` couldn't handle operator spacing variance** — `e-2` vs `e - 2` failed string comparison. Added operator space normalization via `re.sub(r"\s*([+\-*/=<>!])\s*", ...)`.
+  - **`_stream_completion()` crashed on empty `choices` array** — SSE stream can emit usage-only chunks with `choices: []` before the final `[DONE]`. Changed to safe access: `(obj.get("choices") or [])` with guard.
+  - **`_sentences()` consumed sentence delimiter** — `re.split(r"[.!?]", text)` removed the period, colon, or question mark from each sentence. Changed to `re.findall(r"[^.!?]+[.!?]", text)` which preserves punctuation.
+  - **`hardware.fingerprint()` uncached** — Called 3 sequential `sysctl` subprocesses (5s timeout each) every time. Added `@functools.lru_cache(maxsize=1)`.
+- **Feature: MATH benchmark suite** — 50 competition math problems from MATH dataset (`grade_math()` with boxed answer extraction and operator-spacing-normalized string/numeric fallback matching).
+- **Feature: IFEval benchmark suite** — 38 verifiable instruction-following tasks with 26 constraint-type handlers. Fail-closed grading: unrecognized constraint types return `False` instead of being auto-counted as correct.
+- **Feature: Bootstrap 95% confidence intervals** — Every quality suite result now includes `accuracy_ci_95` via `bootstrap_ci()` (1000 resamples). Displayed inline on benchmark history badges (±X%) and comparison table cells, with tooltip showing full range.
+- **Feature: Hardware fingerprint on benchmark results** — chip model, generation, total RAM, OS version, Python version, MLX version, and dashboard version captured at run time and persisted with every benchmark history entry.
+- **Feature: Capability tags on model search results** — HFSearchResult cards now display auto-detected capability badges: parameter count (7B, 70B), quantization level (4-bit, 8-bit), and content type (Instruct, Vision, Code, Thinking, Embed, Audio). Extracted from model name and HF tags.
+- **Feature: Model search sort direction** — Model search now supports ascending/descending sort direction. Sort toggle button in the Find tab passes `direction` parameter to the server, which queries HF API with the correct `direction` param.
+- **Feature: MATH and IFEval columns in benchmark comparison table** — The compare-history benchmark table now includes MATH and IFEval accuracy columns alongside GSM8K, MMLU, and HumanEval.
+- **Fix: Model pagination** — `search_hf_models()` now correctly slices from `offset` instead of always from 0. Fetch limit increased from 100 to 500 to support deeper pagination. `has_more` detection now checks `len(results) > offset + limit` instead of `len(results) > len(sliced)`.
+- **Fix: Fit level uses total RAM** — `computeFitLevel()` now uses the machine's total unified memory (hardware spec) instead of currently available RAM. Fit classification is now stable across runs regardless of memory pressure. Default search page size increased from 25 to 50.
+- **Fix: Thinking tokens stripped before grading** — All quality benchmark suites now strip `[... thinking ...]` / `<think>...</think>` blocks from model output before grading, preventing reasoning tokens from contaminating answer extraction.
+- **Quality: 118 unit tests** — Comprehensive test coverage for all grading functions (`grade_gsm8k`, `grade_mmlu`, `grade_math`, `grade_humaneval`, `grade_ifeval`), streaming, sentence splitting, thinking removal, bootstrap CI, MMLU message construction, and question data integrity (every question has required keys, IFEval has no duplicate types, all constraint types have handlers).
+- **Quality: Ruff clean** — Import ordering fixed (`E402`), ambiguous variable names renamed (`E741`), unused import removed.
+- **UX: Hardware context panel in benchmark run detail** — The Run Detail section now shows hardware context (chip, RAM, macOS version, MLX version) for every benchmark run, making cross-machine comparisons transparent.
+
 ## v0.6.29 — 2026-05-20
 
 - **Fix: Chat history was being wiped on reload** — Critical route ordering bug: `GET /chats` and `GET /chats/{id}` were registered AFTER the SPA catch-all (`/{full_path:path}`), so FastAPI returned `index.html` for all chat API requests. `JSON.parse(html)` silently threw SyntaxError and the frontend fell back to empty state. All 6 `/chats` endpoints are now registered before the catch-all.

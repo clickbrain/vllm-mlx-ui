@@ -17,6 +17,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+
+from vllm_mlx.dashboard.hardware import fingerprint as _hw_fingerprint
 import logging
 logger = logging.getLogger(__name__)
 
@@ -525,6 +527,7 @@ def run_custom_benchmark(
         "avg_total_ms": round(statistics.mean(total_vals), 1) if total_vals else None,
         "raw_output": "\n".join(raw_lines),
         "label": label,
+        "hardware": _hw_fingerprint(),
     }
     if not result["success"]:
         result["error"] = "No successful prompts completed"
@@ -783,6 +786,7 @@ def run_live_benchmark(
         "gen_tps_samples": [round(v, 2) for v in gen_tps_list],
         "raw_output": "\n".join(raw_lines),
         "live": True,  # legacy flag — result_type: "live" is the canonical field
+        "hardware": _hw_fingerprint(),
     }
     if not success:
         result["error"] = "No successful runs completed"

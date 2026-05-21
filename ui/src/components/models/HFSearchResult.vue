@@ -69,6 +69,48 @@ const fitPercent = computed(() => {
   if (!props.size_gb || !props.total_ram_gb || props.total_ram_gb <= 0) return 0
   return Math.min(props.size_gb / props.total_ram_gb, 1)
 })
+
+/** Extract human-readable capability tags from model ID and HF tags */
+const capabilityTags = computed(() => {
+  const id = props.id.toLowerCase()
+  const hfTags = props.tags.map(t => t.toLowerCase())
+  const caps: Array<{ label: string; style: string }> = []
+
+  // Param count — extract like "7b", "13b", "70b", "0.5b", "1.5b", "72b"
+  const paramMatch = id.match(/[._\-/](\d+(?:\.\d+)?)\s*b(?:[._\-/]|$)/) ??
+                     id.match(/^(\d+(?:\.\d+)?)\s*b(?:[._\-/]|$)/)
+  if (paramMatch) {
+    caps.push({ label: `${paramMatch[1]}B`, style: 'param' })
+  }
+
+  // Quantization — look for common MLX quant patterns
+  const quantPatterns = [
+    [/\b(bf16|bfloat16)\b/, 'bf16'],
+    [/\b(fp16|float16)\b/, 'fp16'],
+    [/\b(4bit|4-bit|q4)\b/, '4-bit'],
+    [/\b(8bit|8-bit|q8)\b/, '8-bit'],
+    [/\b(2bit|2-bit|q2)\b/, '2-bit'],
+    [/\b(3bit|3-bit|q3)\b/, '3-bit'],
+    [/\b(6bit|6-bit|q6)\b/, '6-bit'],
+  ] as Array<[RegExp, string]>
+  for (const [re, label] of quantPatterns) {
+    if (re.test(id)) {
+      caps.push({ label, style: 'quant' })
+      break
+    }
+  }
+
+  // Capabilities from model name and HF tags
+  const allText = id + ' ' + hfTags.join(' ')
+  if (/instruct|chat|assistant/.test(allText)) caps.push({ label: 'Instruct', style: 'cap' })
+  if (/vision|vl\b|vlm|multimodal|image/.test(allText)) caps.push({ label: 'Vision', style: 'vision' })
+  if (/code|coding|coder|starcoder|deepseek-coder/.test(allText)) caps.push({ label: 'Code', style: 'code' })
+  if (/thinking|reasoning|reason|qwq|deepseek-r/.test(allText)) caps.push({ label: 'Thinking', style: 'think' })
+  if (/embed|embedding/.test(allText)) caps.push({ label: 'Embed', style: 'cap' })
+  if (/audio|speech|whisper/.test(allText)) caps.push({ label: 'Audio', style: 'cap' })
+
+  return caps
+})
 </script>
 
 <template>
@@ -85,6 +127,16 @@ const fitPercent = computed(() => {
           <AppBadge v-if="is_mlx" variant="info" size="sm">MLX</AppBadge>
         </div>
         <AppButton variant="secondary" size="sm" @click="emit('download')">Download</AppButton>
+      </div>
+
+      <!-- Capability tags row -->
+      <div v-if="capabilityTags.length > 0" class="cap-tags-row">
+        <span
+          v-for="tag in capabilityTags"
+          :key="tag.label"
+          class="cap-tag"
+          :class="`cap-tag--${tag.style}`"
+        >{{ tag.label }}</span>
       </div>
 
       <!-- Fit gauge: model size vs RAM bar -->
@@ -262,5 +314,60 @@ const fitPercent = computed(() => {
 }
 .meta-icon {
   opacity: 0.6;
+}
+
+/* Capability tags */
+.cap-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cap-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 18px;
+}
+
+.cap-tag--param {
+  background: var(--bg-subtle);
+  color: var(--tx-secondary);
+  border: 1px solid var(--bd-subtle);
+  font-family: var(--font-mono);
+}
+
+.cap-tag--quant {
+  background: rgba(91, 106, 208, 0.12);
+  color: var(--si-300);
+  border: 1px solid rgba(91, 106, 208, 0.25);
+  font-family: var(--font-mono);
+}
+
+.cap-tag--cap {
+  background: var(--bg-elevated);
+  color: var(--tx-secondary);
+  border: 1px solid var(--bd-default);
+}
+
+.cap-tag--vision {
+  background: rgba(147, 112, 219, 0.12);
+  color: #9370db;
+  border: 1px solid rgba(147, 112, 219, 0.3);
+}
+
+.cap-tag--code {
+  background: rgba(32, 178, 170, 0.12);
+  color: #20b2aa;
+  border: 1px solid rgba(32, 178, 170, 0.3);
+}
+
+.cap-tag--think {
+  background: rgba(255, 165, 0, 0.12);
+  color: #e69500;
+  border: 1px solid rgba(255, 165, 0, 0.3);
 }
 </style>

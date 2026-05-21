@@ -15,7 +15,7 @@ The dashboard gives you a zero-configuration web UI (Vue 3, served at **http://l
 | 🤖 **6 Inference Engines** | vllm-mlx, DeepSeek V4 Flash (ds4), Rapid-MLX, llama.cpp, Ollama, LM Studio — install, configure, upgrade from the UI |
 | 🖥️ **Serve** | Start / stop / restart any engine, full configuration, live connection URLs, log viewer |
 | 📦 **Models** | Browse downloaded models, search HuggingFace, download by ID, one-click model switching, virtual-scrolled list |
-| ⚡ **Benchmarks** | Speed, quality (GSM8K / MMLU / HumanEval), custom prompts, multi-model comparison bar charts |
+| ⚡ **Benchmarks** | Speed, quality (GSM8K / MMLU / HumanEval / MATH / IFEval), custom prompts, multi-model comparison bar charts with 95% confidence intervals |
 | 💬 **Chat** | Full chat history, named conversations, live HTML preview in code blocks, streaming responses |
 | ⚙️ **Settings** | Per-engine configuration, remote machine management, multi-machine fleet support |
 | 📑 **Docs** | Full documentation browsable in-app at `/docs` |
@@ -241,7 +241,7 @@ Engine cards show system requirement errors (blocks install) and memory advisori
 ### ⚡ Benchmarks Page
 
 - **Speed** — tokens/sec and TTFT across N runs, accurate timing (skips buffered streams)
-- **Quality** — GSM8K, MMLU, HumanEval with authentic test data; thinking mode disabled for fair measurement
+- **Quality** — GSM8K, MMLU, HumanEval, MATH, IFEval with authentic test data; each result includes 95% bootstrap confidence intervals and per-run hardware fingerprint (chip, RAM, OS, MLX version)
 - **Custom Prompts** — run your own prompts, per-prompt results table
 - **Multi-model comparison** — bar charts comparing speed and quality across models
 - Benchmark history with export and delete

@@ -262,6 +262,8 @@ const QUALITY_SUITES = [
   { id: 'gsm8k',     label: 'GSM8K',     description: 'Math word problems' },
   { id: 'mmlu',      label: 'MMLU',      description: 'Multi-subject knowledge' },
   { id: 'humaneval', label: 'HumanEval', description: 'Python coding tasks' },
+  { id: 'math',      label: 'MATH',      description: 'Competition math' },
+  { id: 'ifeval',    label: 'IFEval',    description: 'Instruction-following' },
 ]
 
 // Mode: combined runs quality questions with streaming → captures both accuracy + speed
@@ -1496,6 +1498,9 @@ watch(activeTab, (tab) => {
                     <div class="qsi-score" :class="(sr as QualitySuiteResult).accuracy >= 0.7 ? 'good' : (sr as QualitySuiteResult).accuracy >= 0.5 ? 'mid' : 'bad'">
                       {{ Math.round((sr as QualitySuiteResult).accuracy * 100) }}%
                     </div>
+                    <div v-if="(sr as QualitySuiteResult).accuracy_ci_95" class="qsi-ci dim">
+                      ±{{ Math.round((((sr as QualitySuiteResult).accuracy_ci_95[1] - (sr as QualitySuiteResult).accuracy_ci_95[0]) / 2) * 100) }}%
+                    </div>
                     <div class="qsi-detail dim">{{ (sr as QualitySuiteResult).correct }}/{{ (sr as QualitySuiteResult).total }}</div>
                   </div>
                   <div class="qsi qsi-overall">
@@ -1682,6 +1687,8 @@ watch(activeTab, (tab) => {
                 <th class="num">GSM8K</th>
                 <th class="num">MMLU</th>
                 <th class="num">HumanEval</th>
+                <th class="num">MATH</th>
+                <th class="num">IFEval</th>
                 <th class="num">Overall</th>
               </tr>
             </thead>
@@ -1705,9 +1712,26 @@ watch(activeTab, (tab) => {
                     ? (run.server_settings.kv_cache_quantization_bits ?? 8) + '-bit'
                     : '✗' }}
                 </td>
-                <td class="num mono">{{ run.suites?.gsm8k ? Math.round(run.suites.gsm8k.accuracy * 100) + '%' : '—' }}</td>
-                <td class="num mono">{{ run.suites?.mmlu ? Math.round(run.suites.mmlu.accuracy * 100) + '%' : '—' }}</td>
-                <td class="num mono">{{ run.suites?.humaneval ? Math.round(run.suites.humaneval.accuracy * 100) + '%' : '—' }}</td>
+                <td class="num mono">
+                  {{ run.suites?.gsm8k ? Math.round(run.suites.gsm8k.accuracy * 100) + '%' : '—' }}
+                  <span v-if="run.suites?.gsm8k?.accuracy_ci_95" class="ci-range dim" :title="`95% CI: ${Math.round(run.suites.gsm8k.accuracy_ci_95[0]*100)}%–${Math.round(run.suites.gsm8k.accuracy_ci_95[1]*100)}%`">
+                    ±{{ Math.round((run.suites.gsm8k.accuracy_ci_95[1] - run.suites.gsm8k.accuracy_ci_95[0]) / 2 * 100) }}%
+                  </span>
+                </td>
+                <td class="num mono">
+                  {{ run.suites?.mmlu ? Math.round(run.suites.mmlu.accuracy * 100) + '%' : '—' }}
+                  <span v-if="run.suites?.mmlu?.accuracy_ci_95" class="ci-range dim" :title="`95% CI: ${Math.round(run.suites.mmlu.accuracy_ci_95[0]*100)}%–${Math.round(run.suites.mmlu.accuracy_ci_95[1]*100)}%`">
+                    ±{{ Math.round((run.suites.mmlu.accuracy_ci_95[1] - run.suites.mmlu.accuracy_ci_95[0]) / 2 * 100) }}%
+                  </span>
+                </td>
+                <td class="num mono">
+                  {{ run.suites?.humaneval ? Math.round(run.suites.humaneval.accuracy * 100) + '%' : '—' }}
+                  <span v-if="run.suites?.humaneval?.accuracy_ci_95" class="ci-range dim" :title="`95% CI: ${Math.round(run.suites.humaneval.accuracy_ci_95[0]*100)}%–${Math.round(run.suites.humaneval.accuracy_ci_95[1]*100)}%`">
+                    ±{{ Math.round((run.suites.humaneval.accuracy_ci_95[1] - run.suites.humaneval.accuracy_ci_95[0]) / 2 * 100) }}%
+                  </span>
+                </td>
+                <td class="num mono">{{ run.suites?.math ? Math.round(run.suites.math.accuracy * 100) + '%' : '—' }}</td>
+                <td class="num mono">{{ run.suites?.ifeval ? Math.round(run.suites.ifeval.accuracy * 100) + '%' : '—' }}</td>
                 <td class="num mono">{{ run.overall_score != null ? Math.round(run.overall_score * 100) + '%' : '—' }}</td>
               </tr>
             </tbody>
@@ -1826,6 +1850,28 @@ watch(activeTab, (tab) => {
                 <span class="detail-v"><span class="engine-pill">{{ selectedRun.engine_id }}</span></span>
               </div>
             </div>
+            <div class="detail-section">
+              <div class="detail-section-title">Hardware</div>
+              <div class="detail-settings-grid" v-if="selectedRun.hardware">
+                <div class="detail-kv">
+                  <span class="detail-k">Chip</span>
+                  <span class="detail-v">{{ selectedRun.hardware.chip }}</span>
+                </div>
+                <div class="detail-kv" v-if="selectedRun.hardware.total_ram_gb">
+                  <span class="detail-k">RAM</span>
+                  <span class="detail-v">{{ selectedRun.hardware.total_ram_gb }} GB</span>
+                </div>
+                <div class="detail-kv">
+                  <span class="detail-k">macOS</span>
+                  <span class="detail-v">{{ selectedRun.hardware.os_version }}</span>
+                </div>
+                <div class="detail-kv" v-if="selectedRun.hardware.mlx_version">
+                  <span class="detail-k">MLX</span>
+                  <span class="detail-v">{{ selectedRun.hardware.mlx_version }}</span>
+                </div>
+              </div>
+              <div v-else class="panel-empty">Not captured (pre-v0.7 benchmark)</div>
+            </div>
           </div>
 
           <!-- Per-prompt results (custom benchmark) -->
@@ -1915,18 +1961,37 @@ watch(activeTab, (tab) => {
               <span v-if="run.server_settings?.use_paged_cache" class="h-badge kv-badge">paged KV</span>
               <span v-if="run.suites?.gsm8k" class="h-badge quality-badge"
                 :class="run.suites.gsm8k.accuracy >= 0.7 ? 'good' : run.suites.gsm8k.accuracy >= 0.5 ? 'mid' : 'bad'"
+                :title="run.suites.gsm8k.accuracy_ci_95
+                  ? `95% CI: ${Math.round(run.suites.gsm8k.accuracy_ci_95[0] * 100)}%–${Math.round(run.suites.gsm8k.accuracy_ci_95[1] * 100)}%`
+                  : ''"
               >
                 GSM8K {{ Math.round(run.suites.gsm8k.accuracy * 100) }}%
               </span>
               <span v-if="run.suites?.mmlu" class="h-badge quality-badge"
                 :class="run.suites.mmlu.accuracy >= 0.7 ? 'good' : run.suites.mmlu.accuracy >= 0.5 ? 'mid' : 'bad'"
+                :title="run.suites.mmlu.accuracy_ci_95
+                  ? `95% CI: ${Math.round(run.suites.mmlu.accuracy_ci_95[0] * 100)}%–${Math.round(run.suites.mmlu.accuracy_ci_95[1] * 100)}%`
+                  : ''"
               >
                 MMLU {{ Math.round(run.suites.mmlu.accuracy * 100) }}%
               </span>
               <span v-if="run.suites?.humaneval" class="h-badge quality-badge"
                 :class="run.suites.humaneval.accuracy >= 0.7 ? 'good' : run.suites.humaneval.accuracy >= 0.5 ? 'mid' : 'bad'"
+                :title="run.suites.humaneval.accuracy_ci_95
+                  ? `95% CI: ${Math.round(run.suites.humaneval.accuracy_ci_95[0] * 100)}%–${Math.round(run.suites.humaneval.accuracy_ci_95[1] * 100)}%`
+                  : ''"
               >
                 HumanEval {{ Math.round(run.suites.humaneval.accuracy * 100) }}%
+              </span>
+              <span v-if="run.suites?.math" class="h-badge quality-badge"
+                :class="run.suites.math.accuracy >= 0.7 ? 'good' : run.suites.math.accuracy >= 0.5 ? 'mid' : 'bad'"
+              >
+                MATH {{ Math.round(run.suites.math.accuracy * 100) }}%
+              </span>
+              <span v-if="run.suites?.ifeval" class="h-badge quality-badge"
+                :class="run.suites.ifeval.accuracy >= 0.7 ? 'good' : run.suites.ifeval.accuracy >= 0.5 ? 'mid' : 'bad'"
+              >
+                IFEval {{ Math.round(run.suites.ifeval.accuracy * 100) }}%
               </span>
               <span v-if="run.overall_score != null" class="h-badge overall-badge">
                 {{ Math.round(run.overall_score * 100) }}% overall
@@ -2353,6 +2418,21 @@ watch(activeTab, (tab) => {
   color: var(--tx-muted);
 }
 .panel-empty.warn { color: #f87171; }
+
+/* ── Confidence interval display ────────────────────────────────────────── */
+.ci-range {
+  font-size: 11px;
+  font-weight: 400;
+  margin-left: 2px;
+  vertical-align: super;
+}
+
+/* ── Quality scores inline (Run Tests tab) ──────────────────────────────── */
+.qsi-ci {
+  font-size: 11px;
+  color: var(--tx-muted);
+  margin-top: -1px;
+}
 
 /* ── Data table ──────────────────────────────────────────────────────────── */
 .table-wrap { overflow-x: auto; }

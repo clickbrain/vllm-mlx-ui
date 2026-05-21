@@ -470,17 +470,26 @@ def search_models(
     limit: int = 30,
     offset: int = 0,
     sort: str = "downloads",
+    direction: str = "desc",
     _: None = Depends(_check_auth),
 ) -> dict:
-    """Search HuggingFace Hub for models. Pass tags=mlx for MLX-only results."""
+    """Search HuggingFace Hub for models. Pass tags=mlx for MLX-only results.
+
+    direction: "asc" or "desc" (default "desc"). Controls sort order for
+    server-side sort columns (downloads, likes, last_modified).
+    """
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
-    results = mm.search_hf_models(query=q, tags=tag_list, limit=limit, offset=offset, sort=sort)
-    sliced = results[:limit]
+    results = mm.search_hf_models(
+        query=q, tags=tag_list, limit=limit, offset=offset, sort=sort, direction=direction
+    )
+    # Slice the correctly-offset window from the overfetched results
+    sliced = results[offset:offset + limit]
     return {
         "results": sliced,
         "offset": offset,
         "limit": limit,
-        "has_more": len(results) > len(sliced),
+        # has_more: true if the backend fetched more than offset+limit items
+        "has_more": len(results) > offset + limit,
     }
 
 

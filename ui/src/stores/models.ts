@@ -54,10 +54,21 @@ export interface BenchmarkResult {
   avg_ttft_ms?: number
 }
 
+export interface HardwareFingerprint {
+  chip: string
+  chip_gen: string
+  total_ram_gb: number
+  os_version: string
+  python_version: string
+  mlx_version: string
+  dashboard_version: string
+}
+
 export interface QualitySuiteResult {
   correct: number
   total: number
   accuracy: number
+  accuracy_ci_95?: [number, number]
 }
 
 export interface PerPromptResult {
@@ -97,6 +108,7 @@ export interface BenchmarkHistoryEntry {
   custom_prompts?: string[]
   dashboard_version?: string
   engine_id?: string
+  hardware?: HardwareFingerprint
 }
 
 export interface BenchmarkConfig {
@@ -118,14 +130,14 @@ function deriveQuantization(modelId: string): string {
 }
 
 /**
- * Classify model size against available RAM.
+ * Classify model size against total unified memory.
  * Returns keys matching HFSearchResult's fitInfo map: perfect | good | marginal | too_tight
  * @param sizeGb   Model file size in GB
- * @param ramGb    Currently available GPU/unified memory in GB
+ * @param totalGb  Total system unified memory in GB (hardware spec)
  */
-function computeFitLevel(sizeGb: number, ramGb: number): string {
-  if (!ramGb || ramGb <= 0) return 'unknown'
-  const pct = (sizeGb / ramGb) * 100
+function computeFitLevel(sizeGb: number, totalGb: number): string {
+  if (!totalGb || totalGb <= 0) return 'unknown'
+  const pct = (sizeGb / totalGb) * 100
   if (pct < 50) return 'perfect'
   if (pct < 75) return 'good'
   if (pct < 90) return 'marginal'
@@ -279,7 +291,7 @@ export const useModelsStore = defineStore('models', () => {
     models.value = models.value.filter(m => m.id !== modelId)
   }
 
-    async function searchHF(query: string, mlxOnlyFlag = false, offset = 0, sort = 'downloads', append = false, limit = 25) {
+    async function searchHF(query: string, mlxOnlyFlag = false, offset = 0, sort = 'downloads', append = false, limit = 50, direction: 'asc' | 'desc' = 'desc') {
     if (!append) {
       searchQuery.value = query
       searchOffset.value = 0
@@ -293,13 +305,14 @@ export const useModelsStore = defineStore('models', () => {
       params.set('limit', String(limit))
       params.set('offset', String(offset))
       params.set('sort', sort)
+      params.set('direction', direction)
       const resp = await api.get<{ results: Array<HFModel & { error?: string }>; has_more: boolean }>(`/models/search?${params}`)
       const results = resp.results.filter(r => !r.error)
-      // Annotate each result with fit_level based on current available RAM
-      const availableGb = serverStore.memory?.available_gb ?? 0
+      // Annotate each result with fit_level based on total RAM (hardware spec)
+      const totalGb = serverStore.memory?.total_gb ?? 0
       const annotated = results.map(r => ({
         ...r,
-        fit_level: r.size_gb ? computeFitLevel(r.size_gb, availableGb) : undefined,
+        fit_level: r.size_gb ? computeFitLevel(r.size_gb, totalGb) : undefined,
       }))
       searchHasMore.value = resp.has_more
       searchOffset.value = offset + results.length
@@ -319,8 +332,8 @@ export const useModelsStore = defineStore('models', () => {
     }
   }
 
-  async function searchHFMore(sort = 'downloads') {
-    await searchHF(searchQuery.value, mlxOnly.value, searchOffset.value, sort, true)
+  async function searchHFMore(sort = 'downloads', direction: 'asc' | 'desc' = 'desc') {
+    await searchHF(searchQuery.value, mlxOnly.value, searchOffset.value, sort, true, 50, direction)
   }
 
   async function runBenchmark(modelIds: string[], cfg: BenchmarkConfig) {
