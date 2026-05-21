@@ -1,6 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.7.0 — 2026-05-21
+## v0.7.1 — 2026-05-21
+
+- **Feature: Available RAM warning on model cards** — When a model fits the machine's total hardware RAM but cannot load right now due to insufficient free memory, a yellow inline warning appears on that card showing the exact amount of free memory and suggesting closing apps. The warning does not appear when the server is not running (no memory data available) or when a model is already flagged as too large for the hardware.
+- **Feature: "Best Choice" recommendation badge** — One model card per search result page is highlighted with a green "✦ Best Choice" banner. The selection algorithm picks the most-downloaded model that (1) fits in total RAM with "perfect" or "good" rating, (2) is an Instruct/Chat model for typical usage, and (3) is not a tiny embed stub. Falls back to best-fit non-instruct model when no instruct models qualify. The banner subtitle dynamically reflects the actual reason: "Fits your hardware · popular · Instruct/Vision/Code/Reasoning".
+
+
 
 - **Feature: Quality benchmark audit — 11 bugs found and fixed** — A comprehensive audit of the quality benchmark pipeline (`quality_runner.py`) discovered and fixed 11 bugs that were silently corrupting results:
   - **MATH runner crash**: `KeyError` on `q["problem"]` — dataset field is `"question"`. Every MATH benchmark run returned zero results.

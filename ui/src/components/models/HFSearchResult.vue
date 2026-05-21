@@ -13,6 +13,10 @@ const props = defineProps<{
   fit_level?: string
   last_modified?: string
   total_ram_gb?: number
+  /** Currently available (free) unified memory in GB */
+  available_ram_gb?: number
+  /** True when this is the single "best choice" recommendation in the current results */
+  is_recommended?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -70,6 +74,30 @@ const fitPercent = computed(() => {
   return Math.min(props.size_gb / props.total_ram_gb, 1)
 })
 
+/**
+ * Warn when the model fits the hardware (total RAM) but won't load right now
+ * because there isn't enough free memory. Only relevant when the server is
+ * not the one holding the RAM (i.e., no model is loaded / available_gb is low).
+ */
+const availableWarning = computed(() => {
+  if (!props.size_gb || !props.available_ram_gb) return null
+  if (props.fit_level === 'too_tight') return null  // already flagged as too large
+  const free = props.available_ram_gb
+  if (props.size_gb <= free) return null  // loads fine right now
+  return `${free.toFixed(1)} GB free now — close apps to load`
+})
+
+/** Dynamic subtitle for the "Best Choice" banner, derived from this card's own tags. */
+const recommendedSub = computed(() => {
+  const parts = ['Fits your hardware', 'popular']
+  const labels = capabilityTags.value.map(t => t.label)
+  if (labels.includes('Instruct')) parts.push('Instruct')
+  else if (labels.includes('Vision')) parts.push('Vision')
+  else if (labels.includes('Code')) parts.push('Code')
+  else if (labels.includes('Thinking')) parts.push('Reasoning')
+  return parts.join(' · ')
+})
+
 /** Extract human-readable capability tags from model ID and HF tags */
 const capabilityTags = computed(() => {
   const id = props.id.toLowerCase()
@@ -114,7 +142,11 @@ const capabilityTags = computed(() => {
 </script>
 
 <template>
-  <div class="hf-result">
+  <div class="hf-result" :class="{ 'hf-result--recommended': is_recommended }">
+    <div v-if="is_recommended" class="recommended-banner">
+      <span class="recommended-icon">✦</span> Best Choice
+      <span class="recommended-sub">{{ recommendedSub }}</span>
+    </div>
     <div class="result-body">
       <!-- Top row: model name + MLX badge + download button -->
       <div class="result-top">
@@ -139,7 +171,7 @@ const capabilityTags = computed(() => {
         >{{ tag.label }}</span>
       </div>
 
-      <!-- Fit gauge: model size vs RAM bar -->
+      <!-- Fit gauge: model size vs total RAM bar -->
       <div v-if="sizeLabel && fitInfo" class="fit-gauge-row">
         <div class="fit-gauge-track">
           <div
@@ -161,6 +193,12 @@ const capabilityTags = computed(() => {
           <span class="fit-size">{{ sizeLabel }}</span>
           <span class="fit-tag fit-unknown">Unknown fit</span>
         </div>
+      </div>
+
+      <!-- Available RAM warning (fits hardware but not right now) -->
+      <div v-if="availableWarning" class="available-warning" role="alert">
+        <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12" class="warn-icon"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.75 4h1.5v4.5h-1.5V5zm0 5.5h1.5V12h-1.5v-1.5z"/></svg>
+        {{ availableWarning }}
       </div>
 
       <!-- Metadata row: downloads, likes, date -->
@@ -185,10 +223,40 @@ const capabilityTags = computed(() => {
   border: 1px solid var(--bd-default);
   border-radius: var(--r-lg);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  overflow: hidden;
 }
 .hf-result:hover {
   border-color: var(--bd-emphasis);
   box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+/* Recommended highlight */
+.hf-result--recommended {
+  border-color: var(--cu-400, #4ade80);
+  box-shadow: 0 0 0 1px var(--cu-400, #4ade80), 0 2px 8px rgba(74, 222, 128, 0.15);
+}
+.hf-result--recommended:hover {
+  box-shadow: 0 0 0 1px var(--cu-400, #4ade80), 0 3px 12px rgba(74, 222, 128, 0.25);
+}
+
+.recommended-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-4);
+  background: linear-gradient(90deg, rgba(74, 222, 128, 0.12), rgba(74, 222, 128, 0.05));
+  border-bottom: 1px solid var(--cu-400, #4ade80);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--cu-400, #4ade80);
+  letter-spacing: 0.03em;
+}
+.recommended-icon { font-size: 14px; }
+.recommended-sub {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--tx-tertiary);
+  margin-left: auto;
 }
 
 .result-body {
@@ -297,6 +365,21 @@ const capabilityTags = computed(() => {
 .fit-unknown {
   color: var(--tx-tertiary);
 }
+
+/* Available RAM warning */
+.available-warning {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  background: rgba(234, 179, 8, 0.10);
+  border: 1px solid rgba(234, 179, 8, 0.30);
+  border-radius: var(--r-sm);
+  font-size: 11.5px;
+  color: #ca8a04;
+  font-family: var(--font-mono);
+}
+.warn-icon { flex-shrink: 0; opacity: 0.8; }
 
 /* Meta row */
 .result-meta {

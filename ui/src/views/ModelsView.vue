@@ -188,6 +188,33 @@ const displayedSearchResults = computed(() => {
 
 const preFilterCount = computed(() => modelsStore.searchResults.filter(r => r.is_mlx).length)
 
+/**
+ * Pick the single "best choice" model from the displayed results.
+ * Returns { id, isInstruct } so the banner subtitle reflects the actual reason.
+ * Criteria (in priority order):
+ *   1. Fits in total RAM (perfect or good) — hardware-safe
+ *   2. Is an Instruct / Chat model (useful for typical Q&A usage)
+ *   3. Isn't a tiny embed/tokenizer stub (size_gb > 0.5 or not detectable)
+ *   4. Among qualifying candidates, the one with the most downloads
+ *
+ * Falls back to best fit-only match if no instruct models qualify.
+ */
+const recommended = computed((): { id: string; isInstruct: boolean } | null => {
+  const fits = displayedSearchResults.value.filter(r =>
+    (r.fit_level === 'perfect' || r.fit_level === 'good') &&
+    (r.size_gb == null || r.size_gb > 0.5),
+  )
+  if (fits.length === 0) return null
+
+  const instructPool = fits.filter(r =>
+    /instruct|chat|assistant/.test(r.id.toLowerCase()),
+  )
+  const isInstruct = instructPool.length > 0
+  const pool = isInstruct ? instructPool : fits
+  const best = pool.reduce((a, r) => (r.downloads > a.downloads ? r : a))
+  return { id: best.id, isInstruct }
+})
+
 async function doSearch() {
   sortCol.value = 'last_modified'
   sortDir.value = 'desc'
@@ -557,6 +584,8 @@ watch(activeTab, (tab) => {
           :fit_level="r.fit_level"
           :last_modified="r.last_modified"
           :total_ram_gb="serverStore.memory?.total_gb ?? 0"
+          :available_ram_gb="serverStore.memory?.available_gb ?? 0"
+          :is_recommended="r.id === recommended?.id"
           @download="handleDownload(r.id)"
         />
         <div v-if="modelsStore.searchHasMore" class="load-more-row">
