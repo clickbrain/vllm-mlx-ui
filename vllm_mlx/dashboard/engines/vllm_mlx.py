@@ -139,7 +139,11 @@ class VllmMlxEngine(BaseEngine):
             add_if_supported(cmd, probe, "--stream-interval", [str(config["stream_interval"])])
         if config.get("mllm"):
             add_if_supported(cmd, probe, "--mllm")
-        if config.get("trust_remote_code"):
+        # Check per-model trust_remote_code first, fall back to global default
+        model_id = config.get("model", "")
+        model_settings = config.get("model_settings", {})
+        per_model = model_settings.get(model_id, {}).get("trust_remote_code")
+        if per_model or (per_model is None and config.get("trust_remote_code")):
             add_if_supported(cmd, probe, "--trust-remote-code")
         if config.get("embedding_model"):
             add_if_supported(cmd, probe, "--embedding-model", [config["embedding_model"]])
@@ -190,6 +194,15 @@ class VllmMlxEngine(BaseEngine):
             return __version__
         except Exception:
             return None
+
+    def upgrade_command(self) -> list[str] | None:
+        """Upgrade the vllm-mlx pip package when the global upgrade runs.
+
+        The engine is marked as "bundled" for UI purposes (no separate
+        Install/Uninstall buttons), but it's actually a pip-installable
+        package that must be upgraded independently of vllm-mlx-ui.
+        """
+        return [sys.executable, "-m", "pip", "install", "--upgrade", "vllm-mlx"]
 
     def config_schema(self) -> list[dict[str, Any]]:
         # vllm-mlx settings are managed via the common settings panel in SettingsView.

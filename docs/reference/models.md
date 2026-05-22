@@ -24,9 +24,11 @@ Browse thousands of pre-optimized models at: **https://huggingface.co/mlx-commun
 | Use Case | Model | Memory |
 |----------|-------|--------|
 | Fast/Light | `mlx-community/Qwen3-0.6B-8bit` | ~0.7 GB |
-| Balanced | `mlx-community/Llama-3.2-3B-Instruct-4bit` | ~1.8 GB |
-| Quality | `mlx-community/Llama-3.1-8B-Instruct-4bit` | ~4.5 GB |
+| Efficient | `mlx-community/Qwen3-4B-4bit` | ~2.5 GB |
+| Balanced | `mlx-community/Qwen3-8B-4bit` | ~4.9 GB |
+| Quality | `mlx-community/Qwen3-14B-4bit` | ~8.5 GB |
 | Large | `mlx-community/Qwen3-30B-A3B-4bit` | ~16 GB |
+| Maximum | `mlx-community/Qwen3-32B-4bit` | ~20 GB |
 
 ## Multimodal Models (via mlx-vlm)
 
@@ -91,9 +93,38 @@ vllm-mlx serve /path/to/local/model
 
 ## Finding Models
 
-Filter mlx-community models by:
-- **LLM**: `Llama`, `Qwen`, `Mistral`, `Phi`, `Gemma`, `DeepSeek`, `GLM`, `Kimi`, `Granite`, `Nemotron`
-- **VLM**: `-VL-`, `llava`, `paligemma`, `pixtral`, `molmo`, `idefics`, `deepseek-vl`, `MedGemma`
-- **Embedding**: `e5`, `bert`, `ModernBERT`
-- **Size**: `1B`, `3B`, `7B`, `8B`, `70B`
-- **Quantization**: `4bit`, `8bit`, `bf16`
+The **Find** tab in the Models section searches HuggingFace for MLX-compatible models and helps you pick the best one for your hardware and goals.
+
+### Best Choice Scoring
+
+The dashboard automatically evaluates every model in your search results and awards **Best For** badges in four categories: Chat, Code, Reasoning, and Vision. Each badge is backed by a multi-signal scoring algorithm:
+
+| Signal | Weight | Source |
+|--------|--------|--------|
+| Name/tag affinity | 35% | Does the model name signal this use case? |
+| Benchmark quality | 30% | MMLU, HumanEval, MATH, GPQA, IFEval |
+| Recency | 25% | Publish date — hard-excluded beyond Max Age |
+| Hardware utilization | 10% | Peaks at 55–72% of your total RAM |
+| Popularity | 10% | Log-scaled download count |
+
+Models older than the **Max Age** cutoff (default: 18 months) are hard-excluded from badges. See [Best Choice Scoring](model-scoring.md) for the full algorithm.
+
+### RAM Fit
+
+Each model card shows a fit indicator based on your total unified memory:
+
+| Status | RAM fill | Meaning |
+|--------|---------|---------|
+| 🟢 Perfect | 55–85% | Optimal — good capability with safe headroom |
+| 🟡 Good | 30–55% | Works, but underutilizes your hardware |
+| 🟠 Marginal | 85–92% | Fits but leaves minimal headroom |
+| 🔴 Too large | > 92% | Likely out-of-memory |
+
+A yellow inline warning appears when a model would fit your total RAM but cannot load right now because insufficient free memory is available.
+
+### Filter by Use Case
+
+The **💬 Chat / 💻 Code / 🧠 Reasoning / 🖼️ Vision** pills re-fetch results with use-case-specific queries and focus scoring on the selected category.
+
+---
+

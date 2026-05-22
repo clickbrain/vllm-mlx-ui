@@ -1,5 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.7.9 — 2026-06-12
+
+### Added
+- **Per-model Trust Remote Code** — A "Trust code" toggle on the Serve page lets you enable `--trust-remote-code` for a specific model without affecting the global setting. Per-model overrides are stored in config and checked first; the global setting acts as fallback. The global setting description in Settings now explains it is a fallback with per-model overrides available on the Serve page.
+- **vllm-mlx engine upgrade** — The vllm-mlx engine now provides an `upgrade_command()` that runs `pip install --upgrade vllm-mlx` when "Check for Updates" triggers a full upgrade.
+- **Advisor contextual empty state** — The Advisor tab now shows a contextual message when the server is not running ("Start the inference server on the Serve page first"), when no models are selected, or when ready to run — instead of a single generic prompt.
+- **Documentation** — New `docs/reference/model-scoring.md` documents the full Best Choice scoring algorithm (5 signals, weights, hard exclusion rules, badge reason format). `docs/dashboard/user-guide.md` rewritten to cover all v0.7.1–v0.7.9 features. `docs/index.md` Key Features list updated with all current capabilities. `docs/reference/models.md` recommended models updated to Qwen3 series; new Finding Models section with RAM fit table and use-case filter explanation.
+
 ## v0.7.8 — 2026-06-12
 
 ### Fixed

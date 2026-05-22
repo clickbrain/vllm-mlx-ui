@@ -138,6 +138,8 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "stream_interval": 1,
     "mllm": False,
     "trust_remote_code": False,
+    # Per-model settings overrides (e.g. {"model_id": {"trust_remote_code": true}})
+    "model_settings": {},
     "embedding_model": "",
     "rerank_model": "",
     "enable_metrics": False,

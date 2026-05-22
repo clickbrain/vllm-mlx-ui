@@ -325,6 +325,34 @@ def set_mgmt_key(data: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
     return {"ok": True}
 
 
+@app.post("/config/model-settings")
+def set_model_settings(data: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
+    """Set per-model settings for a specific model.
+
+    Expects: ``{"model_id": "...", "settings": {"trust_remote_code": true}}``
+    Merges with any existing per-model settings for that model.
+    """
+    model_id = str(data.get("model_id", "")).strip()
+    settings = data.get("settings", {})
+    if not model_id:
+        raise HTTPException(status_code=400, detail="model_id is required")
+    cfg = sm.load_config()
+    model_settings = dict(cfg.get("model_settings", {}))
+    existing = dict(model_settings.get(model_id, {}))
+    existing.update(settings)
+    model_settings[model_id] = existing
+    cfg["model_settings"] = model_settings
+    sm.save_config(cfg)
+    return {"ok": True}
+
+
+@app.get("/config/model-settings/{model_id:path}")
+def get_model_settings(model_id: str, _: None = Depends(_check_auth)) -> dict:
+    """Return per-model settings for the given model (or empty dict)."""
+    cfg = sm.load_config()
+    return cfg.get("model_settings", {}).get(model_id, {})
+
+
 # ── Models ────────────────────────────────────────────────────────────────────
 
 @app.get("/models/cached")

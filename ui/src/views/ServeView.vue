@@ -54,6 +54,30 @@ const selectedEngineInfo = computed(() =>
 )
 const fixedModelDisplay = computed(() => selectedEngineInfo.value?.fixed_model_display ?? null)
 
+// Per-model trust_remote_code toggle
+const perModelTrust = ref(false)
+const perModelTrustLoading = ref(false)
+async function loadModelSettings() {
+  const modelId = serverStore.modelId
+  if (!modelId) { perModelTrust.value = false; return }
+  perModelTrustLoading.value = true
+  try {
+    const settings = await api.get<Record<string, boolean>>(`/config/model-settings/${encodeURIComponent(modelId)}`)
+    perModelTrust.value = settings.trust_remote_code ?? false
+  } catch { /* fall back to global */ }
+  finally { perModelTrustLoading.value = false }
+}
+watch(() => serverStore.modelId, (id) => { if (id) loadModelSettings() })
+async function togglePerModelTrust() {
+  const modelId = serverStore.modelId
+  if (!modelId) return
+  const newVal = !perModelTrust.value
+  perModelTrust.value = newVal
+  try {
+    await api.post('/config/model-settings', { model_id: modelId, settings: { trust_remote_code: newVal } })
+  } catch { /* revert handled by next load */ }
+}
+
 async function fetchEngines() {
   try {
     const r = await api.get<{ engines: EngineInfo[] }>('/engines')
@@ -351,6 +375,12 @@ async function doClearCache(type: string) {
             </template>
           </div>
         </div>
+
+        <!-- Per-model trust remote code -->
+        <label v-if="serverStore.modelId && !fixedModelDisplay" class="trust-model-toggle" title="Override Trust Remote Code for this model">
+          <input type="checkbox" :checked="perModelTrust" :disabled="perModelTrustLoading" @change="togglePerModelTrust" />
+          <span class="trust-toggle-label">Trust code</span>
+        </label>
 
         <!-- Apply & Restart when engine changes -->
         <AppButton
@@ -826,6 +856,23 @@ async function doClearCache(type: string) {
 }
 
 .model-select:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.trust-model-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.trust-model-toggle input[type="checkbox"] {
+  accent-color: var(--ac-500, #5b6ad0);
+  cursor: pointer;
+}
+.trust-toggle-label {
+  font-size: 12px;
+  color: var(--tx-secondary);
+}
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .picker-spinner {

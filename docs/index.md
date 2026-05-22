@@ -14,14 +14,19 @@ vllm-mlx provides high-performance local AI inference with a unified API. Primar
 
 ## Key Features
 
-- **Multimodal** - Text, Image, Video & Audio in one platform
-- **Native GPU acceleration** on Apple Silicon (M1–M4); additional inference backends for other platforms
-- **Native TTS voices** - Spanish, French, Chinese, Japanese + 5 more languages
-- **OpenAI API compatible** - drop-in replacement for OpenAI client
-- **Embeddings** - OpenAI-compatible `/v1/embeddings` endpoint
-- **MCP Tool Calling** - integrate external tools via Model Context Protocol
-- **Paged KV Cache** - memory-efficient caching with prefix sharing
-- **Continuous Batching** - high throughput for multiple concurrent users
+- **Model Finder** — search HuggingFace, filter by RAM fit, use-case, and age; multi-signal Best Choice scoring picks the right model for your hardware
+- **Multimodal** — Text, Image, Video & Audio in one platform
+- **Native GPU acceleration** on Apple Silicon (M1–M5); additional inference backends for other platforms
+- **Native TTS voices** — Spanish, French, Chinese, Japanese + 5 more languages
+- **OpenAI API compatible** — drop-in replacement for OpenAI client
+- **Embeddings** — OpenAI-compatible `/v1/embeddings` endpoint
+- **MCP Tool Calling** — integrate external tools via Model Context Protocol
+- **Paged KV Cache** — memory-efficient caching with prefix sharing
+- **Continuous Batching** — high throughput for multiple concurrent users
+- **Quality Benchmarks** — GSM8K, MMLU, HumanEval, MATH, IFEval with confidence intervals
+- **Benchmarks Advisor** — runs targeted benchmarks and ranks models for your specific use case
+- **Chat persistence** — conversation history saved locally across restarts
+- **Multi-engine support** — vllm-mlx, rapid-mlx, Ollama, llama.cpp, DeepSeek ds4
 
 ## Quick Links
 
@@ -47,6 +52,7 @@ vllm-mlx provides high-performance local AI inference with a unified API. Primar
 - [CLI Commands](reference/cli.md)
 - [Supported Models](reference/models.md)
 - [Configuration](reference/configuration.md)
+- [Best Choice Scoring](reference/model-scoring.md)
 
 ### Benchmarks
 - [LLM Benchmarks](benchmarks/llm.md)
@@ -60,7 +66,7 @@ vllm-mlx provides high-performance local AI inference with a unified API. Primar
 
 ## Requirements
 
-- **Apple Silicon (M1/M2/M3/M4)** — full MLX acceleration (recommended)
+- **Apple Silicon (M1/M2/M3/M4/M5)** — full MLX acceleration (recommended)
 - **Linux / Windows** — supported via alternative inference backends
 - Python 3.10+
 - 8GB+ RAM recommended

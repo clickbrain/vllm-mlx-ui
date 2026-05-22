@@ -838,8 +838,8 @@ async function doRestart() {
               Some HuggingFace models (certain Qwen, Phi, and custom architectures) ship custom Python
               tokenizer or model code that must execute locally. Enabling this allows that code to run.
               <strong class="warn-inline">⚠ Only enable for models you explicitly trust</strong> — malicious
-              model code can access your file system and network. Applies to all loaded models; there is no
-              per-model toggle.
+              model code can access your file system and network. This is a global fallback — set per-model
+              overrides on the Serve page.
             </span>
           </div>
           <label class="toggle">

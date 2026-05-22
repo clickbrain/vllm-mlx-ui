@@ -2107,7 +2107,15 @@ watch(activeTab, (tab) => {
                 <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
               </svg>
             </div>
-            <p>Select a task type and models, then click <strong>Analyse Models</strong> to run targeted benchmarks and get a recommendation.</p>
+            <template v-if="!serverStore.isRunning">
+              <p>Start the inference server on the <strong>Serve</strong> page, then return here to analyse models.</p>
+            </template>
+            <template v-else-if="advisorModels.length === 0">
+              <p>Select one or more models on the left, then click <strong>Analyse Models</strong>.</p>
+            </template>
+            <template v-else>
+              <p>Select a task type and models, then click <strong>Analyse Models</strong> to run targeted benchmarks and get a recommendation.</p>
+            </template>
             <div class="cs-tags">
               <span class="cs-tag">Quality scores</span>
               <span class="cs-tag">Speed measurement</span>
