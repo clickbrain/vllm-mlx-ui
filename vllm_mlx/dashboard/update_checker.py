@@ -416,7 +416,9 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
     try:
         from vllm_mlx.dashboard.engines.registry import ENGINES
         for _engine in list(ENGINES.values()):
-            # vllm-mlx is bundled and already handled by _check_vllm above.
+            # vllm-mlx is already checked by _check_vllm above — skip duplicate
+            if _engine.id == "vllm-mlx":
+                continue
             if _engine.install_method == "bundled":
                 continue
             # Only report on engines the user has actually installed.

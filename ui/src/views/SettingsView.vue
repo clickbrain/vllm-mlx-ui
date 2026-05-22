@@ -31,6 +31,18 @@ const formError = ref('')
 const confirmRemove = ref<Machine | null>(null)
 const settingsError = ref('')
 
+// Simple semver comparison — returns true when a > b
+function semverGt(a: string, b: string): boolean {
+  const pa = a.replace(/^v/, '').split('.').map(Number)
+  const pb = b.replace(/^v/, '').split('.').map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] ?? 0, nb = pb[i] ?? 0
+    if (na > nb) return true
+    if (na < nb) return false
+  }
+  return false
+}
+
 // ── Inference engine management ────────────────────────────────────────────
 interface EngineInfo {
   id: string
@@ -602,6 +614,13 @@ async function doRestart() {
               size="sm"
               @click.stop="saveEngineAndRestart()"
             >{{ eng.id !== serverStore.engineId ? 'Save & Restart' : 'Restart' }}</AppButton>
+            <AppButton
+              v-if="eng.installed && eng.version && eng.latest_version && semverGt(eng.latest_version, eng.version)"
+              variant="primary"
+              size="sm"
+              :loading="installingEngine === eng.id"
+              @click.stop="installEngine(eng.id)"
+            >⬆ Update</AppButton>
             <AppButton
               v-if="!eng.installed && eng.install_method !== 'bundled' && !(eng.requirements_errors && eng.requirements_errors.length)"
               variant="primary"

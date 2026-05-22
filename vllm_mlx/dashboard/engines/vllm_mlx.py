@@ -50,8 +50,11 @@ class VllmMlxEngine(BaseEngine):
         "ssd_cache",
         "auto_model_switch",
     })
-    # vllm-mlx ships bundled inside this package — cannot be installed separately.
-    install_method: ClassVar[str] = "bundled"
+    # vllm-mlx is a separate pip package from waybarrios/vllm-mlx.
+    # Even though it ships as a hard dependency of vllm-mlx-ui, treating it as
+    # "pip" ensures the global upgrade flow and per-engine latest-version check
+    # update it independently from the dashboard package itself.
+    install_method: ClassVar[str] = "pip"
 
     # ── BaseEngine implementation ─────────────────────────────────────────────
 
@@ -195,14 +198,9 @@ class VllmMlxEngine(BaseEngine):
         except Exception:
             return None
 
-    def upgrade_command(self) -> list[str] | None:
-        """Upgrade the vllm-mlx pip package when the global upgrade runs.
-
-        The engine is marked as "bundled" for UI purposes (no separate
-        Install/Uninstall buttons), but it's actually a pip-installable
-        package that must be upgraded independently of vllm-mlx-ui.
-        """
-        return [sys.executable, "-m", "pip", "install", "--upgrade", "vllm-mlx"]
+    def get_package_name(self) -> str:
+        """The vllm-mlx engine lives on PyPI under the ``vllm-mlx`` package."""
+        return "vllm-mlx"
 
     def config_schema(self) -> list[dict[str, Any]]:
         # vllm-mlx settings are managed via the common settings panel in SettingsView.

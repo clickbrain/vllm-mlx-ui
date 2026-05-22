@@ -1,5 +1,10 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.1 — 2026-05-22
+
+### Fixed
+- **vllm-mlx engine now updates correctly** — Changed `install_method` from `"bundled"` to `"pip"` so the engine is included in the global upgrade flow and its `latest_version()` check works. Added `get_package_name()` override for correct PyPI package name. Added an "⬆ Update" button on the engine card when a newer version is available (clicking it runs `pip install --upgrade vllm-mlx`).
+
 ## v0.8.0 — 2026-06-12
 
 ### Added
