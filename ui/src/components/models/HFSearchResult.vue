@@ -170,7 +170,7 @@ const capabilityTags = computed(() => {
       </div>
 
       <!-- Fit gauge: model size vs total RAM bar -->
-      <div v-if="sizeLabel && fitInfo" class="fit-gauge-row">
+      <div v-if="hasSizeEstimate && fitInfo" class="fit-gauge-row">
         <div class="fit-gauge-track">
           <div
             class="fit-gauge-fill"
@@ -183,7 +183,7 @@ const capabilityTags = computed(() => {
           <span class="fit-tag" :style="{ color: fitInfo.color }">{{ fitInfo.label }}</span>
         </div>
       </div>
-      <div v-else-if="sizeLabel" class="fit-gauge-row">
+      <div v-else-if="hasSizeEstimate && !fitInfo" class="fit-gauge-row">
         <div class="fit-gauge-track">
           <div class="fit-gauge-fill fit-gauge-unknown" style="width: 30%" />
         </div>

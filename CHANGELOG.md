@@ -1,5 +1,22 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.7.7 — 2026-05-23
+
+### Model Finder — Bug Fixes
+
+- **Use-case pills now work** — clicking Chat / Code / Reasoning / Vision now sends a use-case-specific search query to HuggingFace (`instruct`, `code`, `thinking`, `vision`). Previously the Chat pill sent an empty string, making results identical to the initial load and appearing broken
+- **Search input stays in sync** — when a use-case pill is clicked, the search box updates to reflect the active query so that subsequent sort or filter operations use the correct base query
+- **Refresh indicator** — a subtle animated bar now appears while results are being refreshed (e.g. after clicking a use-case pill), so users get immediate visual feedback instead of a silent wait
+- **"Unknown fit" gauge hidden for models without size data** — the RAM fit bar now only renders when the model size is actually known; previously `—` (a truthy string) caused every unsized model to show a gray "Unknown fit" bar
+- **Backend sort fallback** — the HuggingFace sort parameter now falls back to `downloads` when an unrecognised sort value is passed, instead of `lastModified`
+
+### Model Finder — Size Estimation Improvements
+
+- Added `Mistral NeMo` (12B) to the known-sizes table — the name contains no explicit B count so size was previously unknown
+- Added `Codestral Mamba` (7.3B) and `Codestral` (22B) — no B count in base model names
+- Added `DeepSeek V3` (671B) — the V3 model ID contains a date stamp (`-0324`) not a B count; now correctly shows "Too large" on most hardware
+- All distilled variants (e.g. `DeepSeek-R1-0528-7B`) still parse via regex and are unaffected by the above entries
+
 ## v0.7.6 — 2026-05-22
 
 ### Serve Page — Status Hero & Empty State

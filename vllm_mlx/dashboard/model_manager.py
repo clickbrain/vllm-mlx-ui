@@ -699,12 +699,14 @@ def estimate_size_from_name(model_id: str) -> float | None:
     # Known model sizes by name fragment (lookup table for models whose names
     # don't follow the standard NB convention — e.g. "mini", "nano", "small").
     _KNOWN_SIZES: list[tuple[str, float]] = [
+        # Phi family (no explicit B count in name)
         ("phi-4-mini",       3.8),
         ("phi-3-mini",       3.8),
         ("phi-3.5-mini",     3.8),
         ("phi-3-small",      7.0),
         ("phi-3-medium",    14.0),
         ("phi-4",           14.0),
+        # Gemma (numbers are versions, not param counts)
         ("gemma-2b",         2.0),
         ("gemma-7b",         7.0),
         ("gemma-2-2b",       2.6),
@@ -716,12 +718,14 @@ def estimate_size_from_name(model_id: str) -> float | None:
         ("gemma-3-27b",     27.0),
         ("gemma-3n-e2b",     2.0),
         ("gemma-3n-e4b",     4.0),
+        # SmolLM (sizes in fragment name are in millions, not B)
         ("smollm2-135m",     0.14),
         ("smollm2-360m",     0.36),
         ("smollm2-1.7b",     1.7),
         ("smollm-135m",      0.14),
         ("smollm-360m",      0.36),
         ("smollm-1.7b",      1.7),
+        # Qwen3 (no B count in base name variants)
         ("qwen3-0.6b",       0.6),
         ("qwen3-1.7b",       1.7),
         ("qwen3-4b",         4.0),
@@ -729,6 +733,13 @@ def estimate_size_from_name(model_id: str) -> float | None:
         ("qwen3-14b",       14.0),
         ("qwen3-30b",       30.0),
         ("qwen3-32b",       32.0),
+        # Mistral (marketing names without explicit B count)
+        ("mistral-nemo",    12.0),
+        # Codestral — more specific variant BEFORE the general entry
+        ("codestral-mamba",  7.3),
+        ("codestral",       22.0),
+        # DeepSeek V3 — 671B MoE; all V3 variants are this size; shows "Too large" correctly
+        ("deepseek-v3",    671.0),
     ]
     for fragment, param_b_lookup in _KNOWN_SIZES:
         if fragment in name:
@@ -902,7 +913,7 @@ def search_hf_models(
         "likes": "likes",
         "last_modified": "lastModified",
     }
-    hf_sort = hf_sort_map.get(sort, "lastModified")
+    hf_sort = hf_sort_map.get(sort, "downloads")
 
     # Normalize direction: accept "asc"/"desc" or "1"/"-1"
     hf_direction = "1" if direction in ("asc", "1") else "-1"

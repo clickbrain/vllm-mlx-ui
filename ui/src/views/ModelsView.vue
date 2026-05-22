@@ -272,7 +272,7 @@ watch(() => serverStore.crashLog, (log) => {
 
 // When the use-case filter changes, auto-search with use-case-specific terms
 const USE_CASE_QUERY: Record<string, string> = {
-  chat:      '',
+  chat:      'instruct',
   code:      'code',
   reasoning: 'thinking',
   vision:    'vision',
@@ -282,6 +282,8 @@ watch(selectedUseCase, (uc) => {
   sortCol.value = 'downloads'
   sortDir.value = 'desc'
   filtersPending.value = false
+  // Keep searchInput in sync so sort/filter/loadMore use the same base query
+  searchInput.value = query
   modelsStore.searchHF(query, true, 0, 'downloads', false, 100, 'desc').then(() => {
     modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
   })
@@ -637,10 +639,16 @@ watch(activeTab, (tab) => {
         <button class="error-dismiss" @click="modelsStore.actionError = null">✕</button>
       </div>
 
-      <!-- Loading -->
+      <!-- Loading: first load (no results yet) -->
       <div v-if="modelsStore.searching && !modelsStore.searchResults.length" class="empty-state">
         <div class="spinner" />
         <span class="empty-label">Searching HuggingFace…</span>
+      </div>
+
+      <!-- Loading: refresh while results are already showing -->
+      <div v-else-if="modelsStore.searching && modelsStore.searchResults.length > 0" class="search-refresh-bar" aria-live="polite">
+        <div class="spinner-xs" />
+        <span>{{ selectedUseCase ? `Finding best ${selectedUseCase} models…` : 'Updating results…' }}</span>
       </div>
 
       <!-- Best Choice Elevated Section -->
@@ -1379,6 +1387,31 @@ watch(activeTab, (tab) => {
   border-top-color: var(--si-500);
   border-radius: 50%;
   animation: spin .6s linear infinite;
+}
+
+/* Small inline spinner used in the refresh bar */
+.spinner-xs {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--bd-emphasis);
+  border-top-color: var(--si-500);
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Shown when results are refreshing (not a full empty-state) */
+.search-refresh-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--tx2);
+  background: color-mix(in srgb, var(--si-500) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--si-500) 18%, transparent);
+  border-radius: var(--r-sm);
+  margin-bottom: var(--space-2);
 }
 
 /* Virtual scroller wrapper fills remaining space */
