@@ -1,6 +1,17 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.7.5 — 2026-05-22
+## v0.7.6 — 2026-05-22
+
+### Serve Page — Status Hero & Empty State
+- **Running hero** — when a server is running, a prominent banner now appears below the page header showing the active model name, engine badge, Tok/s, uptime, and free RAM at a glance
+- **Empty state** — when no model is configured, the Serve page now shows an inviting CTA with a "Browse Models →" link instead of a blank layout
+- **Engine-aware endpoints** — the Connection Info endpoint table now adapts to the active engine: Embeddings only shown for engines that support it (`vllm-mlx`, `rapid-mlx`, `Ollama`); ds4 engine shows its additional `/v1/responses` and `/v1/messages` endpoints
+
+### Model Finder — Polish
+- **Fit size note** — model cards with a size estimate now show "Estimated — actual usage varies by model architecture" below the RAM gauge
+
+### Navigation
+- **Chat moved below Benchmarks** — nav order is now Serve → Models → Benchmarks → Chat → Settings, reflecting that Serve and Models are the core workflow; Chat is a secondary tool
 
 ### Model Finder — Bug Fixes
 - **Fix: Use-case pills now trigger search** — Clicking a use-case pill (Chat / Code / Reasoning / Vision) now automatically re-fetches HuggingFace results sorted by downloads using use-case-specific query terms (`code`, `thinking`, `vision`). Previously, clicking a pill did nothing because `bestChoices` scored a stale pool of recently-updated obscure models.

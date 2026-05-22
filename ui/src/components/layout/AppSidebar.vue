@@ -207,19 +207,19 @@ async function doShutdown() {
         <span>Models</span>
       </RouterLink>
 
+      <RouterLink to="/benchmarks" class="nav-item" :class="{ active: isActive('/benchmarks') }" :aria-current="isActive('/benchmarks') ? 'page' : undefined">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
+          <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
+        </svg>
+        <span>Benchmarks</span>
+      </RouterLink>
+
       <RouterLink to="/chat" class="nav-item" :class="{ active: isActive('/chat') }" data-tour="chat">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd" />
           <path d="M15 7h1a2 2 0 012 2v5.5a.5.5 0 01-.5.5H15V7z" />
         </svg>
         <span>Chat</span>
-      </RouterLink>
-
-      <RouterLink to="/benchmarks" class="nav-item" :class="{ active: isActive('/benchmarks') }" :aria-current="isActive('/benchmarks') ? 'page' : undefined">
-        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
-          <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
-        </svg>
-        <span>Benchmarks</span>
       </RouterLink>
 
       <RouterLink to="/settings" class="nav-item" :class="{ active: isActive('/settings') }" data-tour="settings">

@@ -33,6 +33,7 @@ interface EngineInfo {
   name: string
   installed: boolean
   fixed_model_display?: string | null
+  capabilities?: string[]
 }
 
 interface NetworkInterface {
@@ -214,17 +215,54 @@ function connectionUrl(ip: string) {
   return `http://${ip}:${serverPort.value}/v1`
 }
 
-const OPENAI_PATHS = [
-  { tag: 'Base URL',         path: '/v1' },
-  { tag: 'Chat',             path: '/v1/chat/completions' },
-  { tag: 'Completions',      path: '/v1/completions' },
-  { tag: 'Models',           path: '/v1/models' },
-  { tag: 'Embeddings',       path: '/v1/embeddings' },
+// ── Running status hero ───────────────────────────────────────────────────────
+const showHero = computed(() => serverStore.isRunning)
+const showEmptyState = computed(() =>
+  serverStore.config !== null &&
+  !serverStore.isRunning &&
+  !serverStore.modelId &&
+  !serverStore.loading
+)
+
+// Use the engine that IS running (not the picker selection, which may differ)
+const activeEngineInfo = computed(() =>
+  engines.value.find(e => e.id === serverStore.engineId) ?? null
+)
+const activeCaps = computed(() => new Set(activeEngineInfo.value?.capabilities ?? []))
+
+const heroModelName = computed(() =>
+  serverStore.modelId ??
+  activeEngineInfo.value?.fixed_model_display ??
+  'Unknown model'
+)
+
+// ── Engine-aware endpoints ────────────────────────────────────────────────────
+const BASE_PATHS = [
+  { tag: 'Base URL',    path: '/v1' },
+  { tag: 'Chat',        path: '/v1/chat/completions' },
+  { tag: 'Completions', path: '/v1/completions' },
+  { tag: 'Models',      path: '/v1/models' },
 ]
+
+const engineEndpointPaths = computed(() => {
+  const paths = [...BASE_PATHS]
+  if (activeCaps.value.has('embedding')) {
+    paths.push({ tag: 'Embeddings', path: '/v1/embeddings' })
+  }
+  if (serverStore.engineId?.startsWith('ds4')) {
+    paths.push({ tag: 'Responses (OpenAI)', path: '/v1/responses' })
+    paths.push({ tag: 'Messages (Claude)',  path: '/v1/messages' })
+  }
+  // Fall back to showing all common paths if engines haven't loaded yet
+  if (!engines.value.length) {
+    paths.push({ tag: 'Embeddings', path: '/v1/embeddings' })
+  }
+  return paths
+})
 
 function openAiEndpoints(ip: string) {
   const base = `http://${ip}:${serverPort.value}`
-  return OPENAI_PATHS.map(ep => ({ tag: ep.tag, path: ep.path, url: base + ep.path }))
+  return engineEndpointPaths.value.map(ep => ({ tag: ep.tag, path: ep.path, url: base + ep.path }))
 }
 
 function proxyEndpoints(ip: string) {
@@ -356,6 +394,44 @@ async function doClearCache(type: string) {
         <button class="error-dismiss" @click="serverStore.crashLog = null">✕</button>
       </div>
       <pre class="crash-log">{{ crashLogTail }}</pre>
+    </div>
+
+    <!-- Empty state: no model configured yet -->
+    <div v-if="showEmptyState" class="serve-empty">
+      <div class="serve-empty-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
+          <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35"/>
+          <path d="M8 11h6M11 8v6" />
+        </svg>
+      </div>
+      <h2 class="serve-empty-title">No model loaded</h2>
+      <p class="serve-empty-desc">Find and download a model to get started. The Model Finder scores models for your hardware and use case.</p>
+      <RouterLink to="/models" class="serve-empty-cta">Browse Models →</RouterLink>
+    </div>
+
+    <!-- Running hero: confirms what's active when server is up -->
+    <div v-if="showHero" class="serve-hero">
+      <div class="hero-model">
+        <span class="hero-model-label">Running</span>
+        <span class="hero-model-name" :title="heroModelName">{{ heroModelName.split('/').pop() }}</span>
+        <span class="hero-engine-badge">{{ serverStore.engineId }}</span>
+      </div>
+      <div class="hero-stats">
+        <div class="hero-stat">
+          <span class="hero-stat-value">{{ tps }}</span>
+          <span class="hero-stat-label">Tok/s</span>
+        </div>
+        <div class="hero-stat-divider" />
+        <div class="hero-stat">
+          <span class="hero-stat-value">{{ uptime }}</span>
+          <span class="hero-stat-label">Uptime</span>
+        </div>
+        <div class="hero-stat-divider" />
+        <div class="hero-stat">
+          <span class="hero-stat-value">{{ memAvailable }}</span>
+          <span class="hero-stat-label">GB free</span>
+        </div>
+      </div>
     </div>
 
     <!-- Live metrics — shown first so server state is immediately visible -->
@@ -1018,4 +1094,140 @@ async function doClearCache(type: string) {
   border-radius: var(--r-md);
   padding: var(--space-3);
 }
+
+/* Empty state: no model configured */
+.serve-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-6);
+  text-align: center;
+  border: 1px dashed var(--bd-emphasis);
+  border-radius: var(--r-xl);
+  background: var(--bg-elevated);
+}
+.serve-empty-icon {
+  color: var(--tx-muted);
+  opacity: 0.6;
+}
+.serve-empty-title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--tx-primary);
+  margin: 0;
+}
+.serve-empty-desc {
+  font-size: 15px;
+  color: var(--tx-secondary);
+  max-width: 420px;
+  line-height: 1.55;
+  margin: 0;
+}
+.serve-empty-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 9px 20px;
+  background: var(--si-500);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--r-md);
+  text-decoration: none;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+.serve-empty-cta:hover {
+  background: var(--si-600, var(--si-500));
+  transform: translateY(-1px);
+}
+.serve-empty-cta:focus-visible {
+  outline: 2px solid var(--si-500);
+  outline-offset: 3px;
+}
+
+/* Running hero */
+.serve-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  background: color-mix(in srgb, var(--si-500) 8%, var(--bg-elevated));
+  border: 1px solid color-mix(in srgb, var(--si-500) 25%, var(--bd-default));
+  border-radius: var(--r-xl);
+  flex-wrap: wrap;
+}
+.hero-model {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.hero-model-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--ph-400);
+  white-space: nowrap;
+}
+.hero-model-name {
+  font-size: 15px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--tx-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 360px;
+}
+.hero-engine-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-pill);
+  color: var(--tx-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.hero-stats {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+.hero-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.hero-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--tx-primary);
+  line-height: 1;
+}
+.hero-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--tx-muted);
+}
+.hero-stat-divider {
+  width: 1px;
+  height: 32px;
+  background: var(--bd-subtle);
+}
+@media (max-width: 640px) {
+  .serve-hero { flex-direction: column; align-items: flex-start; }
+  .hero-model-name { max-width: 240px; }
+}
+
 </style>

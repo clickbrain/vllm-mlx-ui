@@ -88,9 +88,9 @@ const availableWarning = computed(() => {
   return `${free.toFixed(1)} GB free now — close apps to load`
 })
 
-const hasBadges = computed(() => props.badges && props.badges.length > 0)
+const hasSizeEstimate = computed(() => props.size_gb != null)
 
-/** Extract human-readable capability tags from model ID and HF tags */
+const hasBadges = computed(() => props.badges && props.badges.length > 0)
 const capabilityTags = computed(() => {
   const id = props.id.toLowerCase()
   const hfTags = props.tags.map(t => t.toLowerCase())
@@ -198,6 +198,9 @@ const capabilityTags = computed(() => {
         <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12" class="warn-icon"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.75 4h1.5v4.5h-1.5V5zm0 5.5h1.5V12h-1.5v-1.5z"/></svg>
         {{ availableWarning }}
       </div>
+
+      <!-- Size estimate caveat -->
+      <p v-if="hasSizeEstimate" class="fit-note">Estimated — actual usage varies by model architecture.</p>
 
       <!-- Metadata row: downloads, likes, date -->
       <div class="result-meta">
@@ -386,6 +389,13 @@ const capabilityTags = computed(() => {
   font-family: var(--font-mono);
 }
 .warn-icon { flex-shrink: 0; opacity: 0.8; }
+
+.fit-note {
+  font-size: 11.5px;
+  color: var(--tx-muted);
+  margin: 0;
+  font-style: italic;
+}
 
 /* Meta row */
 .result-meta {
