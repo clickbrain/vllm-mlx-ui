@@ -64,10 +64,21 @@ export const useCommandPaletteStore = defineStore('commandPalette', () => {
       category: 'nav',
       action: () => router.push('/settings')
     },
+    {
+      id: 'nav-find-models',
+      label: 'Find Models',
+      icon: '🔍',
+      category: 'nav',
+      action: () => router.push('/models?tab=find')
+    },
     // Server actions
     {
       id: 'server-start',
-      label: serverStore.isRunning ? 'Restart Server' : 'Start Server',
+      label: serverStore.isRunning
+        ? `Restart Server (${serverStore.engineId ?? 'engine'})`
+        : serverStore.modelId
+          ? `Start Server — ${serverStore.modelId.split('/').pop()}`
+          : 'Start Server',
       icon: '▶️',
       category: 'server',
       action: () => serverStore.toggleServer()
@@ -80,7 +91,25 @@ export const useCommandPaletteStore = defineStore('commandPalette', () => {
       action: () => serverStore.stopServer(),
       shortcut: 'Mod+Shift+S'
     },
-    // Models
+    {
+      id: 'server-release-memory',
+      label: 'Release Memory',
+      icon: '↺',
+      category: 'server',
+      action: () => serverStore.releaseMemory()
+    },
+    // Loaded models — quick switch
+    ...modelsStore.models.map(m => ({
+      id: `load-${m.id}`,
+      label: `Load ${m.id.split('/').pop() ?? m.id}`,
+      icon: '🤖',
+      category: 'models' as const,
+      action: async () => {
+        await serverStore.saveConfig({ model: m.id })
+        router.push('/serve')
+      }
+    })),
+    // Models management
     {
       id: 'models-refresh',
       label: 'Refresh Models',

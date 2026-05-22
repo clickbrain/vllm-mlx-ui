@@ -247,6 +247,17 @@ const showEmptyState = computed(() =>
   !serverStore.modelId &&
   !serverStore.loading
 )
+// Stopped but a model is configured — show a "Resume" CTA
+const showResumeCard = computed(() =>
+  serverStore.config !== null &&
+  !serverStore.isRunning &&
+  !!serverStore.modelId &&
+  !serverStore.loading &&
+  !serverStore.crashLog
+)
+const resumeModelShort = computed(() =>
+  serverStore.modelId?.split('/').pop() ?? ''
+)
 
 // Use the engine that IS running (not the picker selection, which may differ)
 const activeEngineInfo = computed(() =>
@@ -426,6 +437,27 @@ async function doClearCache(type: string) {
       <pre class="crash-log">{{ crashLogTail }}</pre>
     </div>
 
+    <!-- Resume card: model configured but server stopped (most common daily state) -->
+    <div v-if="showResumeCard" class="serve-resume">
+      <div class="resume-left">
+        <div class="resume-pulse" aria-hidden="true" />
+        <div class="resume-info">
+          <div class="resume-label">Ready to Start</div>
+          <div class="resume-model">
+            <span class="resume-model-name" :title="serverStore.modelId ?? ''">{{ resumeModelShort }}</span>
+            <span class="resume-engine-badge">{{ serverStore.engineId }}</span>
+          </div>
+        </div>
+      </div>
+      <AppButton
+        variant="primary"
+        size="sm"
+        :loading="serverStore.loading"
+        aria-label="Start inference server with current model"
+        @click="serverStore.startServer()"
+      >▶ Start Server</AppButton>
+    </div>
+
     <!-- Empty state: no model configured yet -->
     <div v-if="showEmptyState" class="serve-empty">
       <div class="serve-empty-icon">
@@ -469,7 +501,6 @@ async function doClearCache(type: string) {
       <div class="section-label">
         Live Metrics
         <span v-if="serverStore.metricsError && serverStore.isRunning" class="metrics-stale-badge">metrics unavailable</span>
-        <span v-if="serverStore.isRunning" class="engine-running-badge">Engine: {{ serverStore.engineId }}</span>
         <button class="view-full-link" @click="router.push('/benchmarks')">View full metrics →</button>
       </div>
       <div class="metrics-grid">
@@ -1192,6 +1223,71 @@ async function doClearCache(type: string) {
 .serve-empty-cta:focus-visible {
   outline: 2px solid var(--si-500);
   outline-offset: 3px;
+}
+
+/* Resume card: model configured but stopped */
+.serve-resume {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  background: color-mix(in srgb, var(--si-500) 5%, var(--bg-elevated));
+  border: 1px solid color-mix(in srgb, var(--si-500) 18%, var(--bd-default));
+  border-radius: var(--r-xl);
+}
+.resume-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.resume-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--si-500);
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+.resume-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.resume-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--tx-muted);
+}
+.resume-model {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.resume-model-name {
+  font-size: 15px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--tx-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 400px;
+}
+.resume-engine-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-pill);
+  color: var(--tx-secondary);
+  white-space: nowrap;
 }
 
 /* Running hero */

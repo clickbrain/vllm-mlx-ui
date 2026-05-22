@@ -1,6 +1,12 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.7.9 — 2026-06-12
+## v0.8.0 — 2026-06-12
+
+### Added
+- **Serve page — "Ready to Start" resume card** — When a model is configured but the server is stopped (the most common daily state), the Serve page now shows a contextual "Ready to Start" card displaying the configured model name and engine, with a prominent ▶ Start Server button. Previously the page showed only metric cards with dashes, giving no clear call-to-action for returning users. The resume card does not appear when there is no model configured (shows the discovery empty state instead) or when a server crash log is present (shows the crash banner instead).
+- **Command palette enrichment (Cmd+K)** — The command palette now dynamically lists "Load [model]" commands for every downloaded model, allowing power users to switch models without navigating away. Also added: "Release Memory" server command, "Find Models" navigation shortcut, and context-aware server command labels that include the current model or engine name (e.g. "Start Server — Qwen3-14B-4bit").
+- **Removed redundant engine badge from Live Metrics header** — "Engine: vllm-mlx" label in the metrics section header was redundant with both the running hero banner and the sidebar status row. Removed to reduce visual noise.
+
 
 ### Added
 - **Per-model Trust Remote Code** — A "Trust code" toggle on the Serve page lets you enable `--trust-remote-code` for a specific model without affecting the global setting. Per-model overrides are stored in config and checked first; the global setting acts as fallback. The global setting description in Settings now explains it is a fallback with per-model overrides available on the Serve page.
