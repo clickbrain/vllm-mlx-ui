@@ -31,6 +31,7 @@ export interface HFModel {
   is_mlx: boolean
   tags: string[]
   last_modified?: string
+  created_at?: string     // HF repo creation date — use for recency (more reliable than last_modified)
   size_gb?: number
   fit_level?: string  // perfect | good | marginal | too_tight
   trending_score?: number

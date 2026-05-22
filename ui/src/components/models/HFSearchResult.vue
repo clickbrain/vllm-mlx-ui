@@ -13,6 +13,7 @@ const props = defineProps<{
   size_gb?: number
   fit_level?: string
   last_modified?: string
+  created_at?: string     // HF repo creation — more accurate than last_modified for age display
   total_ram_gb?: number
   /** Currently available (free) unified memory in GB */
   available_ram_gb?: number
@@ -33,10 +34,14 @@ function abbreviate(n: number): string {
 const downloadsFormatted = computed(() => abbreviate(props.downloads))
 const likesFormatted = computed(() => abbreviate(props.likes))
 
+const dateForDisplay = computed(() => props.created_at || props.last_modified)
+const dateLabel = computed(() => props.created_at ? 'Published' : 'Modified')
+
 const dateFormatted = computed(() => {
-  if (!props.last_modified) return 'Date unknown'
+  const d = dateForDisplay.value
+  if (!d) return 'Date unknown'
   try {
-    const date = new Date(props.last_modified)
+    const date = new Date(d)
     if (Number.isNaN(date.getTime())) return 'Date unknown'
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
   } catch {
@@ -212,7 +217,7 @@ const capabilityTags = computed(() => {
           <svg class="meta-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M8 1.5l1.76 3.57 3.94.57-2.85 2.78.67 3.93L8 10.46l-3.52 1.85.67-3.93L2.3 5.64l3.94-.57L8 1.5z"/></svg>
           {{ likesFormatted }}
         </span>
-        <span class="meta-stat">Updated: {{ dateFormatted }}</span>
+        <span class="meta-stat">{{ dateLabel }}: {{ dateFormatted }}</span>
       </div>
     </div>
   </div>

@@ -189,6 +189,7 @@ interface ScoringInput {
   downloads: number
   tags: string[]
   last_modified?: string
+  created_at?: string    // preferred for recency — HF repo creation date
   size_gb?: number
 }
 
@@ -221,7 +222,9 @@ function scoreModel(
   if (model.size_gb && totalRamGb > 0 && model.size_gb / totalRamGb >= 0.92) return 0
 
   const bq = computeBenchmarkQuality(scores, useCase)
-  const rc = computeRecencyScore(model.last_modified, maxAgeMonths)
+  // Use created_at (actual publish date) over last_modified (repo file touch date)
+  const dateForRecency = model.created_at || model.last_modified
+  const rc = computeRecencyScore(dateForRecency, maxAgeMonths)
   const ut = computeUtilizationScore(model.size_gb, totalRamGb)
   const pp = computePopularityScore(model.downloads)
 
@@ -254,14 +257,15 @@ function reasonString(
     parts.push(`${prefix}${Math.round(bq * 100)}% quality score`)
   }
 
-  // Age
-  if (model.last_modified) {
-    const ageMs = Date.now() - new Date(model.last_modified).getTime()
+  // Age — use created_at (actual publish date) over last_modified (repo file touch)
+  const dateForAge = model.created_at || model.last_modified
+  if (dateForAge) {
+    const ageMs = Date.now() - new Date(dateForAge).getTime()
     const ageMonths = ageMs / (1000 * 60 * 60 * 24 * 30.44)
     if (!isNaN(ageMonths)) {
-      if (ageMonths < 1)       parts.push('< 1mo ago')
-      else if (ageMonths < 12) parts.push(`${Math.round(ageMonths)}mo ago`)
-      else                     parts.push(`${(ageMonths / 12).toFixed(1)}yr ago`)
+      if (ageMonths < 1)       parts.push('< 1mo old')
+      else if (ageMonths < 12) parts.push(`${Math.round(ageMonths)}mo old`)
+      else                     parts.push(`${(ageMonths / 12).toFixed(1)}yr old`)
     }
   }
 

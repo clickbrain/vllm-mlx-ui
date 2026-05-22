@@ -974,6 +974,7 @@ def search_hf_models(
                     "likes": m.get("likes", 0) or 0,
                     "tags": model_tags,
                     "last_modified": str(m.get("lastModified") or ""),
+                    "created_at": str(m.get("createdAt") or ""),
                     "is_mlx": "mlx" in [t.lower() for t in model_tags],
                     "size_gb": size_gb,
                     "fit_level": fit_level,

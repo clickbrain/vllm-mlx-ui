@@ -247,9 +247,15 @@ async function doShutdown() {
       @click="router.push('/serve')"
     >
       <span class="status-dot" :class="serverStore.isRunning ? 'running' : 'stopped'" />
-      <span class="status-engine">{{ serverStore.engineId ?? 'No engine' }}</span>
-      <span v-if="serverStore.modelId" class="status-model">· {{ (serverStore.modelId ?? '').split('/').pop() }}</span>
-      <span v-else class="status-model-none">· No model</span>
+      <div class="status-text">
+        <span class="status-engine">{{ serverStore.engineId ?? 'No engine' }}</span>
+        <span
+          v-if="serverStore.modelId"
+          class="status-model"
+          :title="serverStore.modelId"
+        >{{ (serverStore.modelId ?? '').split('/').pop() }}</span>
+        <span v-else class="status-model-none">No model loaded</span>
+      </div>
     </button>
 
     <!-- Memory Arc Gauge -->
@@ -379,7 +385,7 @@ async function doShutdown() {
 /* Server status row — compact read-only pill; click → /serve */
 .sidebar-status-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-2);
   width: 100%;
   padding: var(--space-2) var(--space-3);
@@ -398,14 +404,42 @@ async function doShutdown() {
 .status-dot {
   width: 7px;
   height: 7px;
+  margin-top: 4px; /* align with first text line */
   border-radius: 50%;
   flex-shrink: 0;
 }
 .status-dot.running  { background: var(--si-500); }
 .status-dot.stopped  { background: var(--tx-muted); }
-.status-engine { font-weight: 600; color: var(--tx-primary); max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.status-model { color: var(--tx-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.status-model-none { color: var(--tx-muted); flex: 1; }
+/* Two-line stacked engine + model display */
+.status-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+.status-engine {
+  font-weight: 600;
+  color: var(--tx-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-model {
+  color: var(--tx-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-model-none {
+  color: var(--tx-muted);
+  font-size: 11px;
+  font-style: italic;
+}
 
 .sidebar-section {
   padding: var(--space-3) var(--space-3);

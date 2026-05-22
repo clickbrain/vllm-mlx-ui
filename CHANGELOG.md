@@ -1,5 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.7.8 — 2026-06-12
+
+### Fixed
+- **Sidebar status row truncation** — engine name was `max-width: 60px` causing immediate overflow. Reworked to a 2-line stacked layout: engine name on top (bold, full width), model short-name below (smaller, muted), status dot aligned to first line. Both fields now use `text-overflow: ellipsis` at full sidebar width.
+- **Model Finder scoring used wrong date field** — `computeRecencyScore()` was reading `last_modified` (HF repo's last file modification date, which is touched by README edits, safety patches, and metadata changes) instead of `createdAt` (the actual model publish date). This caused 2-year-old models with a recent README update to score as freshly released. Now uses `created_at` (from HF `createdAt`) as the primary recency signal. Model cards now display "Published: &lt;date&gt;" instead of "Updated: &lt;date&gt;" when the publish date is available.
+
 ## v0.7.7 — 2026-05-23
 
 ### Model Finder — Bug Fixes
