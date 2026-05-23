@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.2 — 2026-05-23
+
+### Fixed
+- **Upgrade hardened — all pip operations use `sys.executable -m pip`** — `engine_upgrade_commands()` and `upgrade_command()` now use the running Python's pip (`sys.executable -m pip`) instead of a resolved `pip_bin` binary. This guarantees upgrades always target the same Python environment the management process runs in, eliminating the bug where brew cellar pip resolved to the wrong venv and upgrades silently targeted a different environment.
+- **`_resolve_pip_bin()` removed** — no longer needed; all pip operations go through `sys.executable -m pip`.
+- **Phantom updates eliminated** — `_check_ui()` uses `_brew_latest_version()` (reads `brew info --json` formula version) on brew installs, matching what `brew upgrade` actually installs. `_check_vllm()` uses `_pypi_latest("vllm-mlx")` instead of `_github_latest_tag()`, matching the pip install source. No more "update available" when the install mechanism can't deliver.
+- **`VllmMlxEngine.upgrade_command()` restored** — returns `[sys.executable, "-m", "pip", "install", "--upgrade", "vllm-mlx"]`, replacing the deleted `upgrade_command()` that was routing through `engine_upgrade_commands()` with a resolved pip binary.
+- **SPA catch-all resilience** — if `index.html` is missing (stale process after brew upgrade pruned the old cellar), returns a friendly 503 message instead of a 500 Internal Server Error.
+- **Homebrew formula updated in both repos** (`clickbrain/vllm-mlx-ui` and `clickbrain/homebrew-vllm-mlx-ui`).
+
 ## v0.8.1 — 2026-05-22
 
 ### Fixed

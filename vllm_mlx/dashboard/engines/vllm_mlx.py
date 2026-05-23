@@ -202,6 +202,15 @@ class VllmMlxEngine(BaseEngine):
         """The vllm-mlx engine lives on PyPI under the ``vllm-mlx`` package."""
         return "vllm-mlx"
 
+    def upgrade_command(self) -> list[str] | None:
+        """Upgrade using the running Python's pip (not a resolved pip binary).
+
+        Using ``sys.executable -m pip`` ensures the upgrade always targets the
+        same Python environment the management process runs in — critical when
+        ``pip_bin`` resolves to a different venv (e.g. brew cellar vs system).
+        """
+        return [sys.executable, "-m", "pip", "install", "--upgrade", "vllm-mlx"]
+
     def config_schema(self) -> list[dict[str, Any]]:
         # vllm-mlx settings are managed via the common settings panel in SettingsView.
         # Engine-specific extras (future: mtp advanced options, etc.) go here.

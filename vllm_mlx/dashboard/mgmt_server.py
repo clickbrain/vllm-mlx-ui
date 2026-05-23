@@ -2158,12 +2158,13 @@ def check_for_updates(force: bool = False, _: None = Depends(_check_auth)) -> di
 def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
     """Start an upgrade and self-restart after it completes."""
     import subprocess as _sp
-    import sys as _sys
     import threading as _thr
 
     from vllm_mlx.dashboard import update_checker as _uc
     cmd = _uc.upgrade_command()
-    engine_cmds = _uc.engine_upgrade_commands(_uc._resolve_pip_bin(_sys.executable))
+    # engine_upgrade_commands uses sys.executable -m pip internally,
+    # so it always targets the same environment as the running process.
+    engine_cmds = _uc.engine_upgrade_commands()
 
     def _do_upgrade():
         import time as _t
@@ -2654,10 +2655,15 @@ if _os.path.isdir(_UI_DIST):
 
     @app.get("/", include_in_schema=False)
     @app.get("/{full_path:path}", include_in_schema=False)
-    async def _serve_spa(full_path: str = "") -> FileResponse:
-        # no-store prevents browsers caching the old index.html after an upgrade
-        # (asset filenames are content-hashed so they can be cached indefinitely).
+    async def _serve_spa(full_path: str = "") -> PlainTextResponse:
         index = _os.path.join(_UI_DIST, "index.html")
+        if not _os.path.isfile(index):
+            return PlainTextResponse(
+                "Serving vllm-mlx-ui… this page appears after the app has started.\n"
+                "If this persists, run `brew upgrade vllm-mlx-ui` and restart the process.",
+                status_code=503,
+                headers={"Cache-Control": "no-store"},
+            )
         return FileResponse(index, headers={"Cache-Control": "no-store"})
 
 

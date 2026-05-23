@@ -306,6 +306,30 @@ def _homebrew_formula_version() -> str | None:
     return None
 
 
+def _brew_latest_version() -> str | None:
+    """Return the latest formula version from ``brew info --json``.
+
+    Returns the ``versions.stable`` field — the latest version Homebrew would
+    install when running ``brew upgrade vllm-mlx-ui``.  Returns ``None`` when
+    the brew CLI is unavailable or the formula has no stable version.
+    """
+    try:
+        import json
+        result = subprocess.run(
+            ["brew", "info", "--json", "vllm-mlx-ui"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            versions = data[0].get("versions", {})
+            stable = versions.get("stable") or ""
+            if stable and not stable.startswith("HEAD"):
+                return stable
+    except Exception:
+        logger.warning("Operation failed", exc_info=True)
+    return None
+
+
 def _detect_install_method() -> str:
     """Return 'homebrew', 'pip', or 'unknown'."""
     import sys
@@ -342,9 +366,8 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
 
     def _check_ui():
         from vllm_mlx.dashboard import __version__ as _ui_ver
-        ui_latest = _github_latest_tag("clickbrain", "vllm-mlx-ui")
         # For stable (tarball) Homebrew installs the version is a semver like
-        # "0.3.35" — compare that directly against the latest tag.
+        # "0.3.35" — compare that directly against the latest release.
         # For HEAD-based installs the version contains a commit SHA: fall back
         # to commit-SHA comparison so nightly users still get update dots.
         ui_installed_commit = _homebrew_installed_commit()
@@ -368,6 +391,12 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
                 installed_ver = _ui_ver
             else:
                 installed_ver = cellar_ver or _ui_ver
+            # Use version source matching the upgrade mechanism, not GitHub tags.
+            # pip upgrades from PyPI; brew upgrades from the Homebrew formula.
+            if _detect_install_method() == "homebrew":
+                ui_latest = _brew_latest_version() or installed_ver
+            else:
+                ui_latest = _pypi_latest("vllm-mlx-ui") or installed_ver
             ui_update = _version_gt(ui_latest, installed_ver)
             installed_display = f"v{installed_ver}"
             if cellar_ver and cellar_ver != _ui_ver and _version_gt(cellar_ver, _ui_ver):
@@ -387,14 +416,14 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
 
     def _check_vllm():
         vllm_installed = _installed_version("vllm-mlx")
-        vllm_latest = _github_latest_tag("waybarrios", "vllm-mlx")
+        vllm_latest = _pypi_latest("vllm-mlx")
         update_available = _version_gt(vllm_latest, vllm_installed)
         return PackageInfo(
             name="vllm-mlx (inference engine)",
             installed=vllm_installed,
             latest=vllm_latest if vllm_latest != "unknown" else vllm_installed,
             update_available=update_available,
-            url="https://github.com/waybarrios/vllm-mlx/releases",
+            url="https://pypi.org/project/vllm-mlx/#history",
         )
 
     def _check_hfhub():
@@ -524,14 +553,15 @@ def bust_cache() -> None:
         _cache = {}
 
 
-def engine_upgrade_commands(pip_bin: str) -> list[list[str]]:
+def engine_upgrade_commands() -> list[list[str]]:
     """Return argv lists to upgrade each installed engine (best-effort).
 
-    Each command is an argv list suitable for ``subprocess.run()`` — no shell
-    quoting, no ``&&`` chains, no ambiguity.  Pip engines are upgraded via
-    ``pip install --upgrade <pkg>``; other engines use their
-    ``upgrade_command()`` method directly.
+    Every pip operation uses ``sys.executable -m pip`` so the upgrade always
+    targets the same Python environment the management process runs in — never
+    a different venv that ``pip_bin`` might accidentally resolve to on brew or
+    conda installs.  Non-pip engines use their ``upgrade_command()`` method.
     """
+    import sys
     cmds: list[list[str]] = []
     try:
         from vllm_mlx.dashboard.engines.registry import ENGINES, _registry_lock
@@ -547,8 +577,17 @@ def engine_upgrade_commands(pip_bin: str) -> list[list[str]]:
             if engine.install_method == "pip":
                 pkg = engine.get_package_name()
                 if pkg:
-                    cmds.append([pip_bin, "install", "--upgrade", pkg])
+                    try:
+                        custom = engine.upgrade_command()
+                    except Exception:
+                        custom = None
+                    if custom:
+                        cmds.append(custom)
+                    else:
+                        cmds.append([sys.executable, "-m", "pip", "install", "--upgrade", pkg])
+                continue
 
+            # Non-pip engines: use upgrade_command() if provided.
             try:
                 cmd = engine.upgrade_command()
             except Exception:
@@ -560,18 +599,6 @@ def engine_upgrade_commands(pip_bin: str) -> list[list[str]]:
     return cmds
 
 
-def _resolve_pip_bin(python_exe: str) -> str:
-    """Resolve the pip binary for the same Python environment."""
-    from pathlib import Path as _Path
-    venv_bin = _Path(python_exe).parent
-    pip = str(venv_bin / "pip")
-    if not _Path(pip).exists():
-        pip = str(venv_bin / "pip3")
-    if not _Path(pip).exists():
-        pip = shutil.which("pip3") or "pip3"
-    return pip
-
-
 def upgrade_command() -> list[str]:
     """Return the shell command to upgrade the installation."""
     import sys
@@ -579,9 +606,10 @@ def upgrade_command() -> list[str]:
 
     method = _detect_install_method()
 
-    # Resolve pip from the *running* Python — guarantees we upgrade packages
-    # inside the correct venv (brew cellar or dev) rather than a system pip.
-    pip = _resolve_pip_bin(sys.executable)
+    # Always use sys.executable -m pip so upgrades target the same Python
+    # environment the management process runs in — never a different venv
+    # that a resolved pip_bin might accidentally point to.
+    pip_cmd = f"{sys.executable} -m pip"
 
     if method == "homebrew":
         # Force-update the tap's git repo so brew sees the new formula immediately.
@@ -601,9 +629,9 @@ def upgrade_command() -> list[str]:
         # Fallback: try common Homebrew locations
         if not tap_dir or not tap_dir.exists():
             for candidate in [
-                Path.home() / ".homebrew" / "Library" / "Taps",
-                Path("/opt/homebrew/Library/Taps"),
-                Path("/usr/local/Homebrew/Library/Taps"),
+                _Path.home() / ".homebrew" / "Library" / "Taps",
+                _Path("/opt/homebrew/Library/Taps"),
+                _Path("/usr/local/Homebrew/Library/Taps"),
             ]:
                 candidate = candidate / "clickbrain" / "homebrew-vllm-mlx-ui"
                 if candidate.exists():
@@ -612,12 +640,15 @@ def upgrade_command() -> list[str]:
         git_pull = f"cd {tap_dir} && git fetch origin && git checkout main && git pull origin main"
         base = (
             f"{git_pull} && brew upgrade vllm-mlx-ui"
-            f" && {pip} install --upgrade vllm-mlx mlx-lm huggingface-hub vllm"
+            f" && {pip_cmd} install --upgrade mlx-lm huggingface-hub vllm"
         )
         return ["sh", "-c", base]
-    # dev / conda / pip install path — upgrade deps unconditionally first.
-    # The UI itself is not on PyPI; users running from source pull via git.
-    return ["sh", "-c", f"{pip} install --upgrade vllm-mlx mlx-lm huggingface-hub vllm"]
+    # pip install path — upgrade engine dependencies unconditionally.
+    # The UI itself is not on PyPI; pip-installed users run from source and
+    # must `git pull` manually to upgrade the app.
+    # Engine-specific upgrades (vllm-mlx, ollama, ds4, etc.) are handled
+    # separately by engine_upgrade_commands() — one source of truth per engine.
+    return ["sh", "-c", f"{pip_cmd} install --upgrade mlx-lm huggingface-hub vllm"]
 
 
 def relaunch() -> None:
