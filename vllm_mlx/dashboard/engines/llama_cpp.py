@@ -49,6 +49,7 @@ class LlamaCppEngine(BaseEngine):
     })
     install_method: ClassVar[str] = "external"
     is_builtin: ClassVar[bool] = True
+    homepage_url: ClassVar[str] = "https://github.com/ggerganov/llama.cpp"
     release_url: ClassVar[str] = "https://github.com/ggerganov/llama.cpp/releases"
 
     # llama.cpp can be installed via Homebrew on macOS, or built from source.

@@ -334,6 +334,7 @@ onMounted(async () => {
     mgmtApiKeyMasked.value = r.masked
   } catch { /* mgmt key display is non-critical */ }
   updatesStore.checkUpdates().catch(() => { /* non-critical */ })
+  updatesStore.fetchNewFeatures().catch(() => { /* non-critical */ })
   loadEngines().catch(() => { /* non-critical */ })
 })
 
@@ -521,8 +522,14 @@ async function doRestart() {
           <span class="pkg-name">
             <a :href="pkg.url" target="_blank" rel="noopener" class="pkg-link">{{ pkg.name }}</a>
           </span>
-          <span class="pkg-mono">{{ pkg.installed }}</span>
-          <span class="pkg-mono">{{ pkg.latest }}</span>
+          <span class="pkg-mono">
+            <a v-if="pkg.release_url" :href="pkg.release_url" target="_blank" rel="noopener" class="pkg-link">{{ pkg.installed }}</a>
+            <template v-else>{{ pkg.installed }}</template>
+          </span>
+          <span class="pkg-mono">
+            <a v-if="pkg.release_url && pkg.update_available" :href="pkg.release_url" target="_blank" rel="noopener" class="pkg-link">{{ pkg.latest }}</a>
+            <template v-else>{{ pkg.latest }}</template>
+          </span>
           <span>
             <span v-if="pkg.update_available" class="update-chip available">Update available</span>
             <span v-else class="update-chip up-to-date">Up to date</span>
@@ -536,6 +543,17 @@ async function doRestart() {
             <span class="pref-desc">Click "Check Now" to fetch update status.</span>
           </div>
         </div>
+      </div>
+      <div v-if="updatesStore.newFeatures.length" class="new-features-banner">
+        <div class="new-features-header">
+          <span class="new-features-icon">✦</span>
+          <span class="new-features-title">New Features Discovered</span>
+        </div>
+        <div v-for="feat in updatesStore.newFeatures" :key="feat.engine_id" class="new-features-item">
+          <span class="new-features-engine">{{ feat.engine_name }} <span class="new-features-version">v{{ feat.version }}</span></span>
+          <span class="new-features-settings">New settings: <code v-for="s in feat.new_settings" :key="s" class="new-features-setting">{{ s }}</code></span>
+        </div>
+        <button class="new-features-dismiss" @click="updatesStore.dismissNewFeatures()">Got it</button>
       </div>
       <div v-if="updatesStore.anyUpdate || updatesStore.installing" class="update-install-row">
         <div v-if="updatesStore.installPhase" class="install-phase">
@@ -1411,6 +1429,19 @@ async function doRestart() {
 .phase-spinner { animation: spin 1.2s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .update-error { padding: var(--space-3) var(--space-5); font-size: 14px; color: var(--cr-400); }
+
+/* New features banner */
+.new-features-banner { margin: var(--space-4) var(--space-5); padding: var(--space-4); border: 1px solid var(--ph-400, #4ade80); border-radius: var(--r-base); background: rgba(74,222,128,.04); }
+.new-features-header { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+.new-features-icon { font-size: 16px; }
+.new-features-title { font-weight: 700; font-size: 14px; }
+.new-features-item { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-2); padding: var(--space-2); border-radius: var(--r-base); background: var(--bg-elevated); }
+.new-features-engine { font-weight: 500; font-size: 13px; }
+.new-features-version { font-weight: 400; color: var(--tx-muted); font-size: 12px; }
+.new-features-settings { font-size: 12px; color: var(--tx-secondary); display: flex; gap: var(--space-1); flex-wrap: wrap; align-items: center; }
+.new-features-setting { font-size: 11px; }
+.new-features-dismiss { margin-top: var(--space-2); font-size: 12px; padding: 4px 14px; border: 1px solid var(--bd-default); border-radius: var(--r-pill); background: var(--bg-elevated); color: var(--tx-primary); cursor: pointer; }
+.new-features-dismiss:hover { background: var(--bg-inset); }
 
 /* Firewall guide */
 .pref-collapsible-wrap {

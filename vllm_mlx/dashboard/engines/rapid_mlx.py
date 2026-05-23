@@ -71,7 +71,8 @@ class RapidMlxEngine(BaseEngine):
         "cloud_routing",
     })
     install_method: ClassVar[str] = "pip"
-    release_url: ClassVar[str] = "https://pypi.org/project/rapid-mlx/#history"
+    homepage_url: ClassVar[str] = "https://github.com/raullenchai/Rapid-MLX"
+    release_url: ClassVar[str] = "https://github.com/raullenchai/Rapid-MLX/releases"
 
     # ── BaseEngine implementation ─────────────────────────────────────────────
 

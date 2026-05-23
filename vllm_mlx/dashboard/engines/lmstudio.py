@@ -49,6 +49,7 @@ class LmStudioEngine(BaseEngine):
     })
     install_method: ClassVar[str] = "external"
     is_builtin: ClassVar[bool] = True
+    homepage_url: ClassVar[str] = "https://lmstudio.ai"
     release_url: ClassVar[str] = "https://lmstudio.ai/download"
 
     # LM Studio is a desktop app — no headless installer.

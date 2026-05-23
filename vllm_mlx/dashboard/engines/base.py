@@ -56,6 +56,9 @@ class BaseEngine(ABC):
     #: URL shown in the update notification for this engine (download/release page).
     release_url: ClassVar[str] = ""
 
+    #: URL shown in the updates table for the engine name link (GitHub main page).
+    homepage_url: ClassVar[str] = ""
+
     # ── Core abstract methods ──────────────────────────────────────────────────
 
     @abstractmethod

@@ -12,11 +12,13 @@ Results are cached in a module-level dict for 1 hour to avoid hammering GitHub/P
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import NamedTuple
 
 import requests
@@ -34,6 +36,58 @@ _cache_lock = threading.Lock()
 # Values: 'idle' | 'upgrading' | 'restarting' | 'done' | 'error:<msg>'
 upgrade_status: str = "idle"
 
+# Discovered features from the most recent upgrade, shown to the user once.
+# Persisted to disk so the info survives the process restart during upgrade.
+latest_discovered_features: list[dict[str, str]] = []
+_latest_discovered_lock = threading.Lock()
+_FEATURES_FILE = Path.home() / ".vllm_mlx_ui" / "discovered_features.json"
+
+
+def _save_discovered_features() -> None:
+    """Persist discovered features to disk so they survive process restart."""
+    import os
+    os.makedirs(str(_FEATURES_FILE.parent), exist_ok=True)
+    with _latest_discovered_lock:
+        data = list(latest_discovered_features)
+    try:
+        _FEATURES_FILE.write_text(json.dumps(data, indent=2))
+    except Exception:
+        logger.warning("Failed to save discovered features", exc_info=True)
+
+
+def _load_discovered_features() -> None:
+    """Load discovered_features from disk into the module-level variable."""
+    global latest_discovered_features
+    try:
+        if _FEATURES_FILE.is_file():
+            raw = _FEATURES_FILE.read_text()
+            data = json.loads(raw) if raw.strip() else []
+            with _latest_discovered_lock:
+                latest_discovered_features = data
+    except Exception:
+        logger.warning("Failed to load discovered features", exc_info=True)
+
+
+def clear_discovered_features() -> None:
+    """Dismiss discovered features — clear memory and remove the file."""
+    global latest_discovered_features
+    with _latest_discovered_lock:
+        latest_discovered_features = []
+    try:
+        if _FEATURES_FILE.is_file():
+            _FEATURES_FILE.unlink()
+    except Exception:
+        logger.warning("Failed to remove discovered features file", exc_info=True)
+
+
+# Load any persisted features from a prior upgrade that survived restart.
+_load_discovered_features()
+
+# Cache of engine config schemas captured before upgrade, keyed by engine id.
+# Used after upgrade to detect newly available settings (feature discovery).
+_post_upgrade_features: list[dict[str, str]] = []
+_post_upgrade_features_lock = threading.Lock()
+
 
 class PackageInfo(NamedTuple):
     """Metadata for a single trackable package's update state.
@@ -43,7 +97,8 @@ class PackageInfo(NamedTuple):
         installed: Currently installed version string or commit SHA.
         latest: Latest available version string or commit SHA.
         update_available: True when an upgrade is ready to install.
-        url: Link to the project's releases page or changelog.
+        url: Link to the project's homepage (GitHub main page).
+        release_url: Link to the project's releases/changelog page.
     """
 
     name: str
@@ -51,6 +106,92 @@ class PackageInfo(NamedTuple):
     latest: str
     update_available: bool
     url: str
+    release_url: str = ""
+
+
+def snapshot_engine_schemas() -> None:
+    """Snapshot each engine's config schema before upgrade for post-upgrade diff."""
+    global _post_upgrade_features
+    try:
+        from vllm_mlx.dashboard.engines.registry import ENGINES, _registry_lock
+        with _registry_lock:
+            engines = dict(ENGINES)
+        features: list[dict[str, str]] = []
+        for eid, eng in engines.items():
+            try:
+                if not eng.is_installed():
+                    continue
+            except Exception:
+                continue
+            try:
+                schema = eng.config_schema()
+                features.append({
+                    "engine_id": eid,
+                    "engine_name": eng.name,
+                    "version": eng.get_version() or "",
+                    "schema_keys": ",".join(sorted(s.get("key", "") for s in schema)),
+                })
+            except Exception:
+                pass
+        with _post_upgrade_features_lock:
+            _post_upgrade_features = features
+    except Exception:
+        logger.warning("Failed to snapshot engine schemas", exc_info=True)
+
+
+def discover_new_features() -> list[dict[str, str]]:
+    """Return features discovered after upgrade by diffing config schemas.
+
+    Compares the post-upgrade config schema of each engine against the snapshot
+    taken before the upgrade.  Returns a list of dicts describing newly
+    available settings (key, label, engine name).
+    """
+    global _post_upgrade_features, latest_discovered_features
+    old_map: dict[str, str] = {}
+    with _post_upgrade_features_lock:
+        for entry in list(_post_upgrade_features):
+            old_map[entry["engine_id"]] = entry["schema_keys"]
+
+    discovered: list[dict[str, str]] = []
+    try:
+        from vllm_mlx.dashboard.engines.registry import ENGINES, _registry_lock
+        with _registry_lock:
+            engines = dict(ENGINES)
+        for eid, eng in engines.items():
+            try:
+                if not eng.is_installed():
+                    continue
+            except Exception:
+                continue
+            old_keys_str = old_map.get(eid, "")
+            old_keys = set(old_keys_str.split(",")) if old_keys_str else set()
+            try:
+                schema = eng.config_schema()
+            except Exception:
+                continue
+            new_keys = set()
+            for s in schema:
+                key = s.get("key", "")
+                if key and key not in old_keys:
+                    new_keys.add(key)
+            if new_keys:
+                discovered.append({
+                    "engine_id": eid,
+                    "engine_name": eng.name,
+                    "new_settings": sorted(new_keys),
+                    "version": eng.get_version() or "",
+                })
+    except Exception:
+        logger.warning("Failed to discover new features", exc_info=True)
+
+    with _post_upgrade_features_lock:
+        _post_upgrade_features = []
+
+    with _latest_discovered_lock:
+        latest_discovered_features[:] = discovered
+    _save_discovered_features()
+
+    return discovered
 
 
 def _installed_version(package: str) -> str:
@@ -411,7 +552,8 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
             installed=installed_display,
             latest=latest_display,
             update_available=ui_update,
-            url="https://github.com/clickbrain/vllm-mlx-ui/releases",
+            url="https://github.com/clickbrain/vllm-mlx-ui",
+            release_url="https://github.com/clickbrain/vllm-mlx-ui/releases",
         )
 
     def _check_vllm():
@@ -423,7 +565,8 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
             installed=vllm_installed,
             latest=vllm_latest if vllm_latest != "unknown" else vllm_installed,
             update_available=update_available,
-            url="https://pypi.org/project/vllm-mlx/#history",
+            url="https://github.com/waybarrios/vllm-mlx",
+            release_url="https://github.com/waybarrios/vllm-mlx/releases",
         )
 
     def _check_hfhub():
@@ -434,7 +577,8 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
             installed=inst,
             latest=latest,
             update_available=_version_gt(latest, inst),
-            url="https://pypi.org/project/huggingface-hub/#history",
+            url="https://github.com/huggingface/huggingface-hub",
+            release_url="https://github.com/huggingface/huggingface-hub/releases",
         )
 
     # Run all checks in parallel — total wait is max(individual timeouts) ≈ 3s
@@ -442,6 +586,8 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
 
     # Add engine update checks dynamically from the registry.
     # pip engines: check PyPI; external engines: call latest_version() if available.
+    # DeepSeek ds4 is always checked even when not installed — its engine and model
+    # weights are interdependent and critical to the user's workflow.
     try:
         from vllm_mlx.dashboard.engines.registry import ENGINES
         for _engine in list(ENGINES.values()):
@@ -450,12 +596,13 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
                 continue
             if _engine.install_method == "bundled":
                 continue
-            # Only report on engines the user has actually installed.
-            try:
-                if not _engine.is_installed():
+            # ds4 is always checked (critical engine, interdependent with its model)
+            if _engine.id != "ds4":
+                try:
+                    if not _engine.is_installed():
+                        continue
+                except Exception:
                     continue
-            except Exception:
-                continue
 
             _ename = _engine.name
 
@@ -466,17 +613,18 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
                             pkg = _e.get_package_name()
                             inst = _installed_version(pkg)
                             latest = _pypi_latest(pkg)
-                            url = getattr(_e, "release_url", None) or f"https://pypi.org/project/{pkg}/#history"
                         else:
                             inst = _e.get_version() or "unknown"
-                            latest = _e.latest_version() or inst  # fall back to inst so entry still appears
-                            url = getattr(_e, "release_url", "")
+                            latest = _e.latest_version() or inst
+                        homepage = getattr(_e, "homepage_url", "") or ""
+                        releases = getattr(_e, "release_url", "") or ""
                         return PackageInfo(
                             name=f"{_e_name} (engine)",
                             installed=inst,
                             latest=latest if latest != "unknown" else inst,
                             update_available=_version_gt(latest, inst),
-                            url=url,
+                            url=homepage,
+                            release_url=releases,
                         )
                     except Exception as exc:
                         logger.warning("Engine update check failed for %s: %s", _e_name, exc, exc_info=True)
@@ -486,34 +634,44 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
             checkers.append(_make_engine_checker())
 
             # ── Model update check (for engines that support it) ──────────
-            try:
-                if hasattr(_engine, "hf_model_latest") and callable(_engine.hf_model_latest):
-                    _mname = _engine.name
-                    _meng = _engine
-                    def _make_model_checker(_e=_meng, _en=_mname):
-                        def _check_model():
-                            try:
-                                installed = _e._model_get_version() if hasattr(_e, "_model_get_version") else None
-                                latest = _e.hf_model_latest()
-                                if not installed or not latest:
-                                    return None
-                                updated = False
-                                if hasattr(_e, "model_update_available") and callable(_e.model_update_available):
-                                    updated = _e.model_update_available()
-                                return PackageInfo(
-                                    name=f"{_en} (model weights)",
-                                    installed=str(installed),
-                                    latest=str(latest),
-                                    update_available=updated,
-                                    url=getattr(_e, "release_url", ""),
-                                )
-                            except Exception as exc:
-                                logger.warning("Model update check failed for %s: %s", _en, exc, exc_info=True)
-                                return None
-                        return _check_model
-                    checkers.append(_make_model_checker())
-            except Exception as exc:
-                logger.warning("Model update check setup failed: %s", exc)
+            # ds4 model weights are always checked (critical + interdependent with engine).
+            if not hasattr(_engine, "hf_model_latest") or not callable(_engine.hf_model_latest):
+                continue
+            # For non-ds4 engines, skip model check if engine isn't installed
+            if _engine.id != "ds4":
+                try:
+                    if not _engine.is_installed():
+                        continue
+                except Exception:
+                    continue
+
+            _mname = _engine.name
+            _meng = _engine
+            def _make_model_checker(_e=_meng, _en=_mname):
+                def _check_model():
+                    try:
+                        installed = _e._model_get_version() if hasattr(_e, "_model_get_version") else None
+                        latest = _e.hf_model_latest()
+                        if not installed or not latest:
+                            return None
+                        updated = False
+                        if hasattr(_e, "model_update_available") and callable(_e.model_update_available):
+                            updated = _e.model_update_available()
+                        homepage = getattr(_e, "homepage_url", "") or getattr(_e, "release_url", "") or ""
+                        releases = getattr(_e, "release_url", "") or ""
+                        return PackageInfo(
+                            name=f"{_en} (model weights)",
+                            installed=str(installed),
+                            latest=str(latest),
+                            update_available=updated,
+                            url=homepage,
+                            release_url=releases,
+                        )
+                    except Exception as exc:
+                        logger.warning("Model update check failed for %s: %s", _en, exc, exc_info=True)
+                        return None
+                return _check_model
+            checkers.append(_make_model_checker())
 
     except Exception as exc:
         logger.warning("Could not load engine registry for update checks: %s", exc)

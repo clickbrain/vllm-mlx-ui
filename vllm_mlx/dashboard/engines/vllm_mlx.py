@@ -55,6 +55,8 @@ class VllmMlxEngine(BaseEngine):
     # "pip" ensures the global upgrade flow and per-engine latest-version check
     # update it independently from the dashboard package itself.
     install_method: ClassVar[str] = "pip"
+    homepage_url: ClassVar[str] = "https://github.com/waybarrios/vllm-mlx"
+    release_url: ClassVar[str] = "https://github.com/waybarrios/vllm-mlx/releases"
 
     # ── BaseEngine implementation ─────────────────────────────────────────────
 

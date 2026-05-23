@@ -21,6 +21,14 @@ interface PackageInfo {
   latest: string
   update_available: boolean
   url: string
+  release_url: string
+}
+
+interface DiscoveredFeature {
+  engine_id: string
+  engine_name: string
+  new_settings: string[]
+  version: string
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -39,6 +47,7 @@ export const useUpdatesStore = defineStore('updates', () => {
   const installMessage = ref('')
   const installPhase = ref('')   // human-readable current phase
   const error = ref('')
+  const newFeatures = ref<DiscoveredFeature[]>([])
 
   async function checkUpdates(force = false) {
     checking.value = true
@@ -125,24 +134,36 @@ export const useUpdatesStore = defineStore('updates', () => {
           await api.get('/health')
           clearInterval(healthPoll)
           installPhase.value = 'Done! Reloading…'
+          // After server is back, fetch any discovered features
+          await fetchNewFeatures()
           // Hard-navigate to / so the browser fetches fresh HTML (not cached).
-          // window.location.reload() can return a stale index.html whose asset
-          // hash no longer matches the new build, causing a blank page.
           setTimeout(() => { window.location.href = '/' }, 1200)
         } catch { /* still restarting */ }
       }, 2000)
     }
   }
 
-  /**
-   * Merge update data delivered via the /poll endpoint.
-   * Avoids a separate /updates network call when the cache is already warm.
-   */
+  async function fetchNewFeatures() {
+    try {
+      const data = await api.get<DiscoveredFeature[]>('/updates/discovered-features')
+      newFeatures.value = data ?? []
+    } catch {
+      newFeatures.value = []
+    }
+  }
+
+  async function dismissNewFeatures() {
+    try {
+      await api.delete('/updates/discovered-features')
+      newFeatures.value = []
+    } catch { /* best-effort */ }
+  }
+
   function mergeFromPoll(pollUpdates: PackageInfo[]) {
     if (!pollUpdates.length && !packages.value.length) return
     packages.value = pollUpdates
     anyUpdate.value = pollUpdates.some(p => p.update_available)
   }
 
-  return { packages, anyUpdate, installMethod, checking, installing, installMessage, installPhase, error, checkUpdates, installUpdates, mergeFromPoll }
+  return { packages, anyUpdate, installMethod, checking, installing, installMessage, installPhase, error, newFeatures, checkUpdates, installUpdates, mergeFromPoll, fetchNewFeatures, dismissNewFeatures }
 })

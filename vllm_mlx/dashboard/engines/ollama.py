@@ -56,7 +56,8 @@ class OllamaEngine(BaseEngine):
     })
     install_method: ClassVar[str] = "external"
     is_builtin: ClassVar[bool] = True
-    release_url: ClassVar[str] = "https://ollama.com/download"
+    homepage_url: ClassVar[str] = "https://github.com/ollama/ollama"
+    release_url: ClassVar[str] = "https://github.com/ollama/ollama/releases"
 
     # ── BaseEngine implementation ─────────────────────────────────────────────
 

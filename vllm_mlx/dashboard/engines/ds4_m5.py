@@ -314,7 +314,8 @@ class Ds4M5Engine(BaseEngine):
     })
     install_method: ClassVar[str] = "external"
     is_builtin: ClassVar[bool] = True
-    release_url: ClassVar[str] = "https://github.com/antirez/ds4"
+    homepage_url: ClassVar[str] = "https://github.com/antirez/ds4"
+    release_url: ClassVar[str] = "https://github.com/antirez/ds4/releases"
     health_path: ClassVar[str] = "/v1/models"
 
     # ── Core BaseEngine implementation ───────────────────────────────────────

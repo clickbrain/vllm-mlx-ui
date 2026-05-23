@@ -808,6 +808,7 @@ def poll(_: None = Depends(_check_auth)) -> dict:
                     "latest": r.latest,
                     "update_available": r.update_available,
                     "url": r.url,
+                    "release_url": r.release_url,
                 }
                 for r in cached
             ]
@@ -2146,6 +2147,7 @@ def check_for_updates(force: bool = False, _: None = Depends(_check_auth)) -> di
                 "latest": p.latest,
                 "update_available": p.update_available,
                 "url": p.url,
+                "release_url": p.release_url,
             }
             for p in packages
         ],
@@ -2169,6 +2171,8 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
     def _do_upgrade():
         import time as _t
         _uc.upgrade_status = "upgrading"
+        # Snapshot engine config schemas so we can detect new settings post-upgrade
+        _uc.snapshot_engine_schemas()
         try:
             main_result = _sp.run(cmd, timeout=300, check=False)
             if main_result.returncode != 0:
@@ -2188,6 +2192,13 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
             except Exception:
                 engine_errors += 1
                 logger.warning("Engine upgrade failed: %s", ec, exc_info=True)
+        # Detect new engine settings after upgrade
+        _uc.bust_cache()
+        discovered = _uc.discover_new_features()
+        if discovered:
+            logger.info("Post-upgrade feature discovery: %d engines have new settings", len(discovered))
+            for feat in discovered:
+                logger.info("  %s: %s", feat["engine_name"], ", ".join(feat["new_settings"]))
         # Stop inference server so new engine binary takes effect on restart
         try:
             from vllm_mlx.dashboard.server_manager import get_server_status, stop_server
@@ -2231,7 +2242,27 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
 def install_status(_: None = Depends(_check_auth)) -> dict:
     """Return the current upgrade phase for frontend progress polling."""
     from vllm_mlx.dashboard import update_checker as _uc
-    return {"status": _uc.upgrade_status}
+    discovered = _uc.latest_discovered_features
+    return {
+        "status": _uc.upgrade_status,
+        "discovered_features": discovered if discovered else None,
+    }
+
+
+@app.get("/updates/discovered-features")
+def get_discovered_features(_: None = Depends(_check_auth)) -> list:
+    """Return features discovered after the last upgrade (new engine settings)."""
+    from vllm_mlx.dashboard import update_checker as _uc
+    with _uc._latest_discovered_lock:
+        return list(_uc.latest_discovered_features)
+
+
+@app.delete("/updates/discovered-features")
+def dismiss_discovered_features(_: None = Depends(_check_auth)) -> dict:
+    """Dismiss discovered features — clear memory and remove the file."""
+    from vllm_mlx.dashboard import update_checker as _uc
+    _uc.clear_discovered_features()
+    return {"ok": True}
 
 
 @app.get("/network/interfaces")

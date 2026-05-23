@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.3 — 2026-05-23
+
+### Added
+- **Feature discovery after upgrades** — After "Install Updates & Restart", the system snapshots each engine's config schema before upgrading and diffs it against the post-upgrade schemas. Any new settings keys found (e.g. `mtp_draft`, `thinking`) are surfaced in a "New Features Discovered" banner in Settings. The banner persists across the process restart and can be dismissed with "Got it".
+- **GET/DELETE `/updates/discovered-features` API** — Frontend fetches discovered features after server comes back from upgrade. DELETE clears them.
+- **Engine ordering in Settings** — `list_engines()` sorts installed engines first, then not-installed; ds4-m5 sinks to bottom on non-M5 hardware (checked via `is_m5_or_newer()`).
+
+### Fixed
+- **Feature discovery survives process restart** — Discovered features are now persisted to `~/.vllm_mlx_ui/discovered_features.json` so they aren't lost when the management process kills itself during upgrade.
+
 ## v0.8.2 — 2026-05-23
 
 ### Fixed
