@@ -1,5 +1,10 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.7 — 2026-05-26
+
+### Fixed
+- **Software Updates still not showing new releases on old versions** — `_brew_latest_version()` now falls back to the GitHub releases API tag when `brew info --json` returns the same version as installed (indicating a stale cache that even `_refresh_tap()` didn't resolve). This eliminates the chicken-and-egg problem where the update checker couldn't detect its own update.
+
 ## v0.8.6 — 2026-05-26
 
 ### Fixed

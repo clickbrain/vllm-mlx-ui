@@ -448,15 +448,17 @@ def _homebrew_formula_version() -> str | None:
 
 
 def _brew_latest_version() -> str | None:
-    """Return the latest formula version from ``brew info --json``.
+    """Return the latest formula version — tries brew first, then GitHub API.
 
-    Refreshes the tap repository first so ``brew info`` sees the latest formula
-    immediately instead of relying on Homebrew's auto-update throttle (which
-    may take hours to detect a new release).  Returns ``None`` when the brew
-    CLI is unavailable or the formula has no stable version.
+    1. Refresh the local tap and query ``brew info --json``.
+    2. If that returns the same as the installed version (stale cache), or
+       if brew is unavailable, fall back to the GitHub releases API tag.
+
+    This dual-path approach ensures users always see available updates even
+    when Homebrew's auto-update throttle has not yet refreshed the local tap.
     """
+    installed = _homebrew_formula_version() or ""
     try:
-        # Refresh the tap so brew info picks up the latest formula.
         _refresh_tap()
         import json
         result = subprocess.run(
@@ -468,10 +470,11 @@ def _brew_latest_version() -> str | None:
             versions = data[0].get("versions", {})
             stable = versions.get("stable") or ""
             if stable and not stable.startswith("HEAD"):
-                return stable
+                if stable != installed:
+                    return stable
     except Exception:
         logger.warning("Operation failed", exc_info=True)
-    return None
+    return _github_latest_tag("clickbrain", "vllm-mlx-ui")
 
 
 def _refresh_tap() -> None:
