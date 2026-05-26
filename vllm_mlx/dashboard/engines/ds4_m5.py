@@ -613,11 +613,70 @@ class Ds4M5Engine(BaseEngine):
 
     # ── Model version/info ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _model_version_file() -> str:
+        return os.path.join(_gguf_dir(), ".model_version.json")
+
+    def _get_stored_version(self) -> dict[str, str]:
+        vf = self._model_version_file()
+        if not os.path.isfile(vf):
+            return {}
+        try:
+            import json
+            with open(vf) as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def store_version_data(self) -> None:
+        """Query HF API and persist current SHA + lfs.oid after a model download."""
+        if not _MODEL_HF_REPO:
+            return
+        try:
+            import json as _json
+            import urllib.request as _urllib
+
+            repo_url = f"https://huggingface.co/api/models/{_MODEL_HF_REPO}"
+            with _urllib.urlopen(repo_url, timeout=5) as resp:
+                repo_data = _json.loads(resp.read().decode())
+            sha = repo_data.get("sha", "")
+            last_modified = repo_data.get("lastModified", "")
+            date_str = ""
+            if last_modified:
+                import datetime
+                dt = datetime.datetime.fromisoformat(last_modified.replace("Z", "+00:00"))
+                date_str = dt.strftime("%Y-%m-%d")
+
+            installed_gguf = self._find_gguf()
+            installed_name = os.path.basename(installed_gguf) if installed_gguf else ""
+            lfs_oid = ""
+            if installed_name:
+                try:
+                    tree_url = f"https://huggingface.co/api/models/{_MODEL_HF_REPO}/tree/main"
+                    with _urllib.urlopen(tree_url, timeout=5) as resp:
+                        tree = _json.loads(resp.read().decode())
+                    for entry in tree:
+                        if entry.get("type") == "file" and entry.get("path") == installed_name:
+                            lfs_oid = (entry.get("lfs") or {}).get("oid", "")
+                            break
+                except Exception:
+                    pass
+
+            vf = self._model_version_file()
+            os.makedirs(os.path.dirname(vf), exist_ok=True)
+            with open(vf, "w") as f:
+                _json.dump({"sha": sha, "lfs_oid": lfs_oid, "version": date_str, "updated_at": date_str}, f)
+        except Exception as e:
+            logger.warning("Failed to store model version data: %s", e, exc_info=True)
+
     def _model_get_version(self) -> str | None:
-        """Return the installed model's version (HF commit SHA or mtime hash)."""
+        """Return the installed model's version (stored SHA date or fallback mtime)."""
         gguf = self._find_gguf()
         if not gguf:
             return None
+        stored = self._get_stored_version()
+        if stored.get("version"):
+            return stored["version"]
         try:
             mtime = os.path.getmtime(gguf)
             import datetime
@@ -626,29 +685,56 @@ class Ds4M5Engine(BaseEngine):
             return None
 
     def hf_model_latest(self) -> str | None:
-        """Check the HF model repo for the latest update date."""
+        """Return the latest available version date using repo SHA + lfs.oid.
+
+        Detects real content changes by comparing the HF repo SHA and the
+        installed GGUF file's LFS OID against stored values.  This avoids
+        false positives from non-model changes (README edits, metadata).
+        """
         if not _MODEL_HF_REPO:
             return None
         try:
             import json as _json
             import urllib.request as _urllib
-            url = f"https://huggingface.co/api/models/{_MODEL_HF_REPO}"
-            with _urllib.urlopen(url, timeout=5) as resp:
-                data = _json.loads(resp.read().decode())
-            last_modified = data.get("lastModified", "")
+
+            repo_url = f"https://huggingface.co/api/models/{_MODEL_HF_REPO}"
+            with _urllib.urlopen(repo_url, timeout=5) as resp:
+                repo_data = _json.loads(resp.read().decode())
+            current_sha = repo_data.get("sha", "")
+            last_modified = repo_data.get("lastModified", "")
+
+            installed_gguf = self._find_gguf()
+            installed_name = os.path.basename(installed_gguf) if installed_gguf else ""
+            current_lfs = ""
+            if installed_name:
+                try:
+                    tree_url = f"https://huggingface.co/api/models/{_MODEL_HF_REPO}/tree/main"
+                    with _urllib.urlopen(tree_url, timeout=5) as resp:
+                        tree = _json.loads(resp.read().decode())
+                    for entry in tree:
+                        if entry.get("type") == "file" and entry.get("path") == installed_name:
+                            current_lfs = (entry.get("lfs") or {}).get("oid", "")
+                            break
+                except Exception:
+                    pass
+
+            stored = self._get_stored_version()
+            stored_sha = stored.get("sha", "")
+            stored_lfs = stored.get("lfs_oid", "")
+            stored_version = stored.get("version", "")
+
+            if stored_sha and stored_lfs and stored_sha == current_sha and stored_lfs == current_lfs:
+                return stored_version
+
             if last_modified:
                 import datetime
                 dt = datetime.datetime.fromisoformat(last_modified.replace("Z", "+00:00"))
                 return dt.strftime("%Y-%m-%d")
-            siblings = data.get("siblings", [])
-            for sib in siblings:
-                lm = sib.get("lastModified", sib.get("rfilename", ""))
-                if lm:
-                    return str(lm)[:10]
+
+            return stored_version or None
         except Exception as e:
             logger.warning("Failed to check HF model latest version: %s", e, exc_info=True)
             return None
-        return None
 
     def model_update_available(self) -> bool:
         """Return True when a newer model version is available on HF."""
@@ -666,13 +752,20 @@ class Ds4M5Engine(BaseEngine):
         if not script:
             return None
         quant = _recommended_quant()
-        engine_settings = {}  # populated at runtime
         return [
             "sh", "-c",
             f"cd {shlex_quote(d)} && echo '=== Re-downloading model ({quant}) ===' "
             f"&& bash {shlex_quote(script)} {quant} "
             f"&& echo '=== Model update complete. ==='",
         ]
+
+    def refresh_model_version(self) -> None:
+        """Refresh stored version metadata after a model upgrade.
+
+        Called by ``_do_upgrade()`` in ``mgmt_server.py`` after a successful
+        ``model_upgrade_command()`` completes.
+        """
+        self.store_version_data()
 
     def get_fixed_model_display(self) -> str | None:
         """ds4 serves a single fixed GGUF — report it so the UI shows a label."""

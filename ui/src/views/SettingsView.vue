@@ -121,9 +121,13 @@ async function installEngine(id: string) {
       method: 'POST',
       headers: getMgmtApiKey() ? { 'X-Api-Key': getMgmtApiKey() } : {},
     })
-    if (resp.status === 400) {
-      const err = await resp.json().catch(() => ({}))
-      enginesError.value = err.detail || 'This engine cannot be installed automatically. See description for instructions.'
+    if (!resp.ok) {
+      let detail = `HTTP ${resp.status}`
+      try {
+        const err = await resp.json()
+        detail = err.detail ?? detail
+      } catch { /* ignore */ }
+      enginesError.value = `Install failed: ${detail}`
       return
     }
     if (!resp.body) throw new Error('No response body')
@@ -155,9 +159,13 @@ async function uninstallEngine(id: string, name: string) {
       method: 'POST',
       headers: getMgmtApiKey() ? { 'X-Api-Key': getMgmtApiKey() } : {},
     })
-    if (resp.status === 400) {
-      const err = await resp.json().catch(() => ({}))
-      enginesError.value = err.detail || 'This engine cannot be uninstalled automatically.'
+    if (!resp.ok) {
+      let detail = `HTTP ${resp.status}`
+      try {
+        const err = await resp.json()
+        detail = err.detail ?? detail
+      } catch { /* ignore */ }
+      enginesError.value = `Uninstall failed: ${detail}`
       return
     }
     if (!resp.body) throw new Error('No response body')

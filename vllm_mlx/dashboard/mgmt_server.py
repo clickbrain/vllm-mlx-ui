@@ -2012,44 +2012,47 @@ async def install_engine(engine_id: str, _: None = Depends(_check_auth)):
         ) from None
 
     async def _stream():
-        proc = await _asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=_asyncio.subprocess.PIPE,
-            stderr=_asyncio.subprocess.STDOUT,
-        )
-        if proc.stdout:
-            async for line in proc.stdout:
-                yield line
-        await proc.wait()
-        if proc.returncode == 0:
-            # Invalidate flag probe cache so the newly-installed binary is re-probed
-            try:
-                from vllm_mlx.dashboard.engines.flag_probe import invalidate as _fp_inv
-                _fp_inv(cmd[0] if cmd else None)
-            except Exception:
-                pass
-            yield b"\n=== Auto-registering model... ===\n"
-            try:
-                discovered = engine.get_discovered_models()
-                if discovered:
-                    m = discovered[0]
-                    from vllm_mlx.dashboard.server_manager import (
-                        load_config,
-                        save_config,
-                    )
-                    cfg = load_config()
-                    engine_settings = dict(cfg.get("engine_settings", {}))
-                    engine_settings.setdefault(engine_id, {})
-                    engine_settings[engine_id]["launch_model"] = m.get("path", m["id"])
-                    cfg["engine_settings"] = engine_settings
-                    cfg["model"] = m["id"]
-                    save_config(cfg)
-                    yield f"Model registered: {m.get('display', m['id'])}\n".encode()
-            except Exception as exc:
-                yield f"⚠ Model registration skipped: {exc}\n".encode()
-            yield "✅ Install complete.\n".encode()
-        else:
-            yield f"❌ Install failed (exit {proc.returncode}).\n".encode()
+        try:
+            proc = await _asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=_asyncio.subprocess.PIPE,
+                stderr=_asyncio.subprocess.STDOUT,
+            )
+            if proc.stdout:
+                async for line in proc.stdout:
+                    yield line
+            await proc.wait()
+            if proc.returncode == 0:
+                # Invalidate flag probe cache so the newly-installed binary is re-probed
+                try:
+                    from vllm_mlx.dashboard.engines.flag_probe import invalidate as _fp_inv
+                    _fp_inv(cmd[0] if cmd else None)
+                except Exception:
+                    pass
+                yield b"\n=== Auto-registering model... ===\n"
+                try:
+                    discovered = engine.get_discovered_models()
+                    if discovered:
+                        m = discovered[0]
+                        from vllm_mlx.dashboard.server_manager import (
+                            load_config,
+                            save_config,
+                        )
+                        cfg = load_config()
+                        engine_settings = dict(cfg.get("engine_settings", {}))
+                        engine_settings.setdefault(engine_id, {})
+                        engine_settings[engine_id]["launch_model"] = m.get("path", m["id"])
+                        cfg["engine_settings"] = engine_settings
+                        cfg["model"] = m["id"]
+                        save_config(cfg)
+                        yield f"Model registered: {m.get('display', m['id'])}\n".encode()
+                except Exception as exc:
+                    yield f"⚠ Model registration skipped: {exc}\n".encode()
+                yield "✅ Install complete.\n".encode()
+            else:
+                yield f"❌ Install failed (exit {proc.returncode}).\n".encode()
+        except Exception as e:
+            yield f"❌ Install failed: {e}\n".encode()
 
     return StreamingResponse(_stream(), media_type="text/plain")
 
@@ -2199,6 +2202,34 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
             logger.info("Post-upgrade feature discovery: %d engines have new settings", len(discovered))
             for feat in discovered:
                 logger.info("  %s: %s", feat["engine_name"], ", ".join(feat["new_settings"]))
+        # Model weight upgrades — re-download GGUF files that have new versions
+        try:
+            from vllm_mlx.dashboard.engines.registry import ENGINES as _mdl_engines, _registry_lock as _mdl_lock
+            with _mdl_lock:
+                _mdl_snapshot = dict(_mdl_engines)
+            for _mdl_engine in _mdl_snapshot.values():
+                try:
+                    if not hasattr(_mdl_engine, "model_update_available"):
+                        continue
+                    if not _mdl_engine.model_update_available():
+                        continue
+                    _mdl_cmd = _mdl_engine.model_upgrade_command()
+                    if not _mdl_cmd:
+                        continue
+                    logger.info("Upgrading model weights for %s", _mdl_engine.name)
+                    _mdl_result = _sp.run(_mdl_cmd, timeout=600, check=False)
+                    if _mdl_result.returncode == 0:
+                        _mdl_engine.refresh_model_version()
+                    else:
+                        logger.warning(
+                            "Model weight upgrade for %s exited with code %d",
+                            _mdl_engine.name, _mdl_result.returncode,
+                        )
+                except Exception as _mdl_exc:
+                    logger.warning("Model weight upgrade failed: %s", _mdl_exc, exc_info=True)
+        except Exception:
+            logger.warning("Failed to discover model weight upgrades", exc_info=True)
+
         # Stop inference server so new engine binary takes effect on restart
         try:
             from vllm_mlx.dashboard.server_manager import get_server_status, stop_server

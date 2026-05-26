@@ -22,7 +22,6 @@ Model identifiers:
 from __future__ import annotations
 
 import subprocess
-import sys
 from typing import Any, ClassVar
 
 from .base import BaseEngine
@@ -160,10 +159,19 @@ class RapidMlxEngine(BaseEngine):
         return _HF_TO_ALIAS.get(canonical, canonical)
 
     def is_installed(self) -> bool:
-        # rapid-mlx ships binaries (rapid-mlx, vllm-mlx), not a Python module.
-        # Check for the installed binary instead of trying to import a module.
         import shutil
-        return shutil.which("rapid-mlx") is not None
+        if shutil.which("rapid-mlx"):
+            return True
+        try:
+            import subprocess as _sp
+            import sys as _sys
+            result = _sp.run(
+                [_sys.executable, "-m", "pip", "show", "rapid-mlx"],
+                capture_output=True, timeout=10,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
 
     def build_env(self, config: dict[str, Any]) -> dict[str, str] | None:
         """Set HF_HUB_CACHE so the inference subprocess uses the configured models directory."""

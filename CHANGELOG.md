@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.5 — 2026-05-26
+
+### Fixed
+- **Engine install error handling** — `install_engine()` `_stream()` wrapped in try/except so subprocess spawn failures are streamed as install output instead of crashing with HTTP 500. Frontend now handles all non-2xx responses (`installEngine()`, `uninstallEngine()`) with user-visible error banners instead of silently reading JSON error bodies as plain text.
+- **Rapid-MLX `is_installed()` PATH-independent detection** — Added `pip show rapid-mlx` fallback so installs are recognized even when the Python bin directory isn't on the process PATH.
+- **ds4-m5 `_model_get_version()` stores HH SHA + LFS OID** — Model version now persists HF API metadata in `.model_version.json` and checks GGUF existence first, preventing stale version files from reporting a version when no model is installed.
+
+### Added
+- **Auto model weight upgrades** — After "Install Updates & Restart", the system re-downloads GGUF files for engines with model updates available. `refresh_model_version()` updates the stored SHA/OID after a successful weight upgrade.
+
 ## v0.8.4 — 2026-05-25
 
 ### Added

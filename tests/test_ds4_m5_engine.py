@@ -136,9 +136,11 @@ class TestModelGetVersion:
         mock_find.return_value = None
         assert engine._model_get_version() is None
 
+    @patch("vllm_mlx.dashboard.engines.ds4_m5.Ds4M5Engine._get_stored_version")
     @patch("vllm_mlx.dashboard.engines.ds4_m5.Ds4M5Engine._find_gguf")
     @patch("os.path.getmtime")
-    def test_returns_date_string(self, mock_mtime, mock_find, engine):
+    def test_returns_date_string(self, mock_mtime, mock_find, mock_stored, engine):
+        mock_stored.return_value = {}
         mock_find.return_value = self.GGUF_PATH
         mock_mtime.return_value = 1747000000.0
 
@@ -147,9 +149,11 @@ class TestModelGetVersion:
         assert len(result) == 10
         assert result.count("-") == 2
 
+    @patch("vllm_mlx.dashboard.engines.ds4_m5.Ds4M5Engine._get_stored_version")
     @patch("vllm_mlx.dashboard.engines.ds4_m5.Ds4M5Engine._find_gguf")
     @patch("os.path.getmtime")
-    def test_oserror_returns_none(self, mock_mtime, mock_find, engine):
+    def test_oserror_returns_none(self, mock_mtime, mock_find, mock_stored, engine):
+        mock_stored.return_value = {}
         mock_find.return_value = self.GGUF_PATH
         mock_mtime.side_effect = OSError("Bad file descriptor")
 
