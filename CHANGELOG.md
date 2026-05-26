@@ -1,5 +1,10 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.6 — 2026-05-26
+
+### Fixed
+- **Software Updates not detecting new releases** — `_brew_latest_version()` in `update_checker.py` called `brew info --json` without refreshing the local tap first, returning the stale cached version for hours until Homebrew's auto-update triggered. Added `_refresh_tap()` which does a fast-forward `git fetch` + `git pull --ff-only` on the `clickbrain/homebrew-vllm-mlx-ui` tap repository before reading the formula version.
+
 ## v0.8.5 — 2026-05-26
 
 ### Fixed

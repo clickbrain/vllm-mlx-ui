@@ -450,11 +450,14 @@ def _homebrew_formula_version() -> str | None:
 def _brew_latest_version() -> str | None:
     """Return the latest formula version from ``brew info --json``.
 
-    Returns the ``versions.stable`` field — the latest version Homebrew would
-    install when running ``brew upgrade vllm-mlx-ui``.  Returns ``None`` when
-    the brew CLI is unavailable or the formula has no stable version.
+    Refreshes the tap repository first so ``brew info`` sees the latest formula
+    immediately instead of relying on Homebrew's auto-update throttle (which
+    may take hours to detect a new release).  Returns ``None`` when the brew
+    CLI is unavailable or the formula has no stable version.
     """
     try:
+        # Refresh the tap so brew info picks up the latest formula.
+        _refresh_tap()
         import json
         result = subprocess.run(
             ["brew", "info", "--json", "vllm-mlx-ui"],
@@ -469,6 +472,40 @@ def _brew_latest_version() -> str | None:
     except Exception:
         logger.warning("Operation failed", exc_info=True)
     return None
+
+
+def _refresh_tap() -> None:
+    """Fast-forward the homebrew tap repo so brew sees the latest formula."""
+    try:
+        from pathlib import Path as _Path
+        tap_dir: _Path | None = None
+        result = subprocess.run(
+            ["brew", "--repo", "clickbrain/vllm-mlx-ui"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            tap_dir = _Path(result.stdout.strip())
+        if not tap_dir or not tap_dir.exists():
+            for candidate in [
+                _Path.home() / ".homebrew" / "Library" / "Taps",
+                _Path("/opt/homebrew/Library/Taps"),
+                _Path("/usr/local/Homebrew/Library/Taps"),
+            ]:
+                candidate = candidate / "clickbrain" / "homebrew-vllm-mlx-ui"
+                if candidate.exists():
+                    tap_dir = candidate
+                    break
+        if tap_dir and tap_dir.exists():
+            subprocess.run(
+                ["git", "fetch", "origin"],
+                cwd=str(tap_dir), capture_output=True, timeout=10,
+            )
+            subprocess.run(
+                ["git", "pull", "--ff-only", "origin", "main"],
+                cwd=str(tap_dir), capture_output=True, timeout=10,
+            )
+    except Exception:
+        logger.warning("Failed to refresh tap", exc_info=True)
 
 
 def _detect_install_method() -> str:
