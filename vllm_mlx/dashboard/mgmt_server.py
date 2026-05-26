@@ -741,6 +741,7 @@ def model_scores(req: _ModelScoresRequest, _: None = Depends(_check_auth)) -> di
 
 
 
+@app.post("/server/load")
 def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
     """Update the configured model and start (or restart) the server."""
     model_id = req.model_id.strip()

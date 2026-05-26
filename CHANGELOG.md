@@ -1,5 +1,10 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.8 — 2026-05-26
+
+### Fixed
+- **Model switch from Serve view was broken (405 error)** — `load_model()` at `mgmt_server.py:744` was a complete, working implementation (stops running server, saves new model config, starts server with new model) but was missing its `@app.post("/server/load")` route decorator, so the route was never registered. Frontend calls to `POST /server/load` returned HTTP 405. Added the missing decorator.
+
 ## v0.8.7 — 2026-05-26
 
 ### Fixed
