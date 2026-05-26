@@ -1,0 +1,688 @@
+{
+  "qwen-coder-2.5-32b": {
+    "release_date": "2024-09-19",
+    "arch_type": "qwen2",
+    "param_count_b": 32,
+    "aliases": ["qwen/qwen2.5-coder-32b", "qwen/qwen2.5-coder-32b-instruct"],
+    "scores": {"mmlu": 82, "humaneval": 90.2, "math": 75, "gpqa": 45, "ifeval": 84}
+  },
+  "qwen-coder-2.5-14b": {
+    "release_date": "2024-09-19",
+    "arch_type": "qwen2",
+    "param_count_b": 14,
+    "aliases": ["qwen/qwen2.5-coder-14b", "qwen/qwen2.5-coder-14b-instruct"],
+    "scores": {"mmlu": 78, "humaneval": 85, "math": 70, "gpqa": 38, "ifeval": 80}
+  },
+  "qwen-coder-2.5-7b": {
+    "release_date": "2024-09-19",
+    "arch_type": "qwen2",
+    "param_count_b": 7,
+    "aliases": ["qwen/qwen2.5-coder-7b", "qwen/qwen2.5-coder-7b-instruct"],
+    "scores": {"mmlu": 72, "humaneval": 78, "math": 62, "gpqa": 30, "ifeval": 74}
+  },
+  "qwen-coder-2.5-1.5b": {
+    "release_date": "2024-09-19",
+    "arch_type": "qwen2",
+    "param_count_b": 1.5,
+    "aliases": ["qwen/qwen2.5-coder-1.5b", "qwen/qwen2.5-coder-1.5b-instruct"],
+    "scores": {"mmlu": 60, "humaneval": 44, "math": 46, "gpqa": 17, "ifeval": 62}
+  },
+  "qwen-2.5-72b": {
+    "release_date": "2024-09-19",
+    "arch_type": "qwen2",
+    "param_count_b": 72,
+    "aliases": ["qwen/qwen2.5-72b", "qwen/qwen2.5-72b-instruct"],
+    "scores": {"mmlu": 85, "humaneval": 73, "math": 76.2, "gpqa": 49, "ifeval": 87}
+  },
+  "qwen-2.5-32b": {
+    "release_date": "2024-09-19",
+    "arch_type": "qwen2",
+    "param_count_b": 32,
+    "aliases": ["qwen/qwen2.5-32b", "qwen/qwen2.5-32b-instruct"],
+    "scores": {"mmlu": 82.5, "humaneval": 70.5, "math": 73.8, "gpqa": 45, "ifeval": 84.5}
+  },
+  "qwen-2.5-14b": {
+    "release_date": "2024-09-19",
+    "arch_type": "qwen2",
+    "param_count_b": 14,
+    "aliases": ["qwen/qwen2.5-14b", "qwen/qwen2.5-14b-instruct"],
+    "scores": {"mmlu": 79.5, "humaneval": 65.5, "math": 68.5, "gpqa": 40, "ifeval": 81}
+  },
+  "qwen-2.5-7b": {
+    "release_date": "2024-09-19",
+    "arch_type": "qwen2",
+    "param_count_b": 7,
+    "aliases": ["qwen/qwen2.5-7b", "qwen/qwen2.5-7b-instruct"],
+    "scores": {"mmlu": 74.2, "humaneval": 62, "math": 62.5, "gpqa": 31, "ifeval": 77}
+  },
+  "qwen-2.5-3b": {
+    "release_date": "2024-09-19",
+    "arch_type": "qwen2",
+    "param_count_b": 3,
+    "aliases": ["qwen/qwen2.5-3b", "qwen/qwen2.5-3b-instruct"],
+    "scores": {"mmlu": 66, "humaneval": 52, "math": 54, "gpqa": 23, "ifeval": 68}
+  },
+  "qwen-2.5-1.5b": {
+    "release_date": "2024-09-19",
+    "arch_type": "qwen2",
+    "param_count_b": 1.5,
+    "aliases": ["qwen/qwen2.5-1.5b", "qwen/qwen2.5-1.5b-instruct"],
+    "scores": {"mmlu": 60, "humaneval": 44, "math": 46, "gpqa": 17, "ifeval": 62}
+  },
+  "qwen-2.5-math-72b": {
+    "release_date": "2024-09-19",
+    "arch_type": "qwen2",
+    "param_count_b": 72,
+    "aliases": ["qwen/qwen2.5-math-72b"],
+    "scores": {"mmlu": 83, "humaneval": 65, "math": 90.2, "gpqa": 42, "ifeval": 80}
+  },
+  "qwen-2.5-math-7b": {
+    "release_date": "2024-09-19",
+    "arch_type": "qwen2",
+    "param_count_b": 7,
+    "aliases": ["qwen/qwen2.5-math-7b"],
+    "scores": {"mmlu": 72, "humaneval": 55, "math": 82, "gpqa": 28, "ifeval": 70}
+  },
+  "qwen3-235b": {
+    "release_date": "2026-04-10",
+    "arch_type": "qwen3",
+    "param_count_b": 235,
+    "aliases": ["qwen/qwen3-235b", "qwen/qwen3-235b-a22b", "qwen/qwen3-235b-a22b-instruct"],
+    "scores": {"mmlu": 88.9, "humaneval": 80.8, "math": 89, "gpqa": 59.1, "ifeval": 91.4}
+  },
+  "qwen3-72b": {
+    "release_date": "2026-04-10",
+    "arch_type": "qwen3",
+    "param_count_b": 72,
+    "aliases": ["qwen/qwen3-72b", "qwen/qwen3-72b-instruct"],
+    "scores": {"mmlu": 87.5, "humaneval": 79, "math": 85.8, "gpqa": 65.5, "ifeval": 89.1}
+  },
+  "qwen3-32b": {
+    "release_date": "2026-04-10",
+    "arch_type": "qwen3",
+    "param_count_b": 32,
+    "aliases": ["qwen/qwen3-32b", "qwen/qwen3-32b-instruct"],
+    "scores": {"mmlu": 84.6, "humaneval": 75, "math": 82.1, "gpqa": 52.8, "ifeval": 86.3}
+  },
+  "qwen3-14b": {
+    "release_date": "2026-04-10",
+    "arch_type": "qwen3",
+    "param_count_b": 14,
+    "aliases": ["qwen/qwen3-14b", "qwen/qwen3-14b-instruct"],
+    "scores": {"mmlu": 81, "humaneval": 70, "math": 75, "gpqa": 43, "ifeval": 83}
+  },
+  "qwen3-8b": {
+    "release_date": "2026-04-10",
+    "arch_type": "qwen3",
+    "param_count_b": 8,
+    "aliases": ["qwen/qwen3-8b", "qwen/qwen3-8b-instruct"],
+    "scores": {"mmlu": 76.3, "humaneval": 66, "math": 70.1, "gpqa": 36, "ifeval": 80.2}
+  },
+  "qwen3-4b": {
+    "release_date": "2026-04-10",
+    "arch_type": "qwen3",
+    "param_count_b": 4,
+    "aliases": ["qwen/qwen3-4b", "qwen/qwen3-4b-instruct"],
+    "scores": {"mmlu": 70, "humaneval": 60, "math": 62, "gpqa": 28, "ifeval": 75}
+  },
+  "qwen3-1.7b": {
+    "release_date": "2026-04-10",
+    "arch_type": "qwen3",
+    "param_count_b": 1.7,
+    "aliases": ["qwen/qwen3-1.7b", "qwen/qwen3-1.7b-instruct"],
+    "scores": {"mmlu": 60, "humaneval": 50, "math": 50, "gpqa": 20, "ifeval": 65}
+  },
+  "qwen3-coder-235b": {
+    "release_date": "2026-04-10",
+    "arch_type": "qwen3",
+    "param_count_b": 235,
+    "aliases": ["qwen/qwen3-coder-235b", "qwen/qwen3-coder-235b-a22b", "qwen/qwen3-coder-235b-a22b-instruct"],
+    "scores": {"mmlu": 89, "humaneval": 90, "math": 86, "gpqa": 60, "ifeval": 91}
+  },
+  "qwen3-coder-next": {
+    "release_date": "2026-02-03",
+    "arch_type": "qwen3_moe",
+    "param_count_b": 80,
+    "aliases": ["qwen/qwen3-coder-next", "qwen/qwen3-coder-next-fp8"],
+    "scores": {"mmlu": 72, "humaneval": 84, "math": 68, "gpqa": 40, "ifeval": 78}
+  },
+  "qwen3-coder-32b": {
+    "release_date": "2026-04-10",
+    "arch_type": "qwen3",
+    "param_count_b": 32,
+    "aliases": ["qwen/qwen3-coder-32b", "qwen/qwen3-coder-32b-instruct"],
+    "scores": {"mmlu": 85, "humaneval": 86, "math": 81, "gpqa": 53, "ifeval": 87}
+  },
+  "qwen3-coder-14b": {
+    "release_date": "2026-04-10",
+    "arch_type": "qwen3",
+    "param_count_b": 14,
+    "aliases": ["qwen/qwen3-coder-14b", "qwen/qwen3-coder-14b-instruct"],
+    "scores": {"mmlu": 81, "humaneval": 82, "math": 74, "gpqa": 43, "ifeval": 83}
+  },
+  "qwen3-coder-8b": {
+    "release_date": "2026-04-10",
+    "arch_type": "qwen3",
+    "param_count_b": 8,
+    "aliases": ["qwen/qwen3-coder-8b", "qwen/qwen3-coder-8b-instruct"],
+    "scores": {"mmlu": 76, "humaneval": 77, "math": 69, "gpqa": 36, "ifeval": 80}
+  },
+  "qwq-32b": {
+    "release_date": "2025-03-06",
+    "arch_type": "qwen2",
+    "param_count_b": 32,
+    "aliases": ["qwen/qwq-32b", "qwen/qwq-32b-preview"],
+    "scores": {"mmlu": 85, "humaneval": 78, "math": 92, "gpqa": 65, "ifeval": 82}
+  },
+  "deepseek-r1-671b": {
+    "release_date": "2025-01-20",
+    "arch_type": "deepseek",
+    "param_count_b": 671,
+    "aliases": ["deepseek-ai/deepseek-r1"],
+    "scores": {"mmlu": 90.8, "humaneval": 96, "math": 97.3, "gpqa": 71.5, "ifeval": 83.3}
+  },
+  "deepseek-r1-distill-qwen-32b": {
+    "release_date": "2025-01-20",
+    "arch_type": "qwen2",
+    "param_count_b": 32,
+    "aliases": ["deepseek-ai/deepseek-r1-distill-qwen-32b"],
+    "scores": {"mmlu": 87.5, "humaneval": 92, "math": 94.9, "gpqa": 62.1, "ifeval": 83}
+  },
+  "deepseek-r1-distill-qwen-14b": {
+    "release_date": "2025-01-20",
+    "arch_type": "qwen2",
+    "param_count_b": 14,
+    "aliases": ["deepseek-ai/deepseek-r1-distill-qwen-14b"],
+    "scores": {"mmlu": 83, "humaneval": 83, "math": 93.9, "gpqa": 59.1, "ifeval": 80}
+  },
+  "deepseek-r1-distill-qwen-7b": {
+    "release_date": "2025-01-20",
+    "arch_type": "qwen2",
+    "param_count_b": 7,
+    "aliases": ["deepseek-ai/deepseek-r1-distill-qwen-7b"],
+    "scores": {"mmlu": 77, "humaneval": 78, "math": 91.6, "gpqa": 49.1, "ifeval": 75}
+  },
+  "deepseek-r1-distill-llama-70b": {
+    "release_date": "2025-01-20",
+    "arch_type": "llama",
+    "param_count_b": 70,
+    "aliases": ["deepseek-ai/deepseek-r1-distill-llama-70b"],
+    "scores": {"mmlu": 86.7, "humaneval": 86, "math": 95, "gpqa": 65.2, "ifeval": 82}
+  },
+  "deepseek-r1-distill-llama-8b": {
+    "release_date": "2025-01-20",
+    "arch_type": "llama",
+    "param_count_b": 8,
+    "aliases": ["deepseek-ai/deepseek-r1-distill-llama-8b"],
+    "scores": {"mmlu": 72.8, "humaneval": 72, "math": 89.1, "gpqa": 49, "ifeval": 69}
+  },
+  "deepseek-v3-671b": {
+    "release_date": "2024-12-26",
+    "arch_type": "deepseek",
+    "param_count_b": 671,
+    "aliases": ["deepseek-ai/deepseek-v3"],
+    "scores": {"mmlu": 88.5, "humaneval": 91.6, "math": 90.2, "gpqa": 59.1, "ifeval": 86}
+  },
+  "deepseek-coder-v2-236b": {
+    "release_date": "2024-06-17",
+    "arch_type": "deepseek",
+    "param_count_b": 236,
+    "aliases": ["deepseek-ai/deepseek-coder-v2", "deepseek-ai/deepseek-coder-v2-instruct"],
+    "scores": {"mmlu": 79.2, "humaneval": 85, "math": 71.5, "gpqa": 45, "ifeval": 78}
+  },
+  "ds4-deepseek-v4": {
+    "release_date": "2026-02-01",
+    "arch_type": "ds4",
+    "param_count_b": 400,
+    "aliases": ["antirez/ds4", "swival/ds4-m5"],
+    "scores": {"mmlu": 85, "humaneval": 88, "math": 82, "gpqa": 55, "ifeval": 84}
+  },
+  "llama-3.3-70b": {
+    "release_date": "2024-12-06",
+    "arch_type": "llama",
+    "param_count_b": 70,
+    "aliases": ["meta-llama/llama-3.3-70b", "meta-llama/llama-3.3-70b-instruct"],
+    "scores": {"mmlu": 86, "humaneval": 72, "math": 77, "gpqa": 50.1, "ifeval": 88.4}
+  },
+  "llama-3.2-90b": {
+    "release_date": "2024-09-25",
+    "arch_type": "llama",
+    "param_count_b": 90,
+    "aliases": ["meta-llama/llama-3.2-90b", "meta-llama/llama-3.2-90b-vision"],
+    "scores": {"mmlu": 82.5, "humaneval": 65, "math": 70, "gpqa": 44, "ifeval": 83}
+  },
+  "llama-3.2-11b": {
+    "release_date": "2024-09-25",
+    "arch_type": "llama",
+    "param_count_b": 11,
+    "aliases": ["meta-llama/llama-3.2-11b", "meta-llama/llama-3.2-11b-vision"],
+    "scores": {"mmlu": 73.5, "humaneval": 57, "math": 60, "gpqa": 30, "ifeval": 77}
+  },
+  "llama-3.2-3b": {
+    "release_date": "2024-09-25",
+    "arch_type": "llama",
+    "param_count_b": 3,
+    "aliases": ["meta-llama/llama-3.2-3b", "meta-llama/llama-3.2-3b-instruct"],
+    "scores": {"mmlu": 63, "humaneval": 52, "math": 50, "gpqa": 22, "ifeval": 70}
+  },
+  "llama-3.2-1b": {
+    "release_date": "2024-09-25",
+    "arch_type": "llama",
+    "param_count_b": 1,
+    "aliases": ["meta-llama/llama-3.2-1b", "meta-llama/llama-3.2-1b-instruct"],
+    "scores": {"mmlu": 49.3, "humaneval": 35, "math": 34, "gpqa": 12, "ifeval": 59}
+  },
+  "llama-3.1-405b": {
+    "release_date": "2024-07-23",
+    "arch_type": "llama",
+    "param_count_b": 405,
+    "aliases": ["meta-llama/llama-3.1-405b", "meta-llama/llama-3.1-405b-instruct"],
+    "scores": {"mmlu": 88.6, "humaneval": 76, "math": 73.8, "gpqa": 51.1, "ifeval": 87.5}
+  },
+  "llama-3.1-70b": {
+    "release_date": "2024-07-23",
+    "arch_type": "llama",
+    "param_count_b": 70,
+    "aliases": ["meta-llama/llama-3.1-70b", "meta-llama/llama-3.1-70b-instruct"],
+    "scores": {"mmlu": 83.6, "humaneval": 68, "math": 68, "gpqa": 46.7, "ifeval": 85}
+  },
+  "llama-3.1-8b": {
+    "release_date": "2024-07-23",
+    "arch_type": "llama",
+    "param_count_b": 8,
+    "aliases": ["meta-llama/llama-3.1-8b", "meta-llama/llama-3.1-8b-instruct"],
+    "scores": {"mmlu": 69.4, "humaneval": 62, "math": 51.9, "gpqa": 25.7, "ifeval": 77.5}
+  },
+  "llama-3-70b": {
+    "release_date": "2024-04-18",
+    "arch_type": "llama",
+    "param_count_b": 70,
+    "aliases": ["meta-llama/llama-3-70b", "meta-llama/llama-3-70b-instruct"],
+    "scores": {"mmlu": 79.5, "humaneval": 62, "math": 50.4, "gpqa": 39, "ifeval": 77}
+  },
+  "llama-3-8b": {
+    "release_date": "2024-04-18",
+    "arch_type": "llama",
+    "param_count_b": 8,
+    "aliases": ["meta-llama/llama-3-8b", "meta-llama/llama-3-8b-instruct"],
+    "scores": {"mmlu": 68.4, "humaneval": 62, "math": 30, "gpqa": 22, "ifeval": 76.5}
+  },
+  "llama-2-70b": {
+    "release_date": "2023-07-18",
+    "arch_type": "llama",
+    "param_count_b": 70,
+    "aliases": ["meta-llama/llama-2-70b", "meta-llama/llama-2-70b-chat"],
+    "scores": {"mmlu": 68.9, "humaneval": 30, "math": 32, "gpqa": 28, "ifeval": 60}
+  },
+  "llama-2-13b": {
+    "release_date": "2023-07-18",
+    "arch_type": "llama",
+    "param_count_b": 13,
+    "aliases": ["meta-llama/llama-2-13b", "meta-llama/llama-2-13b-chat"],
+    "scores": {"mmlu": 57.3, "humaneval": 22, "math": 27, "gpqa": 20, "ifeval": 52}
+  },
+  "llama-2-7b": {
+    "release_date": "2023-07-18",
+    "arch_type": "llama",
+    "param_count_b": 7,
+    "aliases": ["meta-llama/llama-2-7b", "meta-llama/llama-2-7b-chat"],
+    "scores": {"mmlu": 48.5, "humaneval": 18, "math": 20, "gpqa": 14, "ifeval": 45}
+  },
+  "llama-4-maverick": {
+    "release_date": "2026-04-17",
+    "arch_type": "llama",
+    "param_count_b": 17,
+    "aliases": ["meta-llama/llama-4-maverick", "meta-llama/llama-4-maverick-17b"],
+    "scores": {"mmlu": 86, "humaneval": 78, "math": 82, "gpqa": 55, "ifeval": 87}
+  },
+  "llama-4-scout": {
+    "release_date": "2026-04-17",
+    "arch_type": "llama",
+    "param_count_b": 17,
+    "aliases": ["meta-llama/llama-4-scout", "meta-llama/llama-4-scout-17b"],
+    "scores": {"mmlu": 85.5, "humaneval": 76, "math": 80, "gpqa": 53, "ifeval": 86}
+  },
+  "mistral-small-3.1-24b": {
+    "release_date": "2025-03-13",
+    "arch_type": "mistral",
+    "param_count_b": 24,
+    "aliases": ["mistralai/mistral-small-3.1-24b", "mistralai/mistral-small-3.1-24b-instruct"],
+    "scores": {"mmlu": 81, "humaneval": 72, "math": 67, "gpqa": 42, "ifeval": 80}
+  },
+  "mistral-small-3-24b": {
+    "release_date": "2025-01-22",
+    "arch_type": "mistral",
+    "param_count_b": 24,
+    "aliases": ["mistralai/mistral-small-24b", "mistralai/mistral-small-24b-instruct"],
+    "scores": {"mmlu": 81, "humaneval": 72, "math": 67, "gpqa": 42, "ifeval": 80}
+  },
+  "mistral-nemo-12b": {
+    "release_date": "2024-07-18",
+    "arch_type": "mistral",
+    "param_count_b": 12,
+    "aliases": ["mistralai/mistral-nemo", "mistralai/mistral-nemo-instruct"],
+    "scores": {"mmlu": 68, "humaneval": 64, "math": 48, "gpqa": 28, "ifeval": 76}
+  },
+  "mistral-7b-v0.3": {
+    "release_date": "2024-05-22",
+    "arch_type": "mistral",
+    "param_count_b": 7,
+    "aliases": ["mistralai/mistral-7b-v0.3", "mistralai/mistral-7b-v0.3-instruct"],
+    "scores": {"mmlu": 64.2, "humaneval": 40, "math": 28, "gpqa": 22, "ifeval": 55}
+  },
+  "mixtral-8x22b": {
+    "release_date": "2024-04-17",
+    "arch_type": "mistral",
+    "param_count_b": 141,
+    "aliases": ["mistralai/mixtral-8x22b", "mistralai/mixtral-8x22b-instruct"],
+    "scores": {"mmlu": 77.8, "humaneval": 62, "math": 58, "gpqa": 40, "ifeval": 74}
+  },
+  "mixtral-8x7b": {
+    "release_date": "2023-12-11",
+    "arch_type": "mistral",
+    "param_count_b": 47,
+    "aliases": ["mistralai/mixtral-8x7b", "mistralai/mixtral-8x7b-instruct"],
+    "scores": {"mmlu": 70.6, "humaneval": 52, "math": 42, "gpqa": 32, "ifeval": 68}
+  },
+  "codestral-25.1-250b": {
+    "release_date": "2025-01-13",
+    "arch_type": "mistral",
+    "param_count_b": 250,
+    "aliases": ["mistralai/codestral-25.1"],
+    "scores": {"mmlu": 82, "humaneval": 88, "math": 75, "gpqa": 45, "ifeval": 80}
+  },
+  "codestral-22b": {
+    "release_date": "2024-05-29",
+    "arch_type": "mistral",
+    "param_count_b": 22,
+    "aliases": ["mistralai/codestral-22b"],
+    "scores": {"mmlu": 78, "humaneval": 81, "math": 62, "gpqa": 32, "ifeval": 74}
+  },
+  "gemma-3-27b": {
+    "release_date": "2025-03-06",
+    "arch_type": "gemma",
+    "param_count_b": 27,
+    "aliases": ["google/gemma-3-27b", "google/gemma-3-27b-it"],
+    "scores": {"mmlu": 87, "humaneval": 75.5, "math": 80.5, "gpqa": 48.8, "ifeval": 85.7}
+  },
+  "gemma-3-12b": {
+    "release_date": "2025-03-06",
+    "arch_type": "gemma",
+    "param_count_b": 12,
+    "aliases": ["google/gemma-3-12b", "google/gemma-3-12b-it"],
+    "scores": {"mmlu": 82.5, "humaneval": 69.2, "math": 74, "gpqa": 42.5, "ifeval": 81}
+  },
+  "gemma-3-4b": {
+    "release_date": "2025-03-06",
+    "arch_type": "gemma",
+    "param_count_b": 4,
+    "aliases": ["google/gemma-3-4b", "google/gemma-3-4b-it"],
+    "scores": {"mmlu": 74.5, "humaneval": 60, "math": 62.5, "gpqa": 33, "ifeval": 74}
+  },
+  "gemma-3-1b": {
+    "release_date": "2025-03-06",
+    "arch_type": "gemma",
+    "param_count_b": 1,
+    "aliases": ["google/gemma-3-1b", "google/gemma-3-1b-it"],
+    "scores": {"mmlu": 58, "humaneval": 40, "math": 44, "gpqa": 16, "ifeval": 62}
+  },
+  "gemma-2-27b": {
+    "release_date": "2024-06-27",
+    "arch_type": "gemma",
+    "param_count_b": 27,
+    "aliases": ["google/gemma-2-27b", "google/gemma-2-27b-it"],
+    "scores": {"mmlu": 75.2, "humaneval": 55, "math": 52, "gpqa": 35, "ifeval": 72}
+  },
+  "gemma-2-9b": {
+    "release_date": "2024-06-27",
+    "arch_type": "gemma",
+    "param_count_b": 9,
+    "aliases": ["google/gemma-2-9b", "google/gemma-2-9b-it"],
+    "scores": {"mmlu": 64.5, "humaneval": 48, "math": 40, "gpqa": 25, "ifeval": 65}
+  },
+  "phi-4-14b": {
+    "release_date": "2024-12-12",
+    "arch_type": "phi",
+    "param_count_b": 14,
+    "aliases": ["microsoft/phi-4"],
+    "scores": {"mmlu": 84.8, "humaneval": 82.6, "math": 80.6, "gpqa": 56.1, "ifeval": 86.5}
+  },
+  "phi-4-mini-3.8b": {
+    "release_date": "2025-04-04",
+    "arch_type": "phi",
+    "param_count_b": 3.8,
+    "aliases": ["microsoft/phi-4-mini"],
+    "scores": {"mmlu": 78, "humaneval": 72.5, "math": 73, "gpqa": 40, "ifeval": 80}
+  },
+  "phi-4-reasoning-9b": {
+    "release_date": "2025-04-30",
+    "arch_type": "phi",
+    "param_count_b": 9,
+    "aliases": ["microsoft/phi-4-reasoning"],
+    "scores": {"mmlu": 86, "humaneval": 85, "math": 92, "gpqa": 62, "ifeval": 87}
+  },
+  "phi-3.5-mini-3.8b": {
+    "release_date": "2024-08-23",
+    "arch_type": "phi",
+    "param_count_b": 3.8,
+    "aliases": ["microsoft/phi-3.5-mini"],
+    "scores": {"mmlu": 69, "humaneval": 62, "math": 46, "gpqa": 30, "ifeval": 72}
+  },
+  "smollm2-1.7b": {
+    "release_date": "2024-10-25",
+    "arch_type": "smollm",
+    "param_count_b": 1.7,
+    "aliases": ["huggingface/smollm2-1.7b"],
+    "scores": {"mmlu": 51, "humaneval": 38, "math": 30, "gpqa": 13, "ifeval": 52}
+  },
+  "smollm2-360m": {
+    "release_date": "2024-10-25",
+    "arch_type": "smollm",
+    "param_count_b": 0.36,
+    "aliases": ["huggingface/smollm2-360m"],
+    "scores": {"mmlu": 40, "humaneval": 20, "math": 15, "gpqa": 8, "ifeval": 38}
+  },
+  "smollm2-135m": {
+    "release_date": "2024-10-25",
+    "arch_type": "smollm",
+    "param_count_b": 0.135,
+    "aliases": ["huggingface/smollm2-135m"],
+    "scores": {"mmlu": 32, "humaneval": 12, "math": 10, "gpqa": 5, "ifeval": 30}
+  },
+  "granite-3.2-8b": {
+    "release_date": "2025-03-06",
+    "arch_type": "granite",
+    "param_count_b": 8,
+    "aliases": ["ibm/granite-3.2-8b", "ibm/granite-3.2-8b-instruct"],
+    "scores": {"mmlu": 75, "humaneval": 68, "math": 64, "gpqa": 35, "ifeval": 78}
+  },
+  "granite-3.2-2b": {
+    "release_date": "2025-03-06",
+    "arch_type": "granite",
+    "param_count_b": 2,
+    "aliases": ["ibm/granite-3.2-2b", "ibm/granite-3.2-2b-instruct"],
+    "scores": {"mmlu": 62, "humaneval": 50, "math": 45, "gpqa": 20, "ifeval": 60}
+  },
+  "granite-3.1-8b": {
+    "release_date": "2024-12-18",
+    "arch_type": "granite",
+    "param_count_b": 8,
+    "aliases": ["ibm/granite-3.1-8b", "ibm/granite-3.1-8b-instruct"],
+    "scores": {"mmlu": 74, "humaneval": 66, "math": 62, "gpqa": 33, "ifeval": 76}
+  },
+  "granite-code-34b": {
+    "release_date": "2024-10-21",
+    "arch_type": "granite",
+    "param_count_b": 34,
+    "aliases": ["ibm/granite-34b-code", "ibm/granite-34b-code-instruct"],
+    "scores": {"mmlu": 72, "humaneval": 74, "math": 58, "gpqa": 30, "ifeval": 72}
+  },
+  "granite-code-20b": {
+    "release_date": "2025-01-28",
+    "arch_type": "granite",
+    "param_count_b": 20,
+    "aliases": ["ibm/granite-3.1-20b-code", "ibm/granite-3.1-20b-code-instruct"],
+    "scores": {"mmlu": 76, "humaneval": 78, "math": 65, "gpqa": 36, "ifeval": 76}
+  },
+  "deepseek-coder-v2-lite-16b": {
+    "release_date": "2024-06-17",
+    "arch_type": "deepseek",
+    "param_count_b": 16,
+    "aliases": ["deepseek-ai/deepseek-coder-v2-lite"],
+    "scores": {"mmlu": 71.5, "humaneval": 76, "math": 62, "gpqa": 30, "ifeval": 70}
+  },
+  "starcoder2-15b": {
+    "release_date": "2024-03-13",
+    "arch_type": "starcoder",
+    "param_count_b": 15,
+    "aliases": ["bigcode/starcoder2-15b"],
+    "scores": {"mmlu": 60, "humaneval": 68, "math": 48, "gpqa": 22, "ifeval": 60}
+  },
+  "starcoder2-7b": {
+    "release_date": "2024-03-13",
+    "arch_type": "starcoder",
+    "param_count_b": 7,
+    "aliases": ["bigcode/starcoder2-7b"],
+    "scores": {"mmlu": 55, "humaneval": 62, "math": 40, "gpqa": 18, "ifeval": 55}
+  },
+  "starcoder2-3b": {
+    "release_date": "2024-03-13",
+    "arch_type": "starcoder",
+    "param_count_b": 3,
+    "aliases": ["bigcode/starcoder2-3b"],
+    "scores": {"mmlu": 48, "humaneval": 54, "math": 32, "gpqa": 14, "ifeval": 48}
+  },
+  "yi-34b": {
+    "release_date": "2023-11-22",
+    "arch_type": "yi",
+    "param_count_b": 34,
+    "aliases": ["01-ai/yi-34b", "01-ai/yi-34b-chat"],
+    "scores": {"mmlu": 76.3, "humaneval": 48, "math": 42, "gpqa": 30, "ifeval": 65}
+  },
+  "yi-9b": {
+    "release_date": "2024-03-09",
+    "arch_type": "yi",
+    "param_count_b": 9,
+    "aliases": ["01-ai/yi-9b", "01-ai/yi-9b-chat"],
+    "scores": {"mmlu": 64, "humaneval": 42, "math": 35, "gpqa": 22, "ifeval": 58}
+  },
+  "yi-coder-9b": {
+    "release_date": "2024-09-05",
+    "arch_type": "yi",
+    "param_count_b": 9,
+    "aliases": ["01-ai/yi-coder-9b", "01-ai/yi-coder-9b-chat"],
+    "scores": {"mmlu": 62, "humaneval": 66, "math": 48, "gpqa": 20, "ifeval": 58}
+  },
+  "command-r-plus": {
+    "release_date": "2024-04-04",
+    "arch_type": "command-r",
+    "param_count_b": 104,
+    "aliases": ["cohere/command-r-plus", "cohere/command-r-plus-08-2024"],
+    "scores": {"mmlu": 75.7, "humaneval": 55, "math": 48, "gpqa": 36, "ifeval": 72}
+  },
+  "command-r-07-2024": {
+    "release_date": "2024-08-03",
+    "arch_type": "command-r",
+    "param_count_b": 35,
+    "aliases": ["cohere/command-r-07-2024", "cohere/command-r-v01"],
+    "scores": {"mmlu": 71.5, "humaneval": 48, "math": 42, "gpqa": 28, "ifeval": 68}
+  },
+  "command-r7b": {
+    "release_date": "2025-01-20",
+    "arch_type": "command-r",
+    "param_count_b": 7,
+    "aliases": ["cohere/command-r7b"],
+    "scores": {"mmlu": 62, "humaneval": 50, "math": 42, "gpqa": 22, "ifeval": 60}
+  },
+  "skywork-o1": {
+    "release_date": "2024-12-08",
+    "arch_type": "qwen2",
+    "param_count_b": 32,
+    "aliases": ["skywork/skywork-o1"],
+    "scores": {"mmlu": 82, "humaneval": 72, "math": 88, "gpqa": 50, "ifeval": 78}
+  },
+  "olmo-2-13b": {
+    "release_date": "2024-11-12",
+    "arch_type": "olmo",
+    "param_count_b": 13,
+    "aliases": ["allenai/olmo-2-13b"],
+    "scores": {"mmlu": 68, "humaneval": 52, "math": 42, "gpqa": 28, "ifeval": 65}
+  },
+  "olmo-2-7b": {
+    "release_date": "2024-11-12",
+    "arch_type": "olmo",
+    "param_count_b": 7,
+    "aliases": ["allenai/olmo-2-7b"],
+    "scores": {"mmlu": 62, "humaneval": 45, "math": 36, "gpqa": 22, "ifeval": 58}
+  },
+  "nemotron-4-340b": {
+    "release_date": "2024-06-17",
+    "arch_type": "nemotron",
+    "param_count_b": 340,
+    "aliases": ["nvidia/nemotron-4-340b"],
+    "scores": {"mmlu": 81.8, "humaneval": 58, "math": 52, "gpqa": 42, "ifeval": 76}
+  },
+  "nemotron-mini-4b": {
+    "release_date": "2024-07-12",
+    "arch_type": "nemotron",
+    "param_count_b": 4,
+    "aliases": ["nvidia/nemotron-mini-4b"],
+    "scores": {"mmlu": 62, "humaneval": 44, "math": 36, "gpqa": 20, "ifeval": 55}
+  },
+  "tulu-3-70b": {
+    "release_date": "2024-11-05",
+    "arch_type": "llama",
+    "param_count_b": 70,
+    "aliases": ["allenai/tulu-3-70b"],
+    "scores": {"mmlu": 81, "humaneval": 68, "math": 62, "gpqa": 42, "ifeval": 78}
+  },
+  "tulu-3-8b": {
+    "release_date": "2024-11-05",
+    "arch_type": "llama",
+    "param_count_b": 8,
+    "aliases": ["allenai/tulu-3-8b"],
+    "scores": {"mmlu": 70, "humaneval": 62, "math": 52, "gpqa": 28, "ifeval": 72}
+  },
+  "codegemma-7b": {
+    "release_date": "2024-04-09",
+    "arch_type": "gemma",
+    "param_count_b": 7,
+    "aliases": ["google/codegemma-7b"],
+    "scores": {"mmlu": 58, "humaneval": 62, "math": 34, "gpqa": 18, "ifeval": 55}
+  },
+  "c4ai-command": {
+    "release_date": "2024-03-12",
+    "arch_type": "command-r",
+    "param_count_b": 35,
+    "aliases": ["cohere/c4ai-command", "cohere/command-r"],
+    "scores": {"mmlu": 68, "humaneval": 42, "math": 32, "gpqa": 24, "ifeval": 60}
+  },
+  "falcon-180b": {
+    "release_date": "2023-09-06",
+    "arch_type": "falcon",
+    "param_count_b": 180,
+    "aliases": ["tiiuae/falcon-180b"],
+    "scores": {"mmlu": 70.4, "humaneval": 32, "math": 28, "gpqa": 26, "ifeval": 56}
+  },
+  "falcon-40b": {
+    "release_date": "2023-05-25",
+    "arch_type": "falcon",
+    "param_count_b": 40,
+    "aliases": ["tiiuae/falcon-40b"],
+    "scores": {"mmlu": 58.6, "humaneval": 25, "math": 22, "gpqa": 18, "ifeval": 50}
+  },
+  "falcon-7b": {
+    "release_date": "2023-05-25",
+    "arch_type": "falcon",
+    "param_count_b": 7,
+    "aliases": ["tiiuae/falcon-7b"],
+    "scores": {"mmlu": 45.8, "humaneval": 18, "math": 15, "gpqa": 12, "ifeval": 42}
+  },
+  "dbrx-132b": {
+    "release_date": "2024-03-27",
+    "arch_type": "dbrx",
+    "param_count_b": 132,
+    "aliases": ["databricks/dbrx-132b"],
+    "scores": {"mmlu": 76.1, "humaneval": 50, "math": 42, "gpqa": 34, "ifeval": 66}
+  }
+}

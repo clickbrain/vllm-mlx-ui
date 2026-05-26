@@ -1,6 +1,20 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.3 — 2026-05-23
+## v0.8.4 — 2026-05-25
+
+### Added
+- **Model family scoring system** — Three-tier resolution pipeline (curated table → base_model tag → prefix heuristic) that maps every HF model to a canonical family with release date, architecture type, and benchmark scores. `model_families.json` curates ~80 families. Fixes the root cause of re-upload wins: Outlier-Ai Qwen2.5-Coder-32B re-upload (April 2026) correctly resolves to the Qwen2.5-Coder family (September 2024), losing "Best for Code" to genuinely newer models.
+- **Qwen3-Coder-Next support** — Added to curated table (Feb 2026, 80B MoE, 3B active). Unlisted variants (e.g. `qwen3-coder-ultra`) are caught by a new prefix-heuristic fallback: normalized model names that share ≥60% of their characters with a known family key inherit that family's release date and scores. This handles future model variants without requiring a table update.
+- **Max-age filter granularity** — Settings now offers: 2 weeks, 1, 2, 3, 4, 5, 6, 12, 18 months, or Any Age (replaced the old 6/12/18/24/36 month set).
+
+### Changed
+- **Scoring weights** — popularity signal removed, benchmark increased from 30% → 35%, recency reduced from 25% → 20%. Final weights: name/tag affinity 35%, benchmark 35%, recency 20%, utilization 10%.
+- **Recency uses family release date** — Derivatives (fine-tunes, quants, re-uploads) use their base model family's release date for recency calculation, not the HF repo creation date. Originals without a base_model tag keep their own createdAt. This prevents re-upload timestamp gaming.
+- **Benchmark scores merge family + leaderboard data** — Family data scores are preferred when non-null (always available for known families). The leaderboard cache acts as a supplement, not the primary source.
+- **Max-age filter options** — replaced 6/12/18/24/36 months with 2wk/1mo/2mo/3mo/4mo/5mo/6mo/12mo/18mo/Any Age.
+
+### Fixed
+- **HF search now uses `full=true`** — Returns `cardData.base_model` and `config` in the initial response, eliminating the need for per-model round-trips to resolve family relationships. The family resolver batches all results in one pass.
 
 ### Added
 - **Feature discovery after upgrades** — After "Install Updates & Restart", the system snapshots each engine's config schema before upgrading and diffs it against the post-upgrade schemas. Any new settings keys found (e.g. `mtp_draft`, `thinking`) are surfaced in a "New Features Discovered" banner in Settings. The banner persists across the process restart and can be dismissed with "Got it".

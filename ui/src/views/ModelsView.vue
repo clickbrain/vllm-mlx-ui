@@ -535,11 +535,15 @@ watch(activeTab, (tab) => {
           <span class="uc-age-text">Max age:</span>
           <select v-model="maxAgeMonths" class="uc-age-select">
             <option :value="0">Any age</option>
+            <option :value="0.5">2 weeks</option>
+            <option :value="1">1 month</option>
+            <option :value="2">2 months</option>
+            <option :value="3">3 months</option>
+            <option :value="4">4 months</option>
+            <option :value="5">5 months</option>
             <option :value="6">6 months</option>
             <option :value="12">12 months</option>
             <option :value="18">18 months (default)</option>
-            <option :value="24">24 months</option>
-            <option :value="36">3 years</option>
           </select>
         </label>
       </div>

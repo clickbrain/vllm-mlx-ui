@@ -927,8 +927,8 @@ def search_hf_models(
         "sort": hf_sort,
         "direction": hf_direction,
         "limit": str(fetch_limit),
-        "full": "false",
-        "config": "false",
+        "full": "true",
+        "config": "true",
     }
     if query.strip():
         params["search"] = query.strip()
@@ -958,6 +958,13 @@ def search_hf_models(
         resp.raise_for_status()
         results = []
         raw_models = resp.json()
+        # Lazy-import the family resolver — it loads the curated table on init
+        try:
+            from vllm_mlx.dashboard.model_family_resolver import ModelFamilyResolver
+            resolver = ModelFamilyResolver()
+        except Exception as e:
+            logger.warning("Operation failed: %s", e, exc_info=True)
+            resolver = None
         for m in raw_models:
             model_id = m.get("modelId") or m.get("id", "")
             if not model_id:
@@ -967,6 +974,20 @@ def search_hf_models(
             fit_level = None
             if size_gb is not None and total_gb > 0:
                 fit_level = _score_fit(size_gb, total_gb)
+            # Resolve family data
+            family_data = None
+            if resolver is not None:
+                try:
+                    card_data = m.get("cardData") or {}
+                    config = m.get("config")
+                    family_data = resolver.resolve(
+                        model_id=model_id,
+                        hf_base_model=card_data.get("base_model"),
+                        hf_tags=model_tags,
+                        hf_config=config,
+                    )
+                except Exception as e:
+                    logger.warning("Family resolution failed for %s: %s", model_id, e, exc_info=True)
             results.append(
                 {
                     "id": model_id,
@@ -979,6 +1000,7 @@ def search_hf_models(
                     "size_gb": size_gb,
                     "fit_level": fit_level,
                     "trending_score": round(float(m.get("trendingScore") or 0.0), 2),
+                    "family_data": family_data,
                 }
             )
         # Return ALL fetched results (the store will handle pagination)

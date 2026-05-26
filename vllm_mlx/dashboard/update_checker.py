@@ -612,6 +612,8 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
                         if _e.install_method == "pip":
                             pkg = _e.get_package_name()
                             inst = _installed_version(pkg)
+                            if inst == "unknown":
+                                inst = _e.get_version() or "unknown"
                             latest = _pypi_latest(pkg)
                         else:
                             inst = _e.get_version() or "unknown"

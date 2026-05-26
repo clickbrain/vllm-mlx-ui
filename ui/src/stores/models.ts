@@ -35,6 +35,7 @@ export interface HFModel {
   size_gb?: number
   fit_level?: string  // perfect | good | marginal | too_tight
   trending_score?: number
+  family_data?: FamilyData | null
 }
 
 export interface DownloadQueueItem {
@@ -120,6 +121,25 @@ export interface BenchmarkScores {
   ifeval?: number
   source: 'fallback' | 'leaderboard' | 'none'
   matched_key?: string
+}
+
+export interface FamilyScores {
+  mmlu?: number | null
+  humaneval?: number | null
+  math?: number | null
+  gpqa?: number | null
+  ifeval?: number | null
+}
+
+export interface FamilyData {
+  family_key: string
+  family_name: string
+  release_date: string
+  arch_type: string
+  param_count_b: number
+  tier: number
+  scores: FamilyScores
+  confidence: string
 }
 
 function deriveQuantization(modelId: string): string {
