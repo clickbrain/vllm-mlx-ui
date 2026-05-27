@@ -109,16 +109,42 @@ class LmStudioEngine(BaseEngine):
 
         return [lms_bin, "server", "start", "--port", str(port)]
 
+    def _is_daemon_running(self) -> bool:
+        """Return True if the LM Studio daemon is reachable via lms server status."""
+        lms = self._find_lms()
+        if not lms:
+            return False
+        try:
+            result = subprocess.run(
+                [lms, "server", "status"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
     def is_installed(self) -> bool:
-        return self._find_lms() is not None
+        """Return True only if lms binary exists AND the LM Studio daemon is running.
+
+        Having the binary alone is not enough — lms requires the LM Studio app to
+        be open and its daemon to be active.  Without the daemon, lms server start
+        exits immediately with "daemon is not running".
+        """
+        return self._find_lms() is not None and self._is_daemon_running()
 
     def check_requirements(self) -> list[str]:
-        """Warn if the `lms` CLI is not installed."""
+        """Warn if the `lms` CLI is not installed or the daemon is not running."""
         if not self._find_lms():
             return [
                 "LM Studio CLI (`lms`) not found on PATH. "
                 "Install LM Studio from https://lmstudio.ai, then enable the CLI "
                 "via LM Studio → Settings → CLI."
+            ]
+        if not self._is_daemon_running():
+            return [
+                "LM Studio app is not running. Open LM Studio, then try again."
             ]
         return []
 

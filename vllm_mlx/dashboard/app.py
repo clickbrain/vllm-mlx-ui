@@ -130,6 +130,27 @@ def _kill_stale_ui(ui_pid_file: Path) -> bool:
 
 
 
+def _should_engine_fallback(cfg: dict, msg: str) -> bool:
+    """Return True when a startup failure looks like an engine-level problem.
+
+    Triggers fallback for:
+    - "not installed" — binary not found at all
+    - desktop-app engines (install_method="external") that exited immediately —
+      e.g. LM Studio daemon not running, LMS CLI can't connect to the app
+    """
+    msg_lower = msg.lower()
+    if "not installed" in msg_lower:
+        return True
+    if "server exited immediately" in msg_lower:
+        try:
+            from vllm_mlx.dashboard.engines.registry import get_engine
+            engine = get_engine(cfg.get("engine_id", "vllm-mlx"))
+            return getattr(engine, "install_method", "") == "external"
+        except Exception:
+            pass
+    return False
+
+
 def _try_engine_fallback(cfg, _msg, load_config, save_config, start_server):
     """When the configured engine is not installed, auto-switch to the first installed one.
 
@@ -269,7 +290,7 @@ def main() -> None:
                 print(f"[vllm-mlx] 🔄 Auto-starting inference server: {_cfg['model']}")
                 _time.sleep(0.5)
                 _ok, _msg = start_server(_cfg)
-                if not _ok and "not installed" in _msg.lower():
+                if not _ok and _should_engine_fallback(_cfg, _msg):
                     _cfg, _ok, _msg = _try_engine_fallback(_cfg, _msg, load_config, save_config, start_server)
                 print(f"[vllm-mlx] {'✅' if _ok else '⚠️ '} {_msg}")
         else:
@@ -278,7 +299,7 @@ def main() -> None:
                 print(f"[vllm-mlx] 🔄 startup_model_behavior=auto — starting: {_cfg['model']}")
                 _time.sleep(0.5)
                 _ok, _msg = start_server(_cfg)
-                if not _ok and "not installed" in _msg.lower():
+                if not _ok and _should_engine_fallback(_cfg, _msg):
                     _cfg, _ok, _msg = _try_engine_fallback(_cfg, _msg, load_config, save_config, start_server)
                 print(f"[vllm-mlx] {'✅' if _ok else '⚠️ '} {_msg}")
     except Exception as _exc:

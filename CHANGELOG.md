@@ -1,5 +1,19 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.15 — 2026-05-27
+
+### Fixed
+- **LM Studio daemon check** — `LmStudioEngine.is_installed()` now verifies the LM Studio
+  daemon is actually running (via `lms server status`), not just that the `lms` binary exists.
+  Previously, having the `lms` binary installed but LM Studio app closed caused `lms server
+  start` to exit immediately with "daemon is not running" — bypassing the pre-flight check and
+  never triggering engine auto-fallback.
+- **Auto-fallback for desktop-app engines** — startup engine fallback now also fires when the
+  configured engine is a desktop-app type (`install_method="external"`, e.g. LM Studio) and the
+  server exited immediately, not just when the binary is missing entirely.
+- **`check_requirements()`** — LM Studio settings panel now shows "LM Studio app is not running.
+  Open LM Studio, then try again." when the binary is present but the daemon is not active.
+
 ## v0.8.14 — 2026-05-27
 
 ### Fixed
