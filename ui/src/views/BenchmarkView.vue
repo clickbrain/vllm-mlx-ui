@@ -974,6 +974,68 @@ function formatRelTime(ts: string): string {
   return new Date(ts).toLocaleDateString()
 }
 
+// ── Export helpers ─────────────────────────────────────────────────────────────
+
+function exportCSV() {
+  const rows = sortedHistory.value
+  if (!rows.length) return
+  const headers = ['model_id', 'engine_id', 'benchmark_type', 'timestamp', 'label', 'avg_tps', 'avg_ttft_ms', 'max_tokens', 'overall_score']
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+  let csv = headers.join(',') + '\n'
+  for (const r of rows) {
+    csv += headers.map(h => esc((r as any)[h] ?? '')).join(',') + '\n'
+  }
+  _downloadBlob(csv, 'benchmarks.csv', 'text/csv')
+}
+
+function exportJSON() {
+  const blob = JSON.stringify(sortedHistory.value, null, 2)
+  _downloadBlob(blob, 'benchmarks.json', 'application/json')
+}
+
+function _downloadBlob(content: string, filename: string, mime: string) {
+  const blob = new Blob([content], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename
+  document.body.appendChild(a); a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+// ── Sort state for comparison table ────────────────────────────────────────────
+
+const compareSortCol = ref<string | null>(null)
+const compareSortDir = ref<'asc' | 'desc'>('desc')
+
+function toggleCompareSort(col: string) {
+  if (compareSortCol.value === col) {
+    compareSortDir.value = compareSortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    compareSortCol.value = col
+    compareSortDir.value = 'desc'
+  }
+}
+
+const sortedCompareRuns = computed(() => {
+  const col = compareSortCol.value
+  if (!col) return compareRuns.value
+  const dir = compareSortDir.value === 'asc' ? 1 : -1
+  return [...compareRuns.value].sort((a, b) => {
+    const va = (a as any)[col]
+    const vb = (b as any)[col]
+    if (va == null) return 1
+    if (vb == null) return -1
+    if (typeof va === 'number') return dir * (va - vb)
+    if (col === 'timestamp') return dir * (new Date(va).getTime() - new Date(vb).getTime())
+    return dir * String(va).localeCompare(String(vb))
+  })
+})
+
+function s(active: boolean, dir: string) {
+  return { active, asc: active && dir === 'asc', desc: active && dir === 'desc' }
+}
+
 // ── History helpers ───────────────────────────────────────────────────────────
 watch(activeTab, (tab) => {
   if (tab === 'History') {
@@ -1655,6 +1717,8 @@ watch(activeTab, (tab) => {
           >
             View details
           </AppButton>
+          <AppButton variant="ghost" size="sm" @click="exportCSV">Export CSV</AppButton>
+          <AppButton variant="ghost" size="sm" @click="exportJSON">Export JSON</AppButton>
           <AppButton
             variant="ghost"
             size="sm"
@@ -1675,25 +1739,25 @@ watch(activeTab, (tab) => {
           <table class="data-table">
             <thead>
               <tr>
-                <th>Model</th>
-                <th>Engine</th>
-                <th>Type</th>
-                <th>Date</th>
-                <th class="num">Speed (t/s)</th>
-                <th class="num">TTFT</th>
-                <th class="num">Max Tok</th>
-                <th class="num">Thinking</th>
+                <th class="sortable" :class="s(compareSortCol === 'model_id', compareSortDir)" @click="toggleCompareSort('model_id')">Model<span class="sort-arrow" /></th>
+                <th class="sortable" :class="s(compareSortCol === 'engine_id', compareSortDir)" @click="toggleCompareSort('engine_id')">Engine<span class="sort-arrow" /></th>
+                <th class="sortable" :class="s(compareSortCol === 'benchmark_type', compareSortDir)" @click="toggleCompareSort('benchmark_type')">Type<span class="sort-arrow" /></th>
+                <th class="sortable" :class="s(compareSortCol === 'timestamp', compareSortDir)" @click="toggleCompareSort('timestamp')">Date<span class="sort-arrow" /></th>
+                <th class="num sortable" :class="s(compareSortCol === 'avg_tps', compareSortDir)" @click="toggleCompareSort('avg_tps')">Speed (t/s)<span class="sort-arrow" /></th>
+                <th class="num sortable" :class="s(compareSortCol === 'avg_ttft_ms', compareSortDir)" @click="toggleCompareSort('avg_ttft_ms')">TTFT<span class="sort-arrow" /></th>
+                <th class="num sortable" :class="s(compareSortCol === 'max_tokens', compareSortDir)" @click="toggleCompareSort('max_tokens')">Max Tok<span class="sort-arrow" /></th>
+                <th class="num sortable" :class="s(compareSortCol === 'enable_thinking', compareSortDir)" @click="toggleCompareSort('enable_thinking')">Thinking<span class="sort-arrow" /></th>
                 <th class="num">KV Quant</th>
                 <th class="num">GSM8K</th>
                 <th class="num">MMLU</th>
                 <th class="num">HumanEval</th>
                 <th class="num">MATH</th>
                 <th class="num">IFEval</th>
-                <th class="num">Overall</th>
+                <th class="num sortable" :class="s(compareSortCol === 'overall_score', compareSortDir)" @click="toggleCompareSort('overall_score')">Overall<span class="sort-arrow" /></th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="run in compareRuns" :key="run.id">
+              <tr v-for="run in sortedCompareRuns" :key="run.id">
                 <td class="mono">{{ (run.model_id || '').split('/').pop() || '—' }}</td>
                 <td><span class="engine-pill">{{ run.engine_id ?? 'vllm-mlx' }}</span></td>
                 <td><span class="type-pill" :class="run.benchmark_type">{{ run.benchmark_type || 'speed' }}</span></td>
@@ -2460,9 +2524,23 @@ watch(activeTab, (tab) => {
   text-transform: uppercase;
   color: var(--tx-muted);
   border-bottom: 1px solid var(--bd-default);
+  white-space: nowrap;
 }
 
 .data-table th.num { text-align: right; }
+
+.data-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition-fast);
+}
+.data-table th.sortable:hover { color: var(--tx-primary); }
+.data-table th.sortable.active { color: var(--si-300); }
+
+.sort-arrow { margin-left: 4px; font-size: 10px; }
+th.asc .sort-arrow::after { content: '▲'; }
+th.desc .sort-arrow::after { content: '▼'; }
+th.sortable:not(.active) .sort-arrow::after { content: '▽'; opacity: .3; }
 
 .data-table td {
   padding: var(--space-2) var(--space-4);

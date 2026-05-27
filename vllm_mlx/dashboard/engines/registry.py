@@ -26,7 +26,9 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
+from .apple_fm import AppleFMEngine
 from .ds4_m5 import Ds4M5Engine, is_m5_or_newer
+from .external_api import ExternalApiEngine
 from .llama_cpp import LlamaCppEngine
 from .lmstudio import LmStudioEngine
 from .ollama import OllamaEngine
@@ -40,12 +42,14 @@ logger = logging.getLogger(__name__)
 
 # ── Built-in engines (always present) ─────────────────────────────────────────
 _BUILTINS: list[BaseEngine] = [
+    AppleFMEngine(),
     Ds4M5Engine(),
     VllmMlxEngine(),
     RapidMlxEngine(),
     OllamaEngine(),
     LmStudioEngine(),
     LlamaCppEngine(),
+    ExternalApiEngine(),
 ]
 
 # ── Global registry state ─────────────────────────────────────────────────────

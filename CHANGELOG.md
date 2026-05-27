@@ -1,5 +1,25 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.11 — 2026-05-28
+
+### Fixed
+- **`chat_store.init_db` crash on every startup** — `sqlite3.executescript()` always issues an
+  implicit `COMMIT` before running, which closed the `BEGIN` transaction we opened manually.
+  The subsequent explicit `con.execute("COMMIT")` then raised `OperationalError: cannot commit
+  — no transaction is active`, logged as a warning on every launch. Fixed by replacing
+  `executescript(...)` with individual `con.execute()` calls so the explicit `BEGIN … COMMIT`
+  block works correctly. Tables and indexes are created correctly either way, so no data
+  migration is needed.
+- **Engine card shows no active selection when selected engine not installed** — v0.8.10 changed
+  the `active` CSS class condition to `selectedEngine === eng.id && eng.installed`, hiding the
+  selection indicator when the configured engine fails its `is_installed()` check (e.g. binary
+  not on PATH, or detection error). With no card highlighted the user could believe no engine
+  is selected and accidentally click an uninstalled engine (e.g. lm-studio), writing that
+  engine id to config and causing a `FileNotFoundError: lms` on next start. Restored the
+  condition to `selectedEngine === eng.id` so the selected engine is always highlighted.
+  Also removed the click guard (`eng.installed ? selectEngine : undefined`) so users can
+  always click a card to select it, matching the behaviour before v0.8.10.
+
 ## v0.8.9 — 2026-05-27
 
 ### Fixed

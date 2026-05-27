@@ -56,6 +56,11 @@ _last_crash_log: str | None = None
 # get_server_status() does not misinterpret the dead process as a crash.
 _intentional_stop_in_progress: bool = False
 
+# External API engine mode — no local process; status is managed by flags.
+# Set by mgmt_server.py when the user enables the openai-compatible engine.
+_external_api_mode: bool = False
+_external_api_healthy: bool = False
+
 # Lock protecting both _last_crash_log and _intentional_stop_in_progress from
 # concurrent reads and writes across the Streamlit rerun thread and the
 # background monitor thread.
@@ -666,9 +671,34 @@ def check_health(config: dict[str, Any] | None = None) -> tuple[bool, dict]:
     return False, {}
 
 
+def set_server_healthy() -> None:
+    """Mark the external API engine as healthy (no local process)."""
+    global _external_api_mode, _external_api_healthy
+    with _server_state_lock:
+        _external_api_mode = True
+        _external_api_healthy = True
+
+
+def set_server_stopped() -> None:
+    """Mark the external API engine as stopped (no local process)."""
+    global _external_api_mode, _external_api_healthy
+    with _server_state_lock:
+        _external_api_healthy = False
+        _external_api_mode = False
+
+
 def get_server_status() -> dict[str, Any]:
     """Returns a status dict safe to call on every Streamlit rerun."""
     global _last_crash_log
+    with _server_state_lock:
+        if _external_api_mode:
+            return {
+                "running": _external_api_healthy,
+                "healthy": _external_api_healthy,
+                "pid": None,
+                "health": {},
+                "mode": "external_api",
+            }
     cfg = load_config()
     mgmt = _mgmt_base(cfg)
     if mgmt:

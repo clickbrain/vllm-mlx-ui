@@ -145,6 +145,13 @@ const tps = computed(() => {
   return v !== null ? v.toFixed(1) : '—'
 })
 
+const ttftMs = computed(() => {
+  const v = serverStore.ttftMsAvg
+  return v !== null ? Math.round(v) : '—'
+})
+
+const requestsWindow = computed(() => serverStore.liveMetrics?.requests_window ?? '—')
+
 const memPct = computed(() => serverStore.memoryPercent.toFixed(0))
 const memAvailable = computed(() => serverStore.memory?.available_gb.toFixed(1) ?? '—')
 const memTotal = computed(() => serverStore.memory?.total_gb.toFixed(0) ?? '—')
@@ -505,6 +512,8 @@ async function doClearCache(type: string) {
       </div>
       <div class="metrics-grid">
         <MetricCard label="Tokens / sec" :value="tps" />
+        <MetricCard label="TTFT (avg)" :value="ttftMs" unit="ms" />
+        <MetricCard label="Requests (5m)" :value="requestsWindow" />
         <MetricCard label="Available RAM" :value="memAvailable" :unit="`/ ${memTotal} GB`" />
         <MetricCard label="Memory %" :value="memPct" unit="%" :warnAbove="75" isPercent />
         <MetricCard label="Uptime" :value="uptime" />

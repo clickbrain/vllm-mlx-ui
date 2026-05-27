@@ -59,7 +59,7 @@ def init_db() -> None:
 
     with _conn() as con:
         con.execute("BEGIN")
-        con.executescript("""
+        con.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id           TEXT    PRIMARY KEY,
                 title        TEXT    NOT NULL,
@@ -69,8 +69,9 @@ def init_db() -> None:
                 created_at   INTEGER NOT NULL,
                 updated_at   INTEGER NOT NULL,
                 message_count INTEGER NOT NULL DEFAULT 0
-            );
-
+            )
+        """)
+        con.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 conversation_id TEXT    NOT NULL,
@@ -80,14 +81,14 @@ def init_db() -> None:
                 position        INTEGER NOT NULL,
                 UNIQUE(conversation_id, position),
                 FOREIGN KEY(conversation_id) REFERENCES conversations(id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_messages_conv
-                ON messages(conversation_id);
-
-            CREATE INDEX IF NOT EXISTS idx_conv_updated
-                ON conversations(updated_at DESC);
+            )
         """)
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id)"
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations(updated_at DESC)"
+        )
         version = con.execute("PRAGMA user_version").fetchone()[0]
         if version < _SCHEMA_VERSION:
             con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")

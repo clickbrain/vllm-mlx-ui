@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Any
 
-import httpx
+import httpx as _httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,14 +39,69 @@ from . import __version__ as _dashboard_version
 
 logger = logging.getLogger(__name__)
 
+# ── Request metrics tracker ──────────────────────────────────────────────
 
-_httpx_client: httpx.AsyncClient | None = None
+_RECENT_REQUESTS: list[dict[str, Any]] = []
+_RECENT_REQUESTS_LOCK = threading.Lock()
+_MAX_RECENT = 200
 
 
-def _get_httpx_client() -> httpx.AsyncClient:
+def _record_request(
+    start: float,
+    ttft: float | None,
+    duration: float,
+    completion_tokens: int,
+    model: str,
+) -> None:
+    with _RECENT_REQUESTS_LOCK:
+        _RECENT_REQUESTS.append({
+            "start": start,
+            "ttft_ms": round(ttft * 1000, 1) if ttft is not None else None,
+            "duration_ms": round(duration * 1000, 1),
+            "completion_tokens": completion_tokens,
+            "model": model,
+            "ts": time.time(),
+        })
+        if len(_RECENT_REQUESTS) > _MAX_RECENT:
+            _RECENT_REQUESTS[:] = _RECENT_REQUESTS[-_MAX_RECENT:]
+
+
+def _get_live_metrics() -> dict[str, Any]:
+    """Return rolling average TTFT / TPS from recent requests."""
+    with _RECENT_REQUESTS_LOCK:
+        recent = list(_RECENT_REQUESTS)
+    cutoff = time.time() - 300
+    window = [r for r in recent if r["ts"] > cutoff]
+
+    ttfts = [r["ttft_ms"] for r in window if r["ttft_ms"] is not None]
+
+    tps_vals: list[float] = []
+    for r in window:
+        d = r["duration_ms"] / 1000
+        c = r["completion_tokens"]
+        if d > 0 and c > 0:
+            tps_vals.append(c / d)
+
+    return {
+        "ttft_ms_avg": round(sum(ttfts) / len(ttfts), 1) if ttfts else None,
+        "ttft_ms_p50": round(sorted(ttfts)[len(ttfts) // 2], 1) if ttfts else None,
+        "tps_avg": round(sum(tps_vals) / len(tps_vals), 2) if tps_vals else None,
+        "tps_p50": round(sorted(tps_vals)[len(tps_vals) // 2], 2) if tps_vals else None,
+        "requests_window": len(window),
+        "requests_total": len(recent),
+        "ttft_ms_p95": (
+            round(sorted(ttfts)[int(len(ttfts) * 0.95)], 1) if len(ttfts) >= 20 else None
+        ),
+    }
+
+
+_httpx_client: _httpx.AsyncClient | None = None
+
+
+def _get_httpx_client() -> _httpx.AsyncClient:
     global _httpx_client
     if _httpx_client is None:
-        _httpx_client = httpx.AsyncClient()
+        _httpx_client = _httpx.AsyncClient()
     return _httpx_client
 
 app = FastAPI(
@@ -207,6 +262,9 @@ def status(_: None = Depends(_check_auth)) -> dict:
 def start(_: None = Depends(_check_auth)) -> dict:
     """Start the inference server using the currently saved configuration.
 
+    For the external API engine, this marks the server as healthy immediately
+    without launching a local process.  All other engines start a subprocess.
+
     Raises:
         HTTPException: 400 if no model is configured.
         HTTPException: 409 if a lifecycle operation is already in progress.
@@ -215,8 +273,11 @@ def start(_: None = Depends(_check_auth)) -> dict:
         raise HTTPException(status_code=409, detail="A lifecycle operation is already in progress. Please wait.")
     try:
         config = sm.load_config()
-        if not config.get("model"):
+        if not config.get("model") and not _is_external_api_engine():
             raise HTTPException(status_code=400, detail="No model selected. Set a model in config first.")
+        if _is_external_api_engine():
+            sm.set_server_healthy()
+            return {"ok": True, "message": "External API is ready — remote endpoint will be used for inference"}
         ok, msg = sm.start_server(config)
         return {"ok": ok, "message": msg}
     finally:
@@ -225,10 +286,16 @@ def start(_: None = Depends(_check_auth)) -> dict:
 
 @app.post("/stop")
 def stop(_: None = Depends(_check_auth)) -> dict:
-    """Send SIGTERM to the inference server and return stop status."""
+    """Send SIGTERM to the inference server and return stop status.
+
+    For the external API engine this is a no-op — there is no local process.
+    """
     if not _lifecycle_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="A lifecycle operation is already in progress. Please wait.")
     try:
+        if _is_external_api_engine():
+            sm.set_server_stopped()
+            return {"ok": True, "message": "External API disconnected"}
         ok, msg = sm.stop_server()
         return {"ok": ok, "message": msg}
     finally:
@@ -743,12 +810,23 @@ def model_scores(req: _ModelScoresRequest, _: None = Depends(_check_auth)) -> di
 
 @app.post("/server/load")
 def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
-    """Update the configured model and start (or restart) the server."""
+    """Update the configured model and start (or restart) the server.
+
+    For the external API engine this just saves the model ID to config
+    and marks the server as healthy — no local process is launched.
+    """
     model_id = req.model_id.strip()
     if not model_id:
         raise HTTPException(status_code=400, detail="model_id is required")
 
     cfg = sm.load_config()
+
+    if _is_external_api_engine():
+        cfg["model"] = model_id
+        sm.save_config(cfg)
+        sm.set_server_healthy()
+        return {"ok": True, "model": model_id, "restarted": False}
+
     was_running = sm.get_server_status().get("running", False)
 
     try:
@@ -770,7 +848,8 @@ def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
     if not ok:
         raise HTTPException(status_code=500, detail=msg)
 
-    # Always return restarted=True so the frontend polls until the model is ready.
+    _fire_warmup()
+
     return {"ok": True, "model": model_id, "restarted": True}
 
 
@@ -780,6 +859,12 @@ def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
 def memory_stats(_: None = Depends(_check_auth)) -> dict:
     """Return unified memory stats for this machine."""
     return sm.get_memory_stats()
+
+
+@app.get("/live/metrics")
+def live_metrics(_: None = Depends(_check_auth)) -> dict:
+    """Rolling TTFT and TPS from recent proxy requests (last 5 min window)."""
+    return _get_live_metrics()
 
 
 @app.get("/poll")
@@ -826,6 +911,7 @@ def poll(_: None = Depends(_check_auth)) -> dict:
             "model": server_state.get("model", ""),
             "started_at": server_state.get("started_at"),
         },
+        "live_metrics": _get_live_metrics(),
         "updates": updates_payload,
         "dashboard_version": _dashboard_version,
     }
@@ -1296,14 +1382,79 @@ def _hot_swap_if_needed(requested_model: str) -> None:
             if status.get("healthy"):
                 break
 
+        _fire_warmup()
+
+
+def _fire_warmup() -> None:
+    """Send a minimal warm-up request to the inference server (fire-and-forget).
+
+    After a model is swapped in or loaded, this primes the KV cache / GPU
+    pipeline so the first real user request sees normal latency instead of
+    cold-start jitter.  Runs synchronously in the caller's thread.
+
+    Skipped for the external API engine — there is no local server to warm.
+    """
+    if _is_external_api_engine():
+        return
+    try:
+        cfg = sm.load_config()
+        port = cfg.get("port", 8080)
+        host = cfg.get("host", "127.0.0.1")
+        if not sm.get_server_status().get("healthy"):
+            return
+        with _httpx.Client(timeout=30.0) as client:
+            client.post(
+                f"http://{host}:{port}/v1/chat/completions",
+                json={
+                    "model": cfg.get("model", ""),
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 1,
+                    "stream": False,
+                },
+            )
+    except Exception:
+        logger.debug("Warm-up request failed (non-critical)", exc_info=True)
+
+
+def _is_external_api_engine() -> bool:
+    """Return True when the current engine is the remote API proxy engine."""
+    cfg = sm.load_config()
+    return cfg.get("engine_id", "").strip() == "openai-compatible"
+
+
+def _get_external_target(cfg: dict[str, Any]) -> str | None:
+    """Return the remote API base URL from engine_settings, or None."""
+    es = cfg.get("engine_settings", {}).get("openai-compatible", {})
+    return (es.get("base_url") or "").strip() or None
+
+
+def _get_external_api_key(cfg: dict[str, Any]) -> str:
+    """Return the API key for the external engine."""
+    es = cfg.get("engine_settings", {}).get("openai-compatible", {})
+    return (es.get("api_key") or "").strip()
+
+
+def _get_external_models(cfg: dict[str, Any]) -> list[str]:
+    """Return enabled model IDs for the external API engine."""
+    es = cfg.get("engine_settings", {}).get("openai-compatible", {})
+    raw = (es.get("models") or "").strip()
+    return [m.strip() for m in raw.split(",") if m.strip()] if raw else []
+
 
 def _needs_hot_swap(requested_model: str) -> bool:
     """Return True if requested_model differs from the currently loaded model
-    and is available in the local cache.  Does NOT acquire _swap_lock."""
-    if not _HF_REPO_RE.match(requested_model):
+    and is available in the local cache or (for external API) in the enabled
+    models list.  Does NOT acquire _swap_lock."""
+    if not requested_model:
         return False
     cfg = sm.load_config()
     if cfg.get("model", "").strip() == requested_model:
+        return False
+    # External API: check against enabled models list
+    if _is_external_api_engine():
+        return requested_model in _get_external_models(cfg)
+    # Local engine: check HF cache
+    if not _HF_REPO_RE.match(requested_model):
         return False
     cached_ids = {m["id"] for m in mm.get_cached_models()}
     return requested_model in cached_ids
@@ -1341,11 +1492,25 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
     client_wants_stream = bool(request.get("stream"))
 
     cfg = sm.load_config()
-    target = sm.get_server_url(cfg)
-    req_headers: dict[str, str] = {"Content-Type": "application/json"}
-    key = cfg.get("api_key", "").strip()
-    if key:
-        req_headers["Authorization"] = f"Bearer {key}"
+
+    # External API engine: route to configured remote URL
+    if _is_external_api_engine():
+        base = _get_external_target(cfg)
+        if not base:
+            raise HTTPException(status_code=400, detail="External API engine is enabled but no base URL configured")
+        target = base.rstrip("/")
+        ext_key = _get_external_api_key(cfg)
+        req_headers: dict[str, str] = {
+            "Content-Type": "application/json",
+        }
+        if ext_key:
+            req_headers["Authorization"] = f"Bearer {ext_key}"
+    else:
+        target = sm.get_server_url(cfg)
+        req_headers: dict[str, str] = {"Content-Type": "application/json"}
+        key = cfg.get("api_key", "").strip()
+        if key:
+            req_headers["Authorization"] = f"Bearer {key}"
 
     # ds4-server counts thinking tokens against max_tokens, so the default
     # ChatView value of 2048 is far too small — the thinking section alone
@@ -1358,7 +1523,11 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
             request = {**request, "max_tokens": max_out}
 
     if needs_switch:
-        if client_wants_stream:
+        if _is_external_api_engine():
+            # External API: no local process to swap — just update config model
+            cfg["model"] = requested_model
+            sm.save_config(cfg)
+        elif client_wants_stream:
             # ── Streaming model-switch path ──────────────────────────────────
             # Push notification immediately, then stream the real reply.
             from fastapi.responses import StreamingResponse
@@ -1401,12 +1570,33 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
                 req2 = {**request, "stream": True}
 
                 try:
+                    start = time.time()
+                    first_byte = None
+                    completion_tokens = 0
+                    model = requested_model or cfg2.get("model", "")
                     async with _get_httpx_client().stream(
                         "POST", f"{target2}/v1/chat/completions",
                         timeout=300, json=req2, headers=req_headers,
                     ) as resp:
                         async for chunk in resp.aiter_bytes():
+                            if first_byte is None:
+                                first_byte = time.time()
+                            decoded = chunk.decode("utf-8", errors="replace")
+                            if '"usage"' in decoded and '"completion_tokens"' in decoded:
+                                for line in decoded.split("\n"):
+                                    if line.startswith("data: ") and line != "data: [DONE]":
+                                        import json
+                                        try:
+                                            payload = json.loads(line[6:])
+                                            usage = payload.get("usage") or {}
+                                            completion_tokens = usage.get("completion_tokens", 0)
+                                            model = payload.get("model", model)
+                                        except json.JSONDecodeError:
+                                            pass
                             yield chunk
+                    duration = time.time() - start
+                    ttft = (first_byte - start) if first_byte else None
+                    _record_request(start, ttft, duration, completion_tokens, model)
                 except Exception as exc:
                     yield _sse_delta(f"\n\n❌ Request failed after model switch: {exc}")
                     yield "data: [DONE]\n\n"
@@ -1437,40 +1627,70 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
     # ── Normal path (no model switch needed) ────────────────────────────────
     # If the inference server is currently starting up (model loading from a
     # dashboard-initiated switch), wait for it to become healthy before forwarding.
-    status = sm.get_server_status()
-    if status.get("running") and not status.get("healthy"):
-        # Server process is alive but not yet ready — wait up to 120 s
-        for _ in range(60):
-            await asyncio.sleep(2)
-            status = sm.get_server_status()
-            if status.get("healthy"):
-                break
-        if not status.get("healthy"):
-            raise HTTPException(status_code=503, detail="Model is still loading — try again shortly")
-        # Refresh target URL after potential config change
-        cfg = sm.load_config()
-        target = sm.get_server_url(cfg)
+    # Skip this for external API — there is no local server.
+    if not _is_external_api_engine():
+        status = sm.get_server_status()
+        if status.get("running") and not status.get("healthy"):
+            for _ in range(60):
+                await asyncio.sleep(2)
+                status = sm.get_server_status()
+                if status.get("healthy"):
+                    break
+            if not status.get("healthy"):
+                raise HTTPException(status_code=503, detail="Model is still loading — try again shortly")
+            cfg = sm.load_config()
+            target = sm.get_server_url(cfg)
 
     try:
         if client_wants_stream:
             from fastapi.responses import StreamingResponse
 
             async def _stream():
+                start = time.time()
+                first_byte = None
+                completion_tokens = 0
+                model = requested_model or cfg.get("model", "")
+
                 client = _get_httpx_client()
                 async with client.stream(
                     "POST", f"{target}/v1/chat/completions",
                     timeout=300, json=request, headers=req_headers,
                 ) as resp:
                     async for chunk in resp.aiter_bytes():
+                        if first_byte is None:
+                            first_byte = time.time()
+                        # Parse usage from the final data chunk
+                        decoded = chunk.decode("utf-8", errors="replace")
+                        if '"usage"' in decoded and '"completion_tokens"' in decoded:
+                            for line in decoded.split("\n"):
+                                if line.startswith("data: ") and line != "data: [DONE]":
+                                    import json
+                                    try:
+                                        payload = json.loads(line[6:])
+                                        usage = payload.get("usage") or {}
+                                        completion_tokens = usage.get("completion_tokens", 0)
+                                        model = payload.get("model", model)
+                                    except json.JSONDecodeError:
+                                        pass
                         yield chunk
+
+                duration = time.time() - start
+                ttft = (first_byte - start) if first_byte else None
+                _record_request(start, ttft, duration, completion_tokens, model)
 
             return StreamingResponse(_stream(), media_type="text/event-stream")
         else:
+            start = time.time()
             resp = await _get_httpx_client().post(
                 f"{target}/v1/chat/completions",
                 timeout=300, json=request, headers=req_headers,
             )
-            return resp.json()
+            data = resp.json()
+            dur = time.time() - start
+            ct = (data.get("usage") or {}).get("completion_tokens", 0)
+            m = data.get("model", requested_model or cfg.get("model", ""))
+            _record_request(start, dur, dur, ct, m)
+            return data
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -1484,19 +1704,34 @@ async def proxy_completions(request: dict[str, Any], _: None = Depends(_check_au
     needs_switch = bool(requested_model and auto_switch and _needs_hot_swap(requested_model))
 
     cfg = sm.load_config()
-    target = sm.get_server_url(cfg)
-    req_headers: dict[str, str] = {"Content-Type": "application/json"}
-    key = cfg.get("api_key", "").strip()
-    if key:
-        req_headers["Authorization"] = f"Bearer {key}"
+
+    if _is_external_api_engine():
+        base = _get_external_target(cfg)
+        if not base:
+            raise HTTPException(status_code=400, detail="External API engine is enabled but no base URL configured")
+        target = base.rstrip("/")
+        ext_key = _get_external_api_key(cfg)
+        req_headers: dict[str, str] = {"Content-Type": "application/json"}
+        if ext_key:
+            req_headers["Authorization"] = f"Bearer {ext_key}"
+    else:
+        target = sm.get_server_url(cfg)
+        req_headers: dict[str, str] = {"Content-Type": "application/json"}
+        key = cfg.get("api_key", "").strip()
+        if key:
+            req_headers["Authorization"] = f"Bearer {key}"
 
     if needs_switch:
-        try:
-            await asyncio.to_thread(_hot_swap_if_needed, requested_model)
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Model switch failed: {exc}") from exc
-        cfg = sm.load_config()
-        target = sm.get_server_url(cfg)
+        if _is_external_api_engine():
+            cfg["model"] = requested_model
+            sm.save_config(cfg)
+        else:
+            try:
+                await asyncio.to_thread(_hot_swap_if_needed, requested_model)
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail=f"Model switch failed: {exc}") from exc
+            cfg = sm.load_config()
+            target = sm.get_server_url(cfg)
 
     try:
         resp = await _get_httpx_client().post(
@@ -1556,13 +1791,22 @@ async def proxy_v1_passthrough(path: str, request: Request) -> _FRsp:
     clients can point at http://<host>:8502/v1 and use any standard endpoint.
     """
     cfg = sm.load_config()
-    target = sm.get_server_url(cfg)
 
-    # Forward the inference server API key if configured
-    headers: dict[str, str] = {"Content-Type": request.headers.get("content-type", "application/json")}
-    key = cfg.get("api_key", "").strip()
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
+    if _is_external_api_engine():
+        base = _get_external_target(cfg)
+        if not base:
+            raise HTTPException(status_code=400, detail="External API engine is enabled but no base URL configured")
+        target = base.rstrip("/")
+        headers: dict[str, str] = {"Content-Type": request.headers.get("content-type", "application/json")}
+        ext_key = _get_external_api_key(cfg)
+        if ext_key:
+            headers["Authorization"] = f"Bearer {ext_key}"
+    else:
+        target = sm.get_server_url(cfg)
+        headers: dict[str, str] = {"Content-Type": request.headers.get("content-type", "application/json")}
+        key = cfg.get("api_key", "").strip()
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
 
     body = await request.body()
 

@@ -95,6 +95,8 @@ const filterSizeMin = ref<number>(0)
 const filterSizeMax = ref<number>(200)  // reasonable max for Apple Silicon
 const filterDownloadsMin = ref<number>(0)
 const filterDownloadsMax = ref<number>(100_000_000)
+const filterLikesMin = ref<number>(0)
+const filterLikesMax = ref<number>(1_000_000)
 const filterFitOnly = ref(false)  // quick checkbox: only "perfect" and "good"
 
 // Quick-search by company/org
@@ -157,6 +159,10 @@ function hasFitLevel(level: string): boolean {
   return filterFitLevels.value.has(level)
 }
 
+function effectiveDate(r: { family_data?: { release_date?: string } | null; created_at?: string; last_modified?: string }): string | undefined {
+  return r.family_data?.release_date || r.created_at || r.last_modified
+}
+
 const displayedSearchResults = computed(() => {
   let list = modelsStore.searchResults
 
@@ -185,6 +191,20 @@ const displayedSearchResults = computed(() => {
 
   // Downloads range filter
   list = list.filter(r => r.downloads >= filterDownloadsMin.value && r.downloads <= filterDownloadsMax.value)
+
+  // Likes range filter
+  list = list.filter(r => r.likes >= filterLikesMin.value && r.likes <= filterLikesMax.value)
+
+  // Date recency filter (uses maxAgeMonths) — client-side since HF API doesn't support date-range filtering
+  if (maxAgeMonths.value > 0) {
+    const cutoffMs = Date.now() - maxAgeMonths.value * 30.44 * 24 * 60 * 60 * 1000
+    list = list.filter(r => {
+      const d = effectiveDate(r)
+      if (!d) return true
+      const ageMs = Date.now() - new Date(d).getTime()
+      return ageMs <= cutoffMs
+    })
+  }
 
   // Client-side sort (model name or size)
   if (sortCol.value === 'model') {
@@ -618,6 +638,14 @@ watch(activeTab, (tab) => {
             <input type="number" v-model.number="filterDownloadsMax" min="0" class="range-input" placeholder="max" @input="filtersPending = true" />
           </div>
         </div>
+        <div class="filter-row">
+          <span class="filter-label">Likes:</span>
+          <div class="range-inputs">
+            <input type="number" v-model.number="filterLikesMin" min="0" class="range-input" placeholder="min" @input="filtersPending = true" />
+            <span class="range-dash">–</span>
+            <input type="number" v-model.number="filterLikesMax" min="0" class="range-input" placeholder="max" @input="filtersPending = true" />
+          </div>
+        </div>
         <div class="filter-apply-row">
           <AppButton variant="primary" size="sm" :disabled="!filtersPending" :loading="modelsStore.searching" @click="applyFilters">
             Apply Filters
@@ -674,6 +702,7 @@ watch(activeTab, (tab) => {
             :fit_level="w.result.fit_level"
             :last_modified="w.result.last_modified"
             :created_at="w.result.created_at"
+            :family_release_date="w.result.family_data?.release_date"
             :total_ram_gb="serverStore.memory?.total_gb ?? 0"
             :available_ram_gb="serverStore.memory?.available_gb ?? 0"
             :badges="w.badges"
@@ -697,6 +726,7 @@ watch(activeTab, (tab) => {
           :fit_level="r.fit_level"
           :last_modified="r.last_modified"
           :created_at="r.created_at"
+          :family_release_date="r.family_data?.release_date"
           :total_ram_gb="serverStore.memory?.total_gb ?? 0"
           :available_ram_gb="serverStore.memory?.available_gb ?? 0"
           :badges="bestChoices.get(r.id) ?? []"

@@ -52,6 +52,16 @@ interface MemoryStats {
   pressure: 'low' | 'medium' | 'high' | 'critical' | 'unknown'
 }
 
+export interface LiveMetrics {
+  ttft_ms_avg: number | null
+  ttft_ms_p50: number | null
+  ttft_ms_p95: number | null
+  tps_avg: number | null
+  tps_p50: number | null
+  requests_window: number
+  requests_total: number
+}
+
 export interface ServerConfig {
   model?: string
   engine_id?: string
@@ -81,6 +91,8 @@ export const useServerStore = defineStore('server', () => {
     time: string; active: number; queued: number; total: number; memory_gb: number
   }>>([])
   const MAX_HISTORY = 120
+  /** Rolling TTFT / TPS from recent proxy requests */
+  const liveMetrics = ref<LiveMetrics | null>(null)
   /** Dashboard version string returned by /poll — shown in the sidebar footer */
   const dashboardVersion = ref<string | null>(null)
 
@@ -114,17 +126,25 @@ export const useServerStore = defineStore('server', () => {
 
   /**
    * Returns tokens/sec as a number.
-   * Returns 0 (not null) when server is running but no tokens processed yet,
-   * so the UI shows "0.0 tok/s" rather than "—".
-   * Returns null only when the server is not running (no metrics available).
+   * Uses rolling TPS from liveMetrics (last 5 min window) when available.
+   * Falls back to lifetime average (total_completion_tokens / uptime_s).
+   * Returns 0 when server is running but no tokens processed yet.
+   * Returns null only when the server is not running.
    */
   const tps = computed<number | null>(() => {
     if (!isRunning.value) return null
+    if (liveMetrics.value?.tps_avg != null) return Math.round(liveMetrics.value.tps_avg * 10) / 10
     const m = metrics.value
     if (!m || m.uptime_s < 1) return 0
     if (!m.total_completion_tokens) return 0
     return Math.round(m.total_completion_tokens / m.uptime_s * 10) / 10
   })
+
+  /**
+   * Rolling average TTFT in milliseconds (last 5 min window).
+   * Returns null when no recent requests have been made.
+   */
+  const ttftMsAvg = computed<number | null>(() => liveMetrics.value?.ttft_ms_avg ?? null)
 
   const baseUrl = computed(() => {
     if (!isRunning.value) return null
@@ -244,6 +264,7 @@ export const useServerStore = defineStore('server', () => {
         memory: MemoryStats;
         config: ServerConfig;
         runtime?: { engine_id?: string; model?: string; started_at?: string };
+        live_metrics?: LiveMetrics;
         updates?: Array<{ name: string; installed: string; latest: string; update_available: boolean; url: string }> | null;
         dashboard_version?: string | null;
       }>('/poll')
@@ -271,6 +292,9 @@ export const useServerStore = defineStore('server', () => {
         if (metricsHistory.value.length > MAX_HISTORY)
           metricsHistory.value = metricsHistory.value.slice(-MAX_HISTORY)
       }
+
+      // Live metrics (rolling TTFT / TPS)
+      if (r.live_metrics) liveMetrics.value = r.live_metrics
 
       // Memory
       memory.value = r.memory

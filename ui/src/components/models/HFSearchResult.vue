@@ -13,7 +13,8 @@ const props = defineProps<{
   size_gb?: number
   fit_level?: string
   last_modified?: string
-  created_at?: string     // HF repo creation — more accurate than last_modified for age display
+  created_at?: string
+  family_release_date?: string
   total_ram_gb?: number
   /** Currently available (free) unified memory in GB */
   available_ram_gb?: number
@@ -34,8 +35,11 @@ function abbreviate(n: number): string {
 const downloadsFormatted = computed(() => abbreviate(props.downloads))
 const likesFormatted = computed(() => abbreviate(props.likes))
 
-const dateForDisplay = computed(() => props.created_at || props.last_modified)
-const dateLabel = computed(() => props.created_at ? 'Published' : 'Modified')
+const dateForDisplay = computed(() => props.family_release_date || props.created_at || props.last_modified)
+const dateLabel = computed(() => {
+  if (props.family_release_date) return 'Family release'
+  return props.created_at ? 'Published' : 'Modified'
+})
 
 const dateFormatted = computed(() => {
   const d = dateForDisplay.value
