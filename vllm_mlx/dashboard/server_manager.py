@@ -926,18 +926,41 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
         _last_crash_log = None  # clear any previous crash before starting fresh
         _intentional_stop_in_progress = False  # we're starting fresh
 
+    # Pre-flight: verify the engine binary is actually available before
+    # touching LOG_FILE or launching anything.  Returns a clean error
+    # message instead of letting FileNotFoundError escape to the ASGI layer.
+    engine_id_for_check = config.get("engine_id", "vllm-mlx")
+    try:
+        _chk_engine = get_engine(engine_id_for_check)
+        if not _chk_engine.is_installed():
+            return False, (
+                f"Engine '{engine_id_for_check}' is not installed. "
+                "Please install it or switch to a different engine in Settings → Engine."
+            )
+    except KeyError:
+        pass  # unknown engine — let _build_command handle it
+
     cmd = _build_command(config)
     env = _build_env(config)
     cwd = _build_cwd(config)
-    with open(LOG_FILE, "w") as log_fh:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=log_fh,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            env=env,
-            cwd=cwd,
+    try:
+        with open(LOG_FILE, "w") as log_fh:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                env=env,
+                cwd=cwd,
+            )
+    except (FileNotFoundError, OSError) as exc:
+        binary = cmd[0] if cmd else "(unknown)"
+        return False, (
+            f"Failed to launch engine '{engine_id_for_check}': "
+            f"binary '{binary}' not found. "
+            "Install the engine or switch to a different one in Settings → Engine. "
+            f"(Detail: {exc})"
         )
     _write_server_state(proc.pid, config)
 

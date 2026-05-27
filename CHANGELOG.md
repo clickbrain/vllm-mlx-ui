@@ -1,5 +1,19 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.13 — 2026-05-27
+
+### Fixed
+- **Engine pre-flight check** — `POST /start` no longer throws an unhandled ASGI 500 when the
+  configured engine binary is not on PATH (e.g. `lms` for LM Studio, `llama-server` for
+  llama.cpp). `start_server()` now calls `engine.is_installed()` before attempting to launch,
+  returning `{"ok": false, "message": "Engine 'lm-studio' is not installed..."}` instead of
+  crashing with `FileNotFoundError`. A secondary `try/except` around `subprocess.Popen` catches
+  any race-condition where `is_installed()` passes but the binary disappears before exec.
+  This fixes the crash reported on machines with a stale `engine_id: lm-studio` in
+  `~/.vllm_mlx_ui/server_config.json` after upgrading from an older release.
+- **Tests** — 7 new unit tests in `tests/test_server_manager_preflight.py` covering both the
+  pre-flight path and the `Popen` safety net.
+
 ## v0.8.12 — 2026-05-27
 
 ### Added
