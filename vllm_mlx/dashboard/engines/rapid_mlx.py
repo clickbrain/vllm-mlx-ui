@@ -81,14 +81,23 @@ class RapidMlxEngine(BaseEngine):
         found = self._which("rapid-mlx")
         if found:
             return [found]
-        # pip-installed but binary not on PATH — use module entry point
-        return [sys.executable, "-m", "rapid_mlx.cli"]
+        try:
+            import importlib.util
+            if importlib.util.find_spec("rapid_mlx") is not None:
+                return [sys.executable, "-m", "rapid_mlx.cli"]
+        except ImportError:
+            pass
+        return []
 
     def build_command(self, config: dict[str, Any]) -> list[str]:
         """Build the rapid-mlx serve command with verified CLI flags."""
         model = self.resolve_launch_model(config)
 
         cmd = self._resolve_cmd()
+        if not cmd:
+            raise RuntimeError(
+                "rapid-mlx is not installed. Run `pip install rapid-mlx`."
+            )
         probe_bin = self._which("rapid-mlx") or "rapid-mlx"
         probe = (probe_bin, "serve")
         cmd += ["serve", model]
