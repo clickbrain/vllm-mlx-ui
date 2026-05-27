@@ -22,6 +22,7 @@ Model identifiers:
 from __future__ import annotations
 
 import subprocess
+import sys
 from typing import Any, ClassVar
 
 from .base import BaseEngine
@@ -75,14 +76,22 @@ class RapidMlxEngine(BaseEngine):
 
     # ── BaseEngine implementation ─────────────────────────────────────────────
 
+    def _resolve_cmd(self) -> list[str]:
+        """Return the argv prefix to launch rapid-mlx (binary or module fallback)."""
+        found = self._which("rapid-mlx")
+        if found:
+            return [found]
+        # pip-installed but binary not on PATH — use module entry point
+        return [sys.executable, "-m", "rapid_mlx.cli"]
+
     def build_command(self, config: dict[str, Any]) -> list[str]:
         """Build the rapid-mlx serve command with verified CLI flags."""
         model = self.resolve_launch_model(config)
 
-        # rapid-mlx ships a binary (rapid-mlx), not a Python module.
-        rapid_bin = self._which("rapid-mlx") or "rapid-mlx"
-        probe = (rapid_bin, "serve")
-        cmd = [rapid_bin, "serve", model]
+        cmd = self._resolve_cmd()
+        probe_bin = self._which("rapid-mlx") or "rapid-mlx"
+        probe = (probe_bin, "serve")
+        cmd += ["serve", model]
         cmd += ["--host", str(config.get("host", "127.0.0.1"))]
         cmd += ["--port", str(config.get("port", 8000))]
 
@@ -158,19 +167,43 @@ class RapidMlxEngine(BaseEngine):
         canonical = config.get("model", "")
         return _HF_TO_ALIAS.get(canonical, canonical)
 
+    def uninstall_command(self) -> list[str]:
+        """Uninstall rapid-mlx, trying both naming conventions.
+
+        The PyPI package is ``rapid-mlx`` (hyphen) but older docs referenced
+        ``rapid_mlx`` (underscore).  We try the primary name first; if pip
+        reports it is not installed, try the alternate.
+        """
+        primary = [sys.executable, "-m", "pip", "uninstall", "-y", "rapid-mlx"]
+        try:
+            r = subprocess.run(
+                [sys.executable, "-m", "pip", "show", "rapid-mlx"],
+                capture_output=True, timeout=10,
+            )
+            if r.returncode == 0:
+                return primary
+        except Exception:
+            pass
+        return [sys.executable, "-m", "pip", "uninstall", "-y", "rapid_mlx"]
+
     def is_installed(self) -> bool:
         import shutil
         if shutil.which("rapid-mlx"):
             return True
         try:
-            import subprocess as _sp
-            import sys as _sys
-            result = _sp.run(
-                [_sys.executable, "-m", "pip", "show", "rapid-mlx"],
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "show", "rapid-mlx"],
                 capture_output=True, timeout=10,
             )
-            return result.returncode == 0
+            if result.returncode == 0:
+                return True
         except Exception:
+            pass
+        # Final fallback: try importing the package directly
+        try:
+            import rapid_mlx  # noqa: F401
+            return True
+        except ImportError:
             return False
 
     def build_env(self, config: dict[str, Any]) -> dict[str, str] | None:
@@ -183,16 +216,28 @@ class RapidMlxEngine(BaseEngine):
             return None
 
     def get_version(self) -> str | None:
+        # Try binary first (handles both PATH and _which-resolved paths)
         try:
+            cmd = self._resolve_cmd() + ["--version"]
             result = subprocess.run(
-                ["rapid-mlx", "--version"],
-                capture_output=True, text=True, timeout=5,
+                cmd, capture_output=True, text=True, timeout=5,
             )
             if result.returncode == 0:
                 line = (result.stdout or result.stderr or "").strip()
-                # Version lines like "rapid-mlx 1.2.3" or "1.2.3"
                 parts = line.split()
                 return parts[-1] if parts else None
+        except Exception:
+            pass
+        # Fallback: pip show (works when binary not on PATH)
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "show", "rapid-mlx"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if line.lower().startswith("version:"):
+                        return line.split(":", 1)[1].strip()
         except Exception:
             pass
         return None
@@ -210,22 +255,22 @@ class RapidMlxEngine(BaseEngine):
                 "key": "kv_turboquant",
                 "label": "TurboQuant V-Cache",
                 "type": "bool",
-                "default": False,
-                "help": "Rotate + Lloyd-Max compress V cache (86% savings on dense models). Flag: --kv-cache-turboquant",
+                "default": True,
+                "help": "Rotate + Lloyd-Max compress V cache (86% savings on dense models). On by default for maximum memory efficiency. Flag: --kv-cache-turboquant",
             },
             {
                 "key": "kv_quantization",
                 "label": "KV Cache Quantization",
                 "type": "bool",
-                "default": False,
-                "help": "Quantize prefix cache entries to reduce memory usage. Flag: --kv-cache-quantization",
+                "default": True,
+                "help": "Quantize prefix cache entries to reduce memory usage. On by default — reduces memory with minimal quality impact. Flag: --kv-cache-quantization",
             },
             {
                 "key": "enable_prefix_cache",
                 "label": "Prefix Cache",
                 "type": "bool",
-                "default": False,
-                "help": "Cache common prompt prefixes to reduce TTFT. Off by default in the engine. Flag: --enable-prefix-cache",
+                "default": True,
+                "help": "Cache common prompt prefixes to reduce TTFT. On by default for faster chat responses. Flag: --enable-prefix-cache",
             },
             {
                 "key": "prefill_step_size",
@@ -249,8 +294,8 @@ class RapidMlxEngine(BaseEngine):
                 "key": "enable_tool_logits_bias",
                 "label": "Tool Logits Bias",
                 "type": "bool",
-                "default": False,
-                "help": "Jump-forward decoding — bias logits toward structured tokens for faster tool calls. Flag: --enable-tool-logits-bias",
+                "default": True,
+                "help": "Jump-forward decoding — bias logits toward structured tokens for faster tool calls. On by default for faster tool-call responses. Flag: --enable-tool-logits-bias",
             },
             # --- Token limits ---
             {
@@ -324,12 +369,12 @@ class RapidMlxEngine(BaseEngine):
 
     def default_engine_settings(self) -> dict[str, Any]:
         return {
-            "kv_turboquant": False,
-            "kv_quantization": False,
-            "enable_prefix_cache": False,
-            "prefill_step_size": 0,
+            "kv_turboquant": True,
+            "kv_quantization": True,
+            "enable_prefix_cache": True,
+            "prefill_step_size": 8192,
             "gpu_memory_utilization": 0.0,
-            "enable_tool_logits_bias": False,
+            "enable_tool_logits_bias": True,
             "max_tokens": 0,
             "cloud_model": "",
             "cloud_threshold": 20000,

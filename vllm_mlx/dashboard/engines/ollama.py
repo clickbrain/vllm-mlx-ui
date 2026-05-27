@@ -251,7 +251,7 @@ shutil.rmtree(tmp_dir, ignore_errors=True)
 """
         encoded = base64.b64encode(script.encode()).decode()
         return [
-            "sh", "-c",
+            sys.executable, "-c",
             f"import base64; exec(base64.b64decode({encoded!r}).decode())",
         ]
 
@@ -279,9 +279,21 @@ shutil.rmtree(tmp_dir, ignore_errors=True)
 
         For Ollama, the launch model IS the model used in API requests.
         Falls back to ``config["model"]`` which should already be an Ollama tag.
+
+        Validates that the tag looks like an Ollama model identifier and not
+        a filesystem path (common mistake when switching from engines that use
+        local file paths like llama.cpp or ds4-m5).
         """
         engine_settings = config.get("engine_settings", {}).get(self.id, {})
-        return engine_settings.get("launch_model") or config.get("model", "")
+        tag = engine_settings.get("launch_model") or config.get("model", "")
+        if tag and (tag.startswith("/") or tag.startswith("~") or tag.startswith("./")):
+            logger.warning(
+                "ollama resolve_launch_model: %r looks like a filesystem path, "
+                "not an Ollama model tag. Expected a name like 'llama3.2' or 'mistral'. "
+                "Ignoring launch_model and falling back to config model.",
+            )
+            return config.get("model", "")
+        return tag
 
     def config_schema(self) -> list[dict[str, Any]]:
         return [
@@ -329,8 +341,8 @@ shutil.rmtree(tmp_dir, ignore_errors=True)
                 "key": "flash_attention",
                 "label": "Flash Attention",
                 "type": "bool",
-                "default": False,
-                "help": "Sets OLLAMA_FLASH_ATTENTION=1 for supported models.",
+                "default": True,
+                "help": "Sets OLLAMA_FLASH_ATTENTION=1. On by default — faster generation on supported models.",
             },
         ]
 

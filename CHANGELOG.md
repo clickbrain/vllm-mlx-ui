@@ -1,5 +1,30 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.9 — 2026-05-27
+
+### Fixed
+- **Engine audit fixes** — 7 actionable findings resolved from ENGINE_AUDIT.md:
+  - **rapid_mlx `uninstall_command()`** now tries both `rapid-mlx` (hyphen) and `rapid_mlx`
+    (underscore) naming conventions, fixing silent uninstall failures when the engine was
+    installed with the alternate name.
+  - **ollama `resolve_launch_model()`** validates that the model tag isn't a filesystem path
+    (common mistake when switching from path-based engines like llama.cpp or ds4-m5). If a
+    path-like value is detected, it logs a warning and falls back to `config["model"]`.
+  - **`get_model_presets()`** caches results per model_id for the session lifetime, eliminating
+    redundant HF Hub API calls (config.json + generation_config.json fetched once, not on
+    every UI model lookup).
+  - **`get_hf_model_size_gb()`** now applies a 25 % KV cache / runtime overhead multiplier
+    so `check_model_fit()` reports more realistic memory requirements (previously only
+    summed weight files, understating RAM needs by 20–30 %).
+  - **`BaseEngine.description`** type hint relaxed from `ClassVar[str]` to `str`, allowing
+    ds4_m5.py's dynamic `@property`-based description (which depends on detected hardware)
+    without type-checker confusion.
+  - **`_read_server_state()`** stale PID handling — verified that the existing crash-log
+    capture + `_try_adopt_server()` flow in `get_server_status()` already correctly handles
+    stale PIDs. No change needed.
+  - **`_which()` caching** — evaluated and deemed unnecessary: `shutil.which()` is
+    sub-millisecond and caching could produce stale results after mid-session installs.
+
 ## v0.8.8 — 2026-05-26
 
 ### Fixed

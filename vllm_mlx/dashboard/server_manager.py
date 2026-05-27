@@ -477,6 +477,11 @@ def _read_server_state() -> dict[str, Any] | None:
 
     Backward compat: if only the legacy PID_FILE exists (plain integer), returns a
     minimal state dict treating the engine as "vllm-mlx".
+
+    NOTE: Does NOT validate that the recorded PID is alive — callers
+    (get_server_status, stop_server) are responsible for that check so they can
+    capture crash logs and attempt process adoption before declaring the server
+    dead.
     """
     if SERVER_STATE_FILE.exists():
         try:

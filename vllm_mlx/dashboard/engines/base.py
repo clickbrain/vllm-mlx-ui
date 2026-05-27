@@ -43,7 +43,10 @@ class BaseEngine(ABC):
     install_method: ClassVar[str] = "pip"
 
     #: Human-readable description shown in the Settings engine card.
-    description: ClassVar[str] = ""
+    #: Defined as a ClassVar[str] in most engines, but may be a ``@property``
+    #: (e.g. ``ds4_m5.py``) when the description depends on detected hardware.
+    #: Access via ``getattr(engine, "description", "")`` in registry code.
+    description: str = ""
 
     #: True for engines shipped with the dashboard package (vllm-mlx, rapid-mlx).
     #: False for engines discovered via entry_points or user manifest files.

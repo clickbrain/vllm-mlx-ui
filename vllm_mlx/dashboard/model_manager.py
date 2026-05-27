@@ -23,6 +23,24 @@ import requests as _requests
 
 logger = logging.getLogger(__name__)
 
+_HF_TOKEN_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _hf_token_env(token: str | None):
+    """Set HUGGING_FACE_HUB_TOKEN for the duration of the block (thread-safe)."""
+    if not token:
+        yield
+        return
+    with _HF_TOKEN_LOCK:
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = token
+    try:
+        yield
+    finally:
+        with _HF_TOKEN_LOCK:
+            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+
+
 # ── Fit-level constants (llmfit-inspired) ─────────────────────────────────────
 FIT_PERFECT = "perfect"  # model uses < 50 % of unified memory
 FIT_GOOD = "good"  # 50–70 %
@@ -234,41 +252,32 @@ def download_model(
         except Exception as e:
             return False, f"Could not reach management API: {e}"
 
-    if hf_token:
-        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+    with _hf_token_env(hf_token):
+        try:
+            from huggingface_hub import snapshot_download
 
-    try:
-        from huggingface_hub import snapshot_download
-
-        local_dir = snapshot_download(
-            repo_id=model_id,
-            local_files_only=False,
-            cache_dir=get_hf_cache_dir(),
-        )
-        return True, f"Downloaded to {local_dir}"
-    except Exception as e:
-        return False, str(e)
-    finally:
-        if hf_token:
-            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+            local_dir = snapshot_download(
+                repo_id=model_id,
+                local_files_only=False,
+                cache_dir=get_hf_cache_dir(),
+            )
+            return True, f"Downloaded to {local_dir}"
+        except Exception as e:
+            return False, str(e)
 
 
 def download_model_local(
     model_id: str, hf_token: str | None = None
 ) -> tuple[bool, str]:
     """Download directly to local HF cache (no remote routing). Used by DownloadManager."""
-    if hf_token:
-        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
-    try:
-        from huggingface_hub import snapshot_download
+    with _hf_token_env(hf_token):
+        try:
+            from huggingface_hub import snapshot_download
 
-        local_dir = snapshot_download(repo_id=model_id, local_files_only=False, cache_dir=get_hf_cache_dir())
-        return True, f"Downloaded to {local_dir}"
-    except Exception as e:
-        return False, str(e)
-    finally:
-        if hf_token:
-            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+            local_dir = snapshot_download(repo_id=model_id, local_files_only=False, cache_dir=get_hf_cache_dir())
+            return True, f"Downloaded to {local_dir}"
+        except Exception as e:
+            return False, str(e)
 
 
 _partial_bytes_cache: dict[str, tuple[int, float]] = {}
@@ -504,6 +513,10 @@ def get_cache_total_size() -> float:
         return 0.0
 
 
+_MODEL_PRESETS_CACHE: dict[str, dict[str, Any]] = {}
+"""Per-session cache for get_model_presets(). Cleared when the mgmt server restarts."""
+
+
 def get_model_presets(model_id: str, hf_token: str | None = None) -> dict[str, Any]:
     """
     Fetch model config.json from HuggingFace and extract recommended settings.
@@ -511,118 +524,122 @@ def get_model_presets(model_id: str, hf_token: str | None = None) -> dict[str, A
     Returns a dict with any of: max_tokens, context_length, architecture,
     model_type_hint, is_vision, bits, rope_scaling.
     Empty dict if the card cannot be read.
+
+    Results are cached per model_id for the session lifetime to avoid redundant
+    HF API calls from the UI thread.
     """
+    cached = _MODEL_PRESETS_CACHE.get(model_id)
+    if cached is not None:
+        return cached
+
     import json as _json
 
     from huggingface_hub import hf_hub_download
 
-    if hf_token:
-        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
-
     presets: dict[str, Any] = {}
-    try:
-        config_path = hf_hub_download(
-            repo_id=model_id,
-            filename="config.json",
-            local_files_only=False,
-        )
-        with open(config_path) as f:
-            cfg = _json.load(f)
-
-        # HF models store context length under different field names depending on
-        # architecture. Priority order: max_position_embeddings (standard) →
-        # n_ctx (GPT-style) → seq_length → max_sequence_length (fallback).
-        # Cap at 131072 even if the model claims higher — that is the practical
-        # vllm-mlx limit and avoids requesting more KV cache than the engine supports.
-        ctx = (
-            cfg.get("max_position_embeddings")
-            or cfg.get("n_ctx")
-            or cfg.get("seq_length")
-            or cfg.get("max_sequence_length")
-        )
-        if ctx and isinstance(ctx, int):
-            presets["context_length"] = ctx
-            presets["max_tokens"] = min(ctx, 131072)
-
-        # Architecture
-        archs = cfg.get("architectures") or []
-        if archs:
-            presets["architecture"] = archs[0]
-
-        # Model type
-        model_type = cfg.get("model_type", "")
-        if model_type:
-            presets["model_type_hint"] = model_type
-
-        # Rope scaling info
-        rope = cfg.get("rope_scaling")
-        if rope:
-            presets["rope_scaling"] = rope
-
-        # Vision capability is detected from three independent sources because
-        # different model cards use different conventions:
-        # 1. model_type / architecture keywords (llava, qwen2_vl, paligemma, etc.)
-        # 2. architecture field from HF config.json
-        # 3. Model ID string keywords (last-resort heuristic)
-        vision_types = {
-            "llava",
-            "idefics",
-            "pali",
-            "qwen2_vl",
-            "pixtral",
-            "gemma3",
-            "gemma4",
-            "internvl",
-            "cogvlm",
-            "phi3_v",
-            "mipha",
-        }
-        arch_lower = (archs[0] if archs else "").lower()
-        if (
-            any(x in model_type.lower() for x in vision_types)
-            or any(x in arch_lower for x in {"vision", "llava", "vl", "pixtral"})
-            or any(
-                x in model_id.lower()
-                for x in {"-vl-", "-vision", "llava", "idefics", "pixtral"}
-            )
-        ):
-            presets["is_vision"] = True
-
-        # Quantization is inferred from the model ID (e.g., "llama2-7b-4bit")
-        # rather than config.json because model_type rarely encodes quantization.
-        # This is a UI prefill heuristic; it does not affect server startup or loading.
-        name_lower = model_id.lower()
-        for bits, patterns in {
-            4: ["4bit", "4-bit", "q4"],
-            8: ["8bit", "8-bit", "q8"],
-            3: ["3bit", "3-bit"],
-            6: ["6bit", "6-bit"],
-        }.items():
-            if any(p in name_lower for p in patterns):
-                presets["bits"] = bits
-                break
-
-        # Default temperature hint (some model cards embed this in generation_config.json)
+    with _hf_token_env(hf_token):
         try:
-            gen_path = hf_hub_download(
+            config_path = hf_hub_download(
                 repo_id=model_id,
-                filename="generation_config.json",
+                filename="config.json",
                 local_files_only=False,
             )
-            with open(gen_path) as f:
-                gen = _json.load(f)
-            temp = gen.get("temperature")
-            if temp and isinstance(temp, (int, float)) and 0 < temp <= 2:
-                presets["recommended_temperature"] = float(temp)
+            with open(config_path) as f:
+                cfg = _json.load(f)
+
+            # HF models store context length under different field names depending on
+            # architecture. Priority order: max_position_embeddings (standard) →
+            # n_ctx (GPT-style) → seq_length → max_sequence_length (fallback).
+            # Cap at 131072 even if the model claims higher — that is the practical
+            # vllm-mlx limit and avoids requesting more KV cache than the engine supports.
+            ctx = (
+                cfg.get("max_position_embeddings")
+                or cfg.get("n_ctx")
+                or cfg.get("seq_length")
+                or cfg.get("max_sequence_length")
+            )
+            if ctx and isinstance(ctx, int):
+                presets["context_length"] = ctx
+                presets["max_tokens"] = min(ctx, 131072)
+
+            # Architecture
+            archs = cfg.get("architectures") or []
+            if archs:
+                presets["architecture"] = archs[0]
+
+            # Model type
+            model_type = cfg.get("model_type", "")
+            if model_type:
+                presets["model_type_hint"] = model_type
+
+            # Rope scaling info
+            rope = cfg.get("rope_scaling")
+            if rope:
+                presets["rope_scaling"] = rope
+
+            # Vision capability is detected from three independent sources because
+            # different model cards use different conventions:
+            # 1. model_type / architecture keywords (llava, qwen2_vl, paligemma, etc.)
+            # 2. architecture field from HF config.json
+            # 3. Model ID string keywords (last-resort heuristic)
+            vision_types = {
+                "llava",
+                "idefics",
+                "pali",
+                "qwen2_vl",
+                "pixtral",
+                "gemma3",
+                "gemma4",
+                "internvl",
+                "cogvlm",
+                "phi3_v",
+                "mipha",
+            }
+            arch_lower = (archs[0] if archs else "").lower()
+            if (
+                any(x in model_type.lower() for x in vision_types)
+                or any(x in arch_lower for x in {"vision", "llava", "vl", "pixtral"})
+                or any(
+                    x in model_id.lower()
+                    for x in {"-vl-", "-vision", "llava", "idefics", "pixtral"}
+                )
+            ):
+                presets["is_vision"] = True
+
+            # Quantization is inferred from the model ID (e.g., "llama2-7b-4bit")
+            # rather than config.json because model_type rarely encodes quantization.
+            # This is a UI prefill heuristic; it does not affect server startup or loading.
+            name_lower = model_id.lower()
+            for bits, patterns in {
+                4: ["4bit", "4-bit", "q4"],
+                8: ["8bit", "8-bit", "q8"],
+                3: ["3bit", "3-bit"],
+                6: ["6bit", "6-bit"],
+            }.items():
+                if any(p in name_lower for p in patterns):
+                    presets["bits"] = bits
+                    break
+
+            # Default temperature hint (some model cards embed this in generation_config.json)
+            try:
+                gen_path = hf_hub_download(
+                    repo_id=model_id,
+                    filename="generation_config.json",
+                    local_files_only=False,
+                )
+                with open(gen_path) as f:
+                    gen = _json.load(f)
+                temp = gen.get("temperature")
+                if temp and isinstance(temp, (int, float)) and 0 < temp <= 2:
+                    presets["recommended_temperature"] = float(temp)
+            except Exception:
+                logger.warning("Operation failed", exc_info=True)
+
         except Exception:
             logger.warning("Operation failed", exc_info=True)
 
-    except Exception:
-        logger.warning("Operation failed", exc_info=True)
-    finally:
-        if hf_token:
-            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
-
+    # Cache for the session lifetime
+    _MODEL_PRESETS_CACHE[model_id] = presets
     return presets
 
 
@@ -785,6 +802,12 @@ def estimate_size_from_name(model_id: str) -> float | None:
     return param_b * bpp * 1.10
 
 
+_KV_CACHE_OVERHEAD_FACTOR = 1.25
+"""Multiplier applied to weight-only model size to account for KV cache and
+runtime overhead (~25% for typical contexts).  This is a conservative estimate
+— actual overhead varies by context length, batch size, and model architecture."""
+
+
 def get_hf_model_size_gb(model_id: str, hf_token: str | None = None) -> float | None:
     """
     Query the HuggingFace Hub API for the total weight file size of a model
@@ -792,26 +815,28 @@ def get_hf_model_size_gb(model_id: str, hf_token: str | None = None) -> float | 
 
     Only sums files that are actual model weights (.safetensors, .npz, .bin,
     .pt, .gguf) — excludes tokenizer files, config JSON, etc.
-    """
-    if hf_token:
-        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
-    try:
-        from huggingface_hub import HfApi
 
-        api = HfApi()
-        info = api.model_info(model_id, files_metadata=True)
-        weight_exts = {".safetensors", ".npz", ".bin", ".pt", ".pth", ".gguf"}
-        total = 0
-        for f in info.siblings or []:
-            if Path(f.rfilename).suffix.lower() in weight_exts:
-                total += getattr(f, "size", 0) or 0
-        return total / (1024**3) if total > 0 else None
-    except Exception as e:
-        logger.warning("Operation failed: %s", e, exc_info=True)
-        return None
-    finally:
-        if hf_token:
-            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+    The returned value includes a 25 % overhead factor for KV cache and runtime
+    buffers so that ``check_model_fit()`` provides more realistic guidance.
+    """
+    with _hf_token_env(hf_token):
+        try:
+            from huggingface_hub import HfApi
+
+            api = HfApi()
+            info = api.model_info(model_id, files_metadata=True)
+            weight_exts = {".safetensors", ".npz", ".bin", ".pt", ".pth", ".gguf"}
+            total = 0
+            for f in info.siblings or []:
+                if Path(f.rfilename).suffix.lower() in weight_exts:
+                    total += getattr(f, "size", 0) or 0
+            if total <= 0:
+                return None
+            weight_gb = total / (1024**3)
+            return round(weight_gb * _KV_CACHE_OVERHEAD_FACTOR, 1)
+        except Exception as e:
+            logger.warning("Operation failed: %s", e, exc_info=True)
+            return None
 
 
 def _score_fit(model_gb: float, total_gb: float) -> str:

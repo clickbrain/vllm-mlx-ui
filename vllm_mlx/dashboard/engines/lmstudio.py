@@ -94,6 +94,16 @@ class LmStudioEngine(BaseEngine):
     def is_installed(self) -> bool:
         return self._which("lms") is not None
 
+    def check_requirements(self) -> list[str]:
+        """Warn if the `lms` CLI is not installed."""
+        if not self._which("lms"):
+            return [
+                "LM Studio CLI (`lms`) not found on PATH. "
+                "Install LM Studio from https://lmstudio.ai, then enable the CLI "
+                "via LM Studio → Settings → CLI."
+            ]
+        return []
+
     def get_version(self) -> str | None:
         try:
             result = subprocess.run(

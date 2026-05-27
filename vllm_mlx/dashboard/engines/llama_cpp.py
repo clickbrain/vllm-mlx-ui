@@ -165,9 +165,10 @@ class LlamaCppEngine(BaseEngine):
         return self._which("llama-server") is not None
 
     def get_version(self) -> str | None:
+        llama_bin = self._which("llama-server") or "llama-server"
         try:
             result = subprocess.run(
-                ["llama-server", "--version"],
+                [llama_bin, "--version"],
                 capture_output=True, text=True, timeout=5,
             )
             text = result.stdout + result.stderr
@@ -225,10 +226,10 @@ class LlamaCppEngine(BaseEngine):
                 "key": "parallel",
                 "label": "Parallel Requests",
                 "type": "int",
-                "default": 1,
+                "default": 4,
                 "min": 1,
                 "max": 32,
-                "help": "Number of parallel request slots (continuous batching).",
+                "help": "Number of parallel request slots (continuous batching). Default 4 for most Apple Silicon Macs.",
             },
             {
                 "key": "batch_size",
@@ -261,8 +262,8 @@ class LlamaCppEngine(BaseEngine):
                 "key": "flash_attn",
                 "label": "Flash Attention",
                 "type": "bool",
-                "default": False,
-                "help": "Enable Flash Attention (requires compatible model and build).",
+                "default": True,
+                "help": "Enable Flash Attention (requires compatible model and build). On by default — faster generation on supported hardware.",
             },
             {
                 "key": "mlock",
