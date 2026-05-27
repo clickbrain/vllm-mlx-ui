@@ -608,8 +608,8 @@ async function doRestart() {
           v-for="eng in engines"
           :key="eng.id"
           class="engine-card"
-          :class="{ active: selectedEngine === eng.id, unavailable: !eng.installed && eng.install_method === 'bundled' }"
-          @click="eng.installed || eng.install_method !== 'bundled' ? selectEngine(eng.id) : undefined"
+          :class="{ active: selectedEngine === eng.id && eng.installed, unavailable: !eng.installed }"
+          @click="eng.installed ? selectEngine(eng.id) : undefined"
         >
           <div class="engine-card-header">
             <span class="engine-card-name">{{ eng.name }}</span>
