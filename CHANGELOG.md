@@ -1,5 +1,23 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.12 — 2026-05-27
+
+### Added
+- **OpenAI-Compatible API engine** (`openai-compatible`) — proxy any `/v1/chat/completions`
+  request to a remote OpenAI-compatible provider (OpenAI, Groq, OpenRouter, Together AI,
+  Anthropic proxy, self-hosted, etc.). No local inference process is needed. Configure the
+  API base URL, API key, and comma-separated enabled model IDs in Settings → Engine. The
+  dashboard proxy forwards requests transparently with correct `Authorization` headers.
+  "Start" marks the engine as active immediately; "Stop" disconnects it. Auto-model-switch
+  updates the config model without restarting any process. Full tests added:
+  `tests/test_external_api_engine.py` (17 tests).
+
+- **Apple Foundation Model engine** (`apple-fm`) — wraps the community `apfel` tool
+  (`brew install Arthur-Ficial/apfel/apfel`) to expose Apple's on-device ~3B LLM (Apple
+  Intelligence) via an OpenAI-compatible server. Requires macOS 26, Apple Silicon, and Apple
+  Intelligence enabled in System Settings. Supports tool calling. Single fixed model — no
+  model selection needed. Full tests added: `tests/test_apple_fm_engine.py` (36 tests).
+
 ## v0.8.11 — 2026-05-28
 
 ### Fixed
