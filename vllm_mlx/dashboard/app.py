@@ -130,6 +130,33 @@ def _kill_stale_ui(ui_pid_file: Path) -> bool:
 
 
 
+def _try_engine_fallback(cfg, _msg, load_config, save_config, start_server):
+    """When the configured engine is not installed, auto-switch to the first installed one.
+
+    Returns (updated_cfg, ok, message) so the caller can print the final result.
+    Saves the new engine_id to config so the fallback persists across restarts.
+    """
+    try:
+        from vllm_mlx.dashboard.engines.registry import ENGINES
+        configured_engine = cfg.get("engine_id", "vllm-mlx")
+        for eid, engine in ENGINES.items():
+            if eid != configured_engine and engine.is_installed():
+                print(
+                    f"[vllm-mlx] 🔄 Engine '{configured_engine}' not found — "
+                    f"switching to '{eid}'. Update Settings → Engine to keep this choice.",
+                    file=sys.stderr,
+                )
+                cfg = load_config()
+                cfg["engine_id"] = eid
+                save_config(cfg)
+                ok, msg = start_server(cfg)
+                return cfg, ok, msg
+    except Exception as exc:
+        logger.warning("Engine fallback failed: %s", exc, exc_info=True)
+    # No fallback found — return original failure
+    return cfg, False, _msg
+
+
 def main() -> None:
     """CLI entry point for ``vllm-mlx-ui``.
 
@@ -232,6 +259,7 @@ def main() -> None:
         from vllm_mlx.dashboard.server_manager import (
             AUTO_START_FLAG,
             load_config,
+            save_config,
             start_server,
         )
         if AUTO_START_FLAG.exists():
@@ -241,6 +269,8 @@ def main() -> None:
                 print(f"[vllm-mlx] 🔄 Auto-starting inference server: {_cfg['model']}")
                 _time.sleep(0.5)
                 _ok, _msg = start_server(_cfg)
+                if not _ok and "not installed" in _msg.lower():
+                    _cfg, _ok, _msg = _try_engine_fallback(_cfg, _msg, load_config, save_config, start_server)
                 print(f"[vllm-mlx] {'✅' if _ok else '⚠️ '} {_msg}")
         else:
             _cfg = load_config()
@@ -248,6 +278,8 @@ def main() -> None:
                 print(f"[vllm-mlx] 🔄 startup_model_behavior=auto — starting: {_cfg['model']}")
                 _time.sleep(0.5)
                 _ok, _msg = start_server(_cfg)
+                if not _ok and "not installed" in _msg.lower():
+                    _cfg, _ok, _msg = _try_engine_fallback(_cfg, _msg, load_config, save_config, start_server)
                 print(f"[vllm-mlx] {'✅' if _ok else '⚠️ '} {_msg}")
     except Exception as _exc:
         print(f"[vllm-mlx] ⚠️  Auto-start check failed: {_exc}", file=sys.stderr)

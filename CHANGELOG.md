@@ -1,5 +1,21 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.14 — 2026-05-27
+
+### Fixed
+- **LM Studio CLI detection** — `LmStudioEngine.is_installed()` now checks
+  `/usr/local/bin/lms` and `~/.lmstudio/bin/lms` in addition to `$PATH`. The Homebrew-managed
+  Python process does not inherit the user's shell `$PATH`, so machines that had LM Studio
+  installed but reported "not found" will now be detected correctly.
+- **Auto engine fallback** — on startup, if the configured engine is not installed, the app
+  now automatically switches to the first available installed engine (priority order:
+  vllm-mlx → rapid-mlx → ollama → llama-cpp → ds4) instead of warning and leaving the user
+  stuck with a broken config.
+- **Noisy "Operation failed" log messages** — two health-poll log lines in `mgmt_server.py`
+  that printed full tracebacks during normal model-load wait cycles are now `debug`-level with
+  a descriptive message. Two `quality_runner.py` exception messages now include the specific
+  server URL / context instead of the generic "Operation failed".
+
 ## v0.8.13 — 2026-05-27
 
 ### Fixed

@@ -26,10 +26,18 @@ Install:
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from typing import Any, ClassVar
 
 from .base import BaseEngine
+
+# LM Studio installs the CLI to /usr/local/bin on macOS by default.
+# shutil.which() may miss this if the Python process PATH is stripped.
+_KNOWN_LMS_PATHS: list[str] = [
+    "/usr/local/bin/lms",
+    os.path.expanduser("~/.lmstudio/bin/lms"),
+]
 
 
 class LmStudioEngine(BaseEngine):
@@ -66,6 +74,16 @@ class LmStudioEngine(BaseEngine):
 
     # ── BaseEngine implementation ─────────────────────────────────────────────
 
+    def _find_lms(self) -> str | None:
+        """Find the lms binary on PATH or in known LM Studio install locations."""
+        found = self._which("lms")
+        if found:
+            return found
+        for path in _KNOWN_LMS_PATHS:
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+        return None
+
     def build_command(self, config: dict[str, Any]) -> list[str]:
         """Start (or restart) the LM Studio local server.
 
@@ -73,7 +91,7 @@ class LmStudioEngine(BaseEngine):
         ``lms load`` before starting the server, using a shell wrapper so
         both steps happen in one Popen call.
         """
-        lms_bin = self._which("lms") or "lms"
+        lms_bin = self._find_lms() or "lms"
         port = int(config.get("port", 1234))
         engine_settings = config.get("engine_settings", {}).get(self.id, {})
         launch_model = engine_settings.get("launch_model", "").strip()
@@ -92,11 +110,11 @@ class LmStudioEngine(BaseEngine):
         return [lms_bin, "server", "start", "--port", str(port)]
 
     def is_installed(self) -> bool:
-        return self._which("lms") is not None
+        return self._find_lms() is not None
 
     def check_requirements(self) -> list[str]:
         """Warn if the `lms` CLI is not installed."""
-        if not self._which("lms"):
+        if not self._find_lms():
             return [
                 "LM Studio CLI (`lms`) not found on PATH. "
                 "Install LM Studio from https://lmstudio.ai, then enable the CLI "
@@ -105,12 +123,14 @@ class LmStudioEngine(BaseEngine):
         return []
 
     def get_version(self) -> str | None:
+        lms_bin = self._find_lms()
+        if not lms_bin:
+            return None
         try:
             result = subprocess.run(
-                ["lms", "version"],
+                [lms_bin, "version"],
                 capture_output=True, text=True, timeout=5,
             )
-            # Output is typically just the version string "0.3.12"
             v = (result.stdout or result.stderr).strip().splitlines()[0]
             return v or None
         except Exception:

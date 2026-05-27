@@ -655,7 +655,7 @@ def _get_model_name(server_url: str) -> str:
         if models:
             return models[0].get("id", "unknown")
     except Exception:
-        logger.warning("Operation failed", exc_info=True)
+        logger.warning("Could not reach inference server at %s/v1/models", server_url, exc_info=True)
     return "unknown"
 
 
@@ -715,7 +715,7 @@ def _stream_completion(
                         t_first = _time.monotonic()
                     chunks.append(content)
             except Exception:
-                logger.warning("Operation failed", exc_info=True)
+                logger.warning("Could not parse SSE chunk from inference server", exc_info=True)
 
     t_end = _time.monotonic()
     text = "".join(chunks)

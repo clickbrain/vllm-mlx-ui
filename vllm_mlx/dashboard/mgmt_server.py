@@ -1917,8 +1917,7 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
                                 ready = True
                                 break
                         except Exception:
-                            logger.warning("Operation failed", exc_info=True)
-                    if not ready:
+                            logger.debug("Waiting for model server at %s (not ready yet)", health_url)
                         _cb(f"[✗ Timeout waiting for {target_model} to start]\n")
                         continue
                     _cb(f"[✓ {target_model} ready]\n")
@@ -2088,8 +2087,7 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
                             if r.status_code == 200:
                                 break
                         except Exception:
-                            logger.warning("Operation failed", exc_info=True)
-                        _t.sleep(1)
+                            logger.debug("Waiting for model server at %s (not ready yet)", server_url_inner)
 
                 server_url = f"http://127.0.0.1:{sm.load_config().get('port', 8000)}"
                 _cb(f"\n── Running custom benchmark: {mid} ──\n")
