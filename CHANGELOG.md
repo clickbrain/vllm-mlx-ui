@@ -1,5 +1,26 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.29 — 2026-05-28
+
+### Fixed
+
+- **Kilroy (and any client that explicitly sends a large `max_tokens`) still getting
+  37-minute responses after v0.8.28** — v0.8.28 fixed the default generation length
+  (`max_tokens: 16384`) but `max_request_tokens` was still being set to 131,072 by
+  model preset selection.  `max_request_tokens` is the hard ceiling: the vllm-mlx engine
+  accepts any client request with `max_tokens ≤ max_request_tokens`.  With the ceiling
+  at 131,072, a client that explicitly sends `max_tokens: 131072` bypassed the default
+  entirely and still generated 131K tokens.  Fix: model selection no longer writes
+  `max_request_tokens` from the model's context window.  The default value (32768) is
+  preserved, so any client sending `max_tokens > 32768` now gets an immediate HTTP 400
+  error instead of a 37-minute silent hang.  32,768 output tokens is ~24,000 words —
+  a very generous cap that covers all realistic use cases.
+
+- **Model selection no longer corrupts token limits at all** — Both `max_tokens` (default
+  generation length) and `max_request_tokens` (client output cap) are now left untouched
+  when selecting a model.  The model's context window is stored as `context_length` for
+  display purposes only.  Users control token limits explicitly in Settings.
+
 ## v0.8.28 — 2026-05-28
 
 ### Fixed

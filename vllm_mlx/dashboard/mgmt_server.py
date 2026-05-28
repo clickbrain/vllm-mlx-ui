@@ -889,10 +889,11 @@ def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
 
     try:
         presets = mm.get_model_presets(model_id)
-        if presets.get("max_tokens"):
-            # max_request_tokens = model's context window (what clients can request)
-            # max_tokens = default generation length — do NOT override; keep user's setting
-            cfg["max_request_tokens"] = presets["max_tokens"]
+        if presets.get("context_length"):
+            # Store the model's actual context window for display purposes only.
+            # Do NOT write max_tokens or max_request_tokens — these are generation
+            # caps that the user sets; the model's context window is not the right value.
+            cfg["context_length"] = presets["context_length"]
     except Exception:
         logger.warning("Operation failed", exc_info=True)
 
@@ -1432,10 +1433,10 @@ def _hot_swap_if_needed(requested_model: str) -> None:
         # Try to load presets for the new model
         try:
             presets = mm.get_model_presets(requested_model)
-            if presets.get("max_tokens"):
-                # max_request_tokens = model's context window (what clients can request)
-                # max_tokens = default generation length — do NOT override; keep user's setting
-                cfg["max_request_tokens"] = presets["max_tokens"]
+            if presets.get("context_length"):
+                # Store context window for display only; never override max_tokens
+                # or max_request_tokens from model selection.
+                cfg["context_length"] = presets["context_length"]
         except Exception:
             logger.warning("Operation failed", exc_info=True)
 
