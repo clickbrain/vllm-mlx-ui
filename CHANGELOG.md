@@ -1,6 +1,21 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.37 — 2026-05-28
+## v0.8.38 — 2026-05-28
+
+### Fixed
+
+- **Speed benchmark output log missing** — During speed-only benchmarks the "Running" panel showed only a spinner with no output. Fixed: the benchmark backend now streams output lines per model run to a `/benchmark/output` endpoint; the frontend polls it every 1.5 s and renders a live log (`<pre>`) exactly like quality benchmarks.
+
+- **Speed benchmark banner incorrectly said "Server not running — requires server"** — The banner for speed mode was a red error telling users to go to the Serve page first. In reality, speed benchmarks auto-start the server per model just like quality benchmarks. Fixed: replaced the RED error banner with a single unified YELLOW advisory banner for all modes: "Server not running — it will be started automatically for each model when the benchmark begins."
+
+- **Model badge stuck on wrong model during multi-model benchmarks** — The "running / queued" badge on each model row used `serverStore.modelId` (the global serve-page model), which doesn't update as the benchmark cycles through models. Fixed: the backend now returns `current_model` in `/benchmark/status`; the frontend tracks `speedCurrentModel` and uses it for the badge, so it correctly shows which model is active during a run.
+
+- **Engine selector in Benchmarks corrupted global config** — Changing the benchmark engine wrote immediately to `/config` via `POST /config { engine_id }`, which overwrote the global config and caused subsequent benchmarks (including Advisor) to record the wrong engine. Fixed: the engine selector no longer writes to global config; instead `engine_id` is passed as a request field in the `/benchmark/run` POST body and used only for that run.
+
+- **Backend `/benchmark/run` now accepts `engine_id` override** — Passing `engine_id` in the run request body uses that engine for the server snapshot without touching the saved config. Advisor speed benchmarks also pass `engine_id`.
+
+- **Speed benchmark status shows current model name** — When a benchmark is running, the spinner line now shows `"Benchmarking: <model> (N/M)"` instead of the static text "Benchmarking tok/s against live server…".
+
 
 ### Fixed
 

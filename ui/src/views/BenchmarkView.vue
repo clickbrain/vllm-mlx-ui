@@ -304,9 +304,7 @@ async function loadBenchEngines() {
 async function setBenchEngine(id: string) {
   if (id === benchEngineId.value) return
   benchEngineId.value = id
-  try {
-    await api.post('/config', { engine_id: id })
-  } catch { /* best-effort */ }
+  // Don't write to global config — engine_id is passed per-run so it doesn't corrupt config
 }
 
 watch(() => serverStore.engineId, (id) => { benchEngineId.value = id })
@@ -366,6 +364,20 @@ function clearBenchModels() {
 const qualityLogRef    = ref<HTMLPreElement | null>(null)
 // benchRunName is local config, not persistent run state
 const benchRunName    = ref('')
+
+// ── Speed output log (streamed from /benchmark/output) ───────────────────────
+const speedLines       = ref<string[]>([])
+const speedLogRef      = ref<HTMLPreElement | null>(null)
+const speedCurrentModel = ref('')
+const speedModelIndex  = ref(0)
+const speedModelTotal  = ref(0)
+let _speedOutputOffset = 0
+
+watch(speedLines, () => {
+  nextTick(() => {
+    if (speedLogRef.value) speedLogRef.value.scrollTop = speedLogRef.value.scrollHeight
+  })
+})
 
 // ── Custom prompts state ─────────────────────────────────────────────────────
 const customPrompts    = ref<string[]>([''])
@@ -474,6 +486,11 @@ async function runBenchmark() {
   speedPhase.value   = 'idle'
   qualityPhase.value = 'idle'
   qualityLines.value = []
+  speedLines.value   = []
+  speedCurrentModel.value = ''
+  speedModelIndex.value = 0
+  speedModelTotal.value = 0
+  _speedOutputOffset = 0
   qualityRunId.value   = null
   lastRunSpeed.value   = null
   lastRunQuality.value = null
@@ -551,6 +568,7 @@ async function _doBenchmarkRun() {
       await api.post('/benchmark/run', {
         model_ids: models,
         label: benchRunName.value,
+        engine_id: benchEngineId.value || undefined,
         config: { runs: benchRuns.value, max_tokens: benchMaxTokens.value, prompt: 'Explain the concept of machine learning in simple terms.' },
       })
     } catch {
@@ -561,7 +579,22 @@ async function _doBenchmarkRun() {
     if (speedPhase.value === 'running') {
       _speedPollTimer = setInterval(async () => {
         try {
-          const status = await api.get<{ running: boolean }>('/benchmark/status')
+          const status = await api.get<{
+            running: boolean; current_model?: string; model_index?: number; model_total?: number
+          }>('/benchmark/status')
+          // Update current model tracking
+          if (status.current_model) speedCurrentModel.value = status.current_model
+          if (status.model_index) speedModelIndex.value = status.model_index
+          if (status.model_total) speedModelTotal.value = status.model_total
+          // Pull output lines
+          try {
+            const out = await api.get<{ running: boolean; lines: string[]; total_lines: number }>(
+              `/benchmark/output?since=${_speedOutputOffset}`
+            )
+            if (out.lines.length) speedLines.value.push(...out.lines)
+            _speedOutputOffset = out.total_lines
+          } catch { /* output endpoint is optional */ }
+
           if (!status.running) {
             clearInterval(_speedPollTimer!); _speedPollTimer = null
             speedPhase.value = 'done'
@@ -886,6 +919,7 @@ async function runAdvisorAnalysis() {
       await api.post('/benchmark/run', {
         model_ids: advisorModels.value,
         label: `advisor:${taskDef.id}:speed`,
+        engine_id: benchEngineId.value || undefined,
         config: { runs: 2, max_tokens: 256 },
       })
       await new Promise<void>((resolve) => {
@@ -1255,14 +1289,10 @@ watch(activeTab, (tab) => {
     <!-- ── BENCHMARK TAB ──────────────────────────────────────────────────── -->
     <div v-else-if="activeTab === 'Run Tests'" class="tab-body">
 
-      <!-- Server warning: speed mode needs it running; other modes start it automatically -->
-      <div v-if="!serverStore.isRunning && benchMode === 'speed'" class="status-banner banner-red">
+      <!-- Server warning: show advisory only; benchmark auto-starts server for each model -->
+      <div v-if="!serverStore.isRunning" class="status-banner banner-yellow">
         <span class="banner-dot" />
-        <span><strong>Server not running</strong> — speed benchmark requires a running server. Start it on the Serve page first.</span>
-      </div>
-      <div v-else-if="!serverStore.isRunning && benchMode !== 'speed'" class="status-banner banner-yellow">
-        <span class="banner-dot" />
-        <span>Server not running — it will be started automatically when the benchmark begins.</span>
+        <span>Server not running — it will be started automatically for each model when the benchmark begins.</span>
       </div>
 
       <!-- Config panel -->
@@ -1338,8 +1368,8 @@ watch(activeTab, (tab) => {
                       <span class="bench-check-label mono">{{ m.id.split('/').pop() }}</span>
                       <span class="bench-check-desc">{{ m.id.split('/')[0] }} &middot; {{ m.size_gb?.toFixed(1) ?? '?' }} GB &middot; {{ m.quantization }}</span>
                     </div>
-                    <span v-if="benchRunning && benchSelectedModels.includes(m.id)" class="bench-model-badge" :class="m.id === serverStore.modelId ? '' : 'badge-pending'">
-                      {{ m.id === serverStore.modelId ? 'running' : 'queued' }}
+                    <span v-if="benchRunning && benchSelectedModels.includes(m.id)" class="bench-model-badge" :class="speedCurrentModel && m.id === speedCurrentModel ? '' : (serverStore.modelId && m.id === serverStore.modelId ? '' : 'badge-pending')">
+                     {{ (speedCurrentModel && m.id === speedCurrentModel) || (!speedCurrentModel && m.id === serverStore.modelId) ? 'running' : 'queued' }}
                     </span>
                     <span v-else-if="!benchRunning && m.id === serverStore.modelId" class="bench-model-badge">loaded</span>
                   </label>
@@ -1642,8 +1672,12 @@ watch(activeTab, (tab) => {
             <div v-if="speedPhase === 'idle'" class="panel-empty">Waiting to start…</div>
             <div v-else-if="speedPhase === 'running'" class="bench-spin-row">
               <span class="spin" />
-              <span class="dim">Benchmarking tok/s against live server…</span>
+              <span class="dim">
+                {{ speedCurrentModel ? `Benchmarking: ${speedCurrentModel.split('/').pop()}${speedModelTotal > 1 ? ` (${speedModelIndex}/${speedModelTotal})` : ''}` : 'Starting benchmark…' }}
+              </span>
             </div>
+            <!-- Live output log during speed run -->
+            <pre v-if="speedLines.length" ref="speedLogRef" class="quality-log speed-log">{{ speedLines.join('') }}</pre>
             <div v-else-if="speedPhase === 'done' && lastRunSpeed" class="speed-result-inline">
               <div class="sri-stat">
                 <div class="sri-val mono">{{ (lastRunSpeed as any).avg_tps?.toFixed(1) ?? '—' }}</div>

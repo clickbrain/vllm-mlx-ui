@@ -1058,6 +1058,11 @@ _benchmark_running = False
 _benchmark_lock = threading.Lock()
 _benchmark_stop_event: threading.Event | None = None
 _benchmark_thread: threading.Thread | None = None
+_benchmark_output_lines: list[str] = []
+_benchmark_current_model: str = ""
+_benchmark_model_index: int = 0
+_benchmark_model_total: int = 0
+_benchmark_output_lock = threading.Lock()
 
 # Global lifecycle lock shared by start/stop, hot-swap, and engine compare.
 # Prevents concurrent engine restarts from racing with each other.
@@ -1070,6 +1075,8 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
     Poll GET /benchmark/status to check progress, GET /benchmarks for results.
     """
     global _benchmark_running, _benchmark_stop_event, _benchmark_thread
+    global _benchmark_output_lines, _benchmark_current_model
+    global _benchmark_model_index, _benchmark_model_total
     with _benchmark_lock:
         if _benchmark_running:
             return {"ok": False, "message": "A benchmark is already running"}
@@ -1081,6 +1088,8 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
     runs = int(config.get("runs", 10))
     max_tokens = int(config.get("max_tokens", 256))
     label = req.get("label", "") or config.get("label", "")
+    # Allow caller to specify engine_id without mutating the global config
+    override_engine_id: str | None = req.get("engine_id") or None
 
     if not model_ids:
         with _benchmark_lock:
@@ -1095,19 +1104,36 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
     )
     base_cfg = sm.load_config()
     server_settings_snapshot = {k: base_cfg.get(k) for k in _SETTINGS_KEYS if base_cfg.get(k) is not None}
-    server_settings_snapshot["engine_id"] = base_cfg.get("engine_id", "vllm-mlx")
+    server_settings_snapshot["engine_id"] = override_engine_id or base_cfg.get("engine_id", "vllm-mlx")
+
+    # Reset output buffer
+    with _benchmark_output_lock:
+        _benchmark_output_lines = []
+        _benchmark_current_model = ""
+        _benchmark_model_index = 0
+        _benchmark_model_total = len(model_ids)
 
     _stop = _benchmark_stop_event
 
+    def _output_cb(line: str) -> None:
+        with _benchmark_output_lock:
+            _benchmark_output_lines.append(line)
+
     def _run() -> None:
-        global _benchmark_running
+        global _benchmark_running, _benchmark_current_model, _benchmark_model_index
         try:
             running_model = sm.load_config().get("model", "")
             server_running = sm.get_server_status().get("running", False)
             server_url = sm.get_server_url()
-            for model_id in model_ids:
+            for idx, model_id in enumerate(model_ids):
                 if _stop.is_set():
                     break
+                with _benchmark_output_lock:
+                    _benchmark_current_model = model_id
+                    _benchmark_model_index = idx + 1
+                    _benchmark_output_lines.append(
+                        f"\n── Model {idx + 1}/{len(model_ids)}: {model_id.split('/')[-1]} ──\n"
+                    )
                 if server_running and running_model and running_model == model_id:
                     br.run_live_benchmark(
                         model_id,
@@ -1119,7 +1145,8 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
                         server_settings=server_settings_snapshot,
                     )
                 else:
-                    br.run_benchmark(model_id, prompts=runs, max_tokens=max_tokens)
+                    br.run_benchmark(model_id, prompts=runs, max_tokens=max_tokens,
+                                     output_callback=_output_cb)
         finally:
             with _benchmark_lock:
                 _benchmark_running = False
@@ -1145,7 +1172,25 @@ def stop_benchmark_endpoint(_: None = Depends(_check_auth)) -> dict:
 @app.get("/benchmark/status")
 def benchmark_status(_: None = Depends(_check_auth)) -> dict:
     """Return whether a benchmark run is currently in progress."""
-    return {"running": _benchmark_running}
+    with _benchmark_output_lock:
+        return {
+            "running": _benchmark_running,
+            "current_model": _benchmark_current_model,
+            "model_index": _benchmark_model_index,
+            "model_total": _benchmark_model_total,
+        }
+
+
+@app.get("/benchmark/output")
+def benchmark_output(since: int = 0, _: None = Depends(_check_auth)) -> dict:
+    """Return buffered output lines from the running speed benchmark."""
+    with _benchmark_output_lock:
+        lines = _benchmark_output_lines[since:]
+        return {
+            "running": _benchmark_running,
+            "lines": lines,
+            "total_lines": len(_benchmark_output_lines),
+        }
 
 
 # ── Engine comparison benchmark ───────────────────────────────────────────────
