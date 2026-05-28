@@ -1,5 +1,23 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.37 — 2026-05-28
+
+### Fixed
+
+- **Apple Foundation Model shows stale model name in status bar** — The sidebar status bar was displaying `serverStore.modelId` (which holds the model ID from the previous engine's config, e.g. `Olmo-3-7B-Instruct-8bit`) when Apple Foundation Model was active. Fixed: when the active engine returns a `fixed_model_display` (e.g. `"Apple On-Device LLM (~3B)"`), the status bar now shows that instead.
+
+- **Apple Foundation Model chat returns no response** — `buildBody()` was sending `model: 'Olmo-3-7B-Instruct-8bit'` to apfel's OpenAI-compatible endpoint. Apfel validates the model field and returns 404/400 for unrecognized IDs. Fixed: the `model` field is now omitted from the request body for engines that have a `fixed_model_display`, so apfel uses its built-in default.
+
+- **Apple Foundation Model chat model picker shows nothing** — The chat header hid the model picker when `modelsStore.models.length === 0`. Apple FM has no cached HuggingFace models so the picker was hidden with no label. Fixed: a static label badge (`"Apple On-Device LLM (~3B)"`) is now shown in the chat header for fixed-model engines.
+
+- **Apple Foundation Model "No model loaded" warning shown incorrectly** — The warning appeared even when a fixed-model engine was active. Fixed to check `fixedModelDisplay` before showing the warning.
+
+### Changed
+
+- **Benchmarks: "Run Tests" is now the default tab** — Previously "Advisor" was the first/default tab; "Run Tests" is now first and the default on load.
+
+- **Benchmarks: Engine selector in Run Tests** — When multiple inference engines are installed, a dropdown now appears in the "Configure & run" column allowing the user to choose which engine is used for the benchmark run. The selector is hidden when only one engine is installed.
+
 ## v0.8.36 — 2026-05-28
 
 ### Fixed

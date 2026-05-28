@@ -35,6 +35,7 @@ interface EngineInfo {
   id: string
   name: string
   installed: boolean
+  fixed_model_display?: string | null
 }
 
 interface Message {
@@ -131,6 +132,8 @@ const engines          = ref<EngineInfo[]>([])
 const selectedEngine   = ref(serverStore.engineId)
 const switchingEngine  = ref(false)
 const enginesLoadError = ref('')
+const activeEngineInfo  = computed(() => engines.value.find(e => e.id === serverStore.engineId))
+const fixedModelDisplay = computed<string | null>(() => activeEngineInfo.value?.fixed_model_display ?? null)
 
 async function loadEngines() {
   try {
@@ -371,12 +374,16 @@ function buildBody(): Record<string, unknown> {
     })
 
   const body: Record<string, unknown> = {
-    model:       modelId.value ?? 'default',
     messages: [...systemMsgs, ...msgList],
     stream:              p.value.stream,
     temperature:         p.value.temperature,
     max_tokens:          p.value.maxTokens,
     top_p:               p.value.topP,
+  }
+  // For fixed-model engines (e.g. apple-fm), omit the model field so the engine
+  // uses its own default instead of receiving a stale/wrong model ID.
+  if (!fixedModelDisplay.value) {
+    body.model = modelId.value ?? 'default'
   }
   if (p.value.topK > 0)             body.top_k             = p.value.topK
   if (p.value.minP > 0)             body.min_p             = p.value.minP
@@ -514,7 +521,7 @@ async function send() {
   if (sending.value || autoStarting.value) return
   if (!serverStore.isRunning) {
     const configModel = serverStore.config?.model ?? serverStore.modelId
-    if (!configModel && !modelsStore.models.length) {
+    if (!configModel && !modelsStore.models.length && !fixedModelDisplay.value) {
       error.value = 'No model loaded. Download and select a model on the Models page first.'
       return
     }
@@ -829,8 +836,16 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Model picker -->
-          <div v-if="modelsStore.models.length" class="model-picker-wrap">
+          <!-- Fixed-model engine: show static label instead of dropdown -->
+          <div v-if="fixedModelDisplay" class="model-picker-wrap">
+            <div class="model-picker-label">Model</div>
+            <div class="model-picker-control">
+              <span class="model-fixed-label">{{ fixedModelDisplay }}</span>
+            </div>
+          </div>
+
+          <!-- Normal: model picker dropdown (only when models are available) -->
+          <div v-else-if="modelsStore.models.length" class="model-picker-wrap">
             <div class="model-picker-label">Model</div>
             <div class="model-picker-control">
               <select
@@ -886,7 +901,7 @@ onUnmounted(() => {
         <div class="messages" ref="messagesEl" @scroll="onMessagesScroll" role="log" aria-label="Chat messages" aria-live="polite">
           <!-- Empty state -->
           <div v-if="!messages.length" class="empty-state">
-            <div v-if="!modelId" class="server-warning">
+            <div v-if="!modelId && !fixedModelDisplay" class="server-warning">
               ⚠ No model loaded — start the server on the Serve page first.
             </div>
             <div v-else>
@@ -1302,6 +1317,21 @@ onUnmounted(() => {
 }
 .model-select:focus    { outline: none; border-color: var(--bd-focus); box-shadow: 0 0 0 3px rgba(91, 106, 208, .12); }
 .model-select:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Fixed-model engine label (replaces dropdown for engines like apple-fm) */
+.model-fixed-label {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tx2);
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  white-space: nowrap;
+}
 
 /* Small icon button (system prompt toggle) */
 .icon-btn {

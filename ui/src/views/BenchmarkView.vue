@@ -59,9 +59,9 @@ const {
 defineOptions({ name: 'BenchmarkView' })
 
 // ── Tab state ─────────────────────────────────────────────────────────────
-const tabs = ['Advisor', 'Live', 'Run Tests', 'History'] as const
+const tabs = ['Run Tests', 'Live', 'History', 'Advisor'] as const
 type Tab = typeof tabs[number]
-const activeTab = ref<Tab>('Advisor')
+const activeTab = ref<Tab>('Run Tests')
 
 // ── Live tab — polling ─────────────────────────────────────────────────────
 let stopPoll: (() => void) | null = null
@@ -101,6 +101,7 @@ onMounted(() => {
   modelsStore.fetchBenchmarkResults()
   modelsStore.fetchModels()
   loadPerfSettings()
+  loadBenchEngines()
   // Reconnect poll if benchmark was running when this component was last unmounted
   // (e.g. KeepAlive evicted the instance but the backend job is still going)
   if (benchRunning.value && qualityRunId.value && !_qualityPollTimer) {
@@ -112,6 +113,7 @@ onMounted(() => {
 onActivated(() => {
   _startLivePolling()
   modelsStore.fetchBenchmarkResults()
+  loadBenchEngines()
   // Auto-switch to Run Tests tab so the user sees a running benchmark
   if (benchRunning.value) {
     activeTab.value = 'Run Tests'
@@ -285,6 +287,29 @@ const benchNumQuestions = ref(20)
 // Custom prompt options
 const customMaxTokens   = ref(2048)
 const customEnableThinking = ref(false)
+
+// Engine selector for Run Tests
+interface BenchEngineInfo { id: string; name: string; installed: boolean }
+const benchEngines = ref<BenchEngineInfo[]>([])
+const benchEngineId = ref(serverStore.engineId)
+
+async function loadBenchEngines() {
+  try {
+    const result = await api.get<{ engines: BenchEngineInfo[] } | BenchEngineInfo[]>('/engines')
+    const all: BenchEngineInfo[] = Array.isArray(result) ? result : (result as any).engines ?? []
+    benchEngines.value = all.filter(e => e.installed)
+  } catch { /* best-effort */ }
+}
+
+async function setBenchEngine(id: string) {
+  if (id === benchEngineId.value) return
+  benchEngineId.value = id
+  try {
+    await api.post('/config', { engine_id: id })
+  } catch { /* best-effort */ }
+}
+
+watch(() => serverStore.engineId, (id) => { benchEngineId.value = id })
 
 // Model selection
 const cachedModels = computed(() => modelsStore.models.filter((m: { cached: boolean }) => m.cached))
@@ -1336,6 +1361,19 @@ watch(activeTab, (tab) => {
                 <span v-if="benchSelectedModels.length === 0 && cachedModels.length > 0" class="bench-needs-model">
                   ← select a model first
                 </span>
+              </div>
+
+              <!-- Engine selector -->
+              <div v-if="benchEngines.length > 1" class="bench-section-label">Inference Engine</div>
+              <div v-if="benchEngines.length > 1" class="bench-engine-row">
+                <select
+                  class="bench-engine-select"
+                  :value="benchEngineId"
+                  :disabled="benchRunning"
+                  @change="setBenchEngine(($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="e in benchEngines" :key="e.id" :value="e.id">{{ e.name }}</option>
+                </select>
               </div>
 
               <!-- Mode selector -->
@@ -2696,6 +2734,13 @@ th.sortable:not(.active) .sort-arrow::after { content: '▽'; opacity: .3; }
 }
 
 .bench-mode-row { display: flex; flex-direction: column; gap: 6px; }
+.bench-engine-row { margin-bottom: 16px; }
+.bench-engine-select {
+  width: 100%; height: 34px; padding: 0 10px;
+  background: var(--bg-elevated); border: 1px solid var(--bd);
+  border-radius: 6px; color: var(--tx); font-size: 13px; cursor: pointer;
+}
+.bench-engine-select:disabled { opacity: 0.6; cursor: not-allowed; }
 .bench-mode-option {
   display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
   border-radius: 8px; border: 1px solid var(--bd-default); cursor: pointer;

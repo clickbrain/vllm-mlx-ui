@@ -38,9 +38,11 @@ const discoveredMachines = ref<import('@/stores/machines').Machine[]>([])
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 // ── Engine switcher ────────────────────────────────────────────────────────────
-interface EngineInfo { id: string; name: string; installed: boolean }
+interface EngineInfo { id: string; name: string; installed: boolean; fixed_model_display?: string | null }
 const engines           = ref<EngineInfo[]>([])
 const selectedEngine    = ref(serverStore.engineId)
+const activeEngineInfo  = computed(() => engines.value.find(e => e.id === serverStore.engineId))
+const fixedModelDisplay = computed<string | null>(() => activeEngineInfo.value?.fixed_model_display ?? null)
 const switchingEngine   = ref(false)
 
 async function loadEngines() {
@@ -250,10 +252,10 @@ async function doShutdown() {
       <div class="status-text">
         <span class="status-engine">{{ serverStore.engineId ?? 'No engine' }}</span>
         <span
-          v-if="serverStore.modelId"
+          v-if="fixedModelDisplay || serverStore.modelId"
           class="status-model"
-          :title="serverStore.modelId"
-        >{{ (serverStore.modelId ?? '').split('/').pop() }}</span>
+          :title="fixedModelDisplay || serverStore.modelId || ''"
+        >{{ fixedModelDisplay || (serverStore.modelId ?? '').split('/').pop() }}</span>
         <span v-else class="status-model-none">No model loaded</span>
       </div>
     </button>
