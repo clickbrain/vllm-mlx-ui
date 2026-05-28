@@ -1,6 +1,27 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.17 — 2026-05-28
+## v0.8.18 — 2026-05-29
+
+### Fixed
+- **"Engine lm-studio is not installed" crash at startup** — `LmStudioEngine.is_installed()` was checking
+  whether the LM Studio daemon was running in addition to whether the binary existed. If LM Studio was
+  installed but the app was closed (daemon stopped), `is_installed()` returned `False`, blocking any attempt
+  to start the server and causing the `FileNotFoundError: 'lms'` crash. Fixed to check binary existence
+  only; runtime state checks belong in `check_requirements()` which already handled this correctly.
+- **Shell injection risk in `lmstudio.py` `build_command()`** — `lms_bin` was not shell-quoted in the
+  `sh -c` template string. Both `lms_bin` and `launch_model` are now wrapped with `_shell_quote()`.
+- **Double-response / repeating answers in Chat UI** — SSE streaming loop in `ChatView.vue` used `break`
+  inside the inner `for (const line of lines)` loop on `[DONE]`. This only exited the for loop, not the
+  outer `while (true)` loop. If the server sent any bytes after `[DONE]`, they were appended to the same
+  message bubble as a second response. Fixed using a labeled outer loop (`outer: while ...`) so
+  `break outer` on `[DONE]` exits completely and stops all further processing.
+- **`ExternalApiEngine.install_command()` would try to pip-install a non-existent package** — the base
+  class default inherits `pip install openai-compatible` which is not a real PyPI package. Added override
+  that raises `NotImplementedError` with a clear message: configure API URL + key in Settings.
+- **`RapidMlxEngine.upgrade_command()` returned `None`** — rapid-mlx is a pip-managed package but had
+  no `upgrade_command()` override, so "Check for Updates" could never upgrade it. Fixed to return
+  `pip install --upgrade rapid-mlx`.
+
 
 ### Fixed
 - **Duplicate reply bug** — `_switch_and_stream()` was yielding `_sse_delta(notice)` + `_sse_delta("\n\n")`

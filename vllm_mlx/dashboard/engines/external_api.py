@@ -61,6 +61,18 @@ class ExternalApiEngine(BaseEngine):
         """Always installed — this is a remote API, not a local binary."""
         return True
 
+    def install_command(self) -> list[str]:
+        """No installation needed — this is a remote API adapter.
+
+        Overrides base class default to avoid a misleading
+        ``pip install openai-compatible`` attempt.
+        """
+        raise NotImplementedError("ExternalApiEngine requires no installation — configure API URL and key in Settings.")
+
+    def upgrade_command(self) -> list[str] | None:
+        """No upgrade available for a remote API proxy."""
+        return None
+
     def get_version(self) -> str | None:
         """Return a static version string for consistency."""
         return "1.0.0"

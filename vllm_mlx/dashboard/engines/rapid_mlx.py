@@ -195,6 +195,10 @@ class RapidMlxEngine(BaseEngine):
             pass
         return [sys.executable, "-m", "pip", "uninstall", "-y", "rapid_mlx"]
 
+    def upgrade_command(self) -> list[str] | None:
+        """Upgrade rapid-mlx via pip."""
+        return [sys.executable, "-m", "pip", "install", "--upgrade", "rapid-mlx"]
+
     def is_installed(self) -> bool:
         import shutil
         if shutil.which("rapid-mlx"):

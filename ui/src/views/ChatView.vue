@@ -409,7 +409,7 @@ async function sendStreaming(body: Record<string, unknown>) {
   const decoder = new TextDecoder()
   let buf = ''
 
-  while (true) {
+  outer: while (true) {
     const { done, value } = await reader.read()
     if (done) break
     buf += decoder.decode(value, { stream: true })
@@ -420,7 +420,7 @@ async function sendStreaming(body: Record<string, unknown>) {
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue
       const payload = line.slice(6).trim()
-      if (payload === '[DONE]') break
+      if (payload === '[DONE]') break outer  // exit both loops — no double-response processing
       try {
         const chunk = JSON.parse(payload) as {
           choices: Array<{ delta?: { content?: string; reasoning_content?: string }; finish_reason?: string }>

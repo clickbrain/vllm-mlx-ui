@@ -108,9 +108,11 @@ class LmStudioEngine(BaseEngine):
             # steps happen in one Popen call.  The final command uses `exec` so
             # the shell is replaced by the lms process — the stored PID then
             # points to lms itself, not to sh, making SIGTERM work correctly.
+            # Both lms_bin and launch_model are shell-quoted to handle paths with spaces.
             import shutil
             sh = shutil.which("sh") or "/bin/sh"
-            return [sh, "-c", f"{lms_bin} load {_shell_quote(launch_model)} && exec {lms_bin} server start --port {port}"]
+            lms_q = _shell_quote(lms_bin)
+            return [sh, "-c", f"{lms_q} load {_shell_quote(launch_model)} && exec {lms_q} server start --port {port}"]
 
         return [lms_bin, "server", "start", "--port", str(port)]
 
@@ -145,13 +147,16 @@ class LmStudioEngine(BaseEngine):
         return result
 
     def is_installed(self) -> bool:
-        """Return True only if lms binary exists AND the LM Studio daemon is running.
+        """Return True if the lms binary exists anywhere on the system.
 
-        Having the binary alone is not enough — lms requires the LM Studio app to
-        be open and its daemon to be active.  Without the daemon, lms server start
-        exits immediately with "daemon is not running".
+        Daemon running state is NOT checked here — an installed-but-not-running
+        LM Studio is still "installed".  Use ``check_requirements()`` for
+        runtime warnings (daemon not running, etc.).  Previously this checked
+        both binary existence AND daemon running state, which caused
+        ``start_server()`` to report "Engine 'lm-studio' is not installed"
+        even when LM Studio was installed but the app wasn't open yet.
         """
-        return self._find_lms() is not None and self._is_daemon_running()
+        return self._find_lms() is not None
 
     def check_requirements(self) -> list[str]:
         """Warn if the `lms` CLI is not installed or the daemon is not running."""
