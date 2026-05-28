@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.32 — 2026-05-28
+
+### Fixed
+
+- **LM Studio version display garbled with ANSI codes** — `lms version` outputs a
+  coloured ASCII-art banner with ANSI escape sequences. `get_version()` was taking the
+  raw first line and returning it as-is, causing Settings to show `[38;5;166m __ __ ___`
+  garbage. Now strips all ANSI codes and extracts the semver string (e.g. `0.3.12`)
+  from anywhere in the output.
+
 ## v0.8.31 — 2026-05-28
 
 ### Fixed

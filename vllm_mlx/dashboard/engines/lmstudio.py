@@ -181,8 +181,13 @@ class LmStudioEngine(BaseEngine):
                 [lms_bin, "version"],
                 capture_output=True, text=True, timeout=5,
             )
-            v = (result.stdout or result.stderr).strip().splitlines()[0]
-            return v or None
+            raw = (result.stdout or result.stderr).strip()
+            # Strip ANSI escape codes — lms version outputs a colour banner
+            import re as _re
+            clean = _re.sub(r"\x1b\[[0-9;]*m", "", raw)
+            # Extract a semver-style version number from the cleaned output
+            m = _re.search(r"(\d+\.\d+\.\d+[\w.-]*)", clean)
+            return m.group(1) if m else (clean.splitlines()[0].strip() or None)
         except Exception:
             return None
 
