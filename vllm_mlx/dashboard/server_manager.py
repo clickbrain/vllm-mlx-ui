@@ -717,6 +717,7 @@ def is_server_process_running() -> bool:
 
 
 
+def set_server_healthy() -> None:
     """Mark the external API engine as healthy (no local process)."""
     global _external_api_mode, _external_api_healthy
     with _server_state_lock:

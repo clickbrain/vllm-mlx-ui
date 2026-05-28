@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.27 — 2026-05-28
+
+### Fixed
+
+- **P0 regression from v0.8.26: `SyntaxError` on startup** — The edit that added
+  `is_server_process_running()` to `server_manager.py` accidentally dropped the
+  `def set_server_healthy() -> None:` function definition line.  The orphaned function
+  body caused a `SyntaxError` (name used prior to `global` declaration) that prevented
+  the entire module from importing, crashing the app immediately on launch.
+
 ## v0.8.26 — 2026-05-28
 
 ### Fixed
