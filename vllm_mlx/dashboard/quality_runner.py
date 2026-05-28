@@ -126,8 +126,9 @@ def _strip_thinking(text: str) -> str:
     """
     # Strip closed blocks first
     stripped = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-    # Strip any remaining unclosed <think> block (model ran out of tokens mid-think)
-    stripped = re.sub(r"<think>.*", "", stripped, flags=re.DOTALL).strip()
+    # Strip unclosed <think> block only when it appears at the start of the text.
+    # Mid-text <think> tags are part of the content and must be preserved.
+    stripped = re.sub(r"^\s*<think>.*", "", stripped, flags=re.DOTALL).strip()
     return stripped if stripped else text
 
 

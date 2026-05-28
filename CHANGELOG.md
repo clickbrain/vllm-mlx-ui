@@ -1,5 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.44 — 2026-05-28
+
+### Fixed
+
+- **`_strip_thinking()` regex too aggressive** — The unclosed `<think>` block fix in v0.8.43 used `re.sub(r"<think>.*", ...)` which stripped any `<think>` tag anywhere in the text, including mid-sentence ones like `"Hello<think> no close"` → `"Hello"`. Fixed: the regex now anchors to the start of the text (`^\s*<think>.*`) so only `<think>` blocks at the beginning of a response (the real-world truncated-thinking case) are stripped. Mid-text `<think>` tags are preserved unchanged.
+
 ## v0.8.43 — 2026-05-28
 
 ### Fixed
