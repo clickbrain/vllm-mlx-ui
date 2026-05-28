@@ -37,6 +37,7 @@ from . import model_manager as mm
 from . import quality_runner as qr
 from . import server_manager as sm
 from . import __version__ as _dashboard_version
+from . import startup_manager as _startup_mgr
 
 logger = logging.getLogger(__name__)
 
@@ -401,6 +402,28 @@ def set_config(data: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
     if "engine_id" in filtered:
         _invalidate_external_engine_cache()
     return {"ok": True}
+
+
+@app.get("/startup-at-login")
+def get_startup_at_login(_: None = Depends(_check_auth)) -> dict:
+    """Return whether the macOS LaunchAgent for run-at-login is installed."""
+    import sys
+    supported = sys.platform == "darwin"
+    enabled = _startup_mgr.is_enabled() if supported else False
+    return {"supported": supported, "enabled": enabled}
+
+
+@app.post("/startup-at-login")
+def set_startup_at_login(data: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
+    """Enable or disable the macOS LaunchAgent for run-at-login."""
+    import sys
+    if sys.platform != "darwin":
+        raise HTTPException(status_code=400, detail="Only supported on macOS.")
+    enabled = bool(data.get("enabled", False))
+    if enabled:
+        return _startup_mgr.enable()
+    else:
+        return _startup_mgr.disable()
 
 
 @app.get("/config/mgmt-key")

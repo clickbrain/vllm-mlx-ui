@@ -274,6 +274,10 @@ const advancedSaved = ref(false)
 
 // Preferences
 const openBrowserOnStart = ref(localStorage.getItem('vmui_open_browser') !== 'false')
+const startAtLoginSupported = ref(false)
+const startAtLogin = ref(false)
+const startAtLoginLoading = ref(false)
+const startAtLoginError = ref('')
 
 // Maintenance
 const showRestartConfirm = ref(false)
@@ -344,6 +348,10 @@ onMounted(async () => {
   updatesStore.checkUpdates().catch(() => { /* non-critical */ })
   updatesStore.fetchNewFeatures().catch(() => { /* non-critical */ })
   loadEngines().catch(() => { /* non-critical */ })
+  // Load startup-at-login state (macOS only; silently ignored on other platforms)
+  api.get<{ supported: boolean; enabled: boolean }>('/startup-at-login')
+    .then(r => { startAtLoginSupported.value = r.supported; startAtLogin.value = r.enabled })
+    .catch(() => { /* non-critical */ })
 })
 
 async function saveCachePath() {
@@ -442,6 +450,20 @@ function saveHfToken() {
 function saveOpenBrowserOnStart(val: boolean) {
   openBrowserOnStart.value = val
   localStorage.setItem('vmui_open_browser', String(val))
+}
+
+async function saveStartAtLogin(val: boolean) {
+  startAtLoginLoading.value = true
+  startAtLoginError.value = ''
+  try {
+    const result = await api.post<{ ok: boolean; message: string }>('/startup-at-login', { enabled: val })
+    startAtLogin.value = val
+    if (!result?.ok) startAtLoginError.value = result?.message ?? 'Unknown error'
+  } catch (e: any) {
+    startAtLoginError.value = `Failed: ${e?.message ?? 'unknown error'}`
+  } finally {
+    startAtLoginLoading.value = false
+  }
 }
 
 async function saveOfflineMode(val: boolean) {
@@ -784,6 +806,23 @@ onUnmounted(() => {
               type="checkbox"
               :checked="openBrowserOnStart"
               @change="saveOpenBrowserOnStart(($event.target as HTMLInputElement).checked)"
+            />
+            <span class="toggle-track"><span class="toggle-thumb" /></span>
+          </label>
+        </div>
+        <div v-if="startAtLoginSupported" class="pref-row">
+          <div class="pref-info">
+            <span class="pref-label">Start at login</span>
+            <span class="pref-desc">Automatically launch vllm-mlx-ui when you log in to macOS.</span>
+            <span v-if="startAtLoginError" class="pref-error">{{ startAtLoginError }}</span>
+          </div>
+          <label class="toggle" :class="{ 'toggle--loading': startAtLoginLoading }">
+            <input
+              type="checkbox"
+              :checked="startAtLogin"
+              :disabled="startAtLoginLoading"
+              @change="saveStartAtLogin(($event.target as HTMLInputElement).checked)"
+              aria-label="Start at login"
             />
             <span class="toggle-track"><span class="toggle-thumb" /></span>
           </label>
@@ -1415,6 +1454,7 @@ onUnmounted(() => {
 .toggle input:checked ~ .toggle-track { background: var(--si-500); border-color: var(--si-600); }
 .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: white; transition: transform var(--transition-base); }
 .toggle input:checked ~ .toggle-track .toggle-thumb { transform: translateX(16px); }
+.toggle--loading { opacity: 0.6; pointer-events: none; }
 .pref-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
 .pref-actions-row { flex-direction: row; align-items: center; }
 .pref-badge-key { font-family: var(--font-mono); font-size: 11px; color: var(--tx-secondary); background: var(--bg-elevated); border: 1px solid var(--bd-default); border-radius: var(--r-pill); padding: 1px 6px; margin-left: 4px; white-space: nowrap; }

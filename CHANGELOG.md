@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.34 — 2026-05-28
+
+### Added
+
+- **Start at login (macOS)** — New toggle in Settings → Preferences lets users choose whether
+  vllm-mlx-ui launches automatically at macOS login. When enabled, a LaunchAgent plist is written
+  to `~/Library/LaunchAgents/com.clickbrain.vllm-mlx-ui.plist` and loaded immediately via
+  `launchctl load`. Disabling it unloads and removes the plist. The toggle is only shown on macOS.
+  Startup output is logged to `~/.vllm_mlx_ui/startup.log`.
+
 ## v0.8.33 — 2026-05-28
 
 ### Fixed
