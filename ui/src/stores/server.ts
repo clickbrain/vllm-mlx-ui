@@ -417,7 +417,7 @@ export const useServerStore = defineStore('server', () => {
   return {
     status, metrics, memory, config, loading, error, crashLog, metricsError, metricsHistory,
     isRunning, memoryPercent, underPressure, isMultimodal, engineId,
-    modelId, uptimeSeconds, tps, baseUrl, dashboardVersion,
+    modelId, uptimeSeconds, tps, ttftMsAvg, liveMetrics, baseUrl, dashboardVersion,
     numRunning, numWaiting, totalRequests, totalPromptTokens, totalCompletionTokens,
     metalMemoryGb, peakMemoryGb,
     fetchStatus, fetchMetrics, fetchConfig, fetchMemory, fetchCacheStats,

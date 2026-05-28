@@ -1,5 +1,21 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.25 — 2026-05-27
+
+### Fixed
+
+- **Dashboard TOKENS/SEC shows 0.0, TTFT (AVG) and REQUESTS (5M) always show "—"** — `ttftMsAvg`
+  and `liveMetrics` were defined in the Pinia `useServerStore` but not included in its `return`
+  statement. The store computed `tps` (tokens/sec) only, so TTFT and request-count metrics were
+  permanently `undefined` in the UI regardless of what `/poll` returned.
+  Added `ttftMsAvg` and `liveMetrics` to the store's return so all three dashboard stat cards
+  now show real data.
+
+- **`/v1/completions` proxy did not record requests to live metrics** — The `proxy_completions`
+  handler forwarded requests but never called `_record_request()`, so completions (non-chat)
+  requests were invisible to the rolling TTFT/TPS tracking window.
+  Both streaming and non-streaming completions paths now record TTFT, duration, and token count.
+
 ## v0.8.24 — 2026-05-27
 
 ### Fixed

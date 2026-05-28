@@ -1873,6 +1873,10 @@ async def proxy_completions(
             from fastapi.responses import StreamingResponse
 
             async def _stream_completions():
+                start = time.time()
+                first_byte = None
+                completion_tokens = 0
+                model = request.get("model", cfg.get("model", ""))
                 async with _get_httpx_client().stream(
                     "POST", f"{target}/v1/completions",
                     timeout=300, json=request, headers=req_headers,
@@ -1880,7 +1884,23 @@ async def proxy_completions(
                     async for chunk in resp.aiter_bytes():
                         if await _raw.is_disconnected():
                             break
+                        if first_byte is None:
+                            first_byte = time.time()
+                        decoded = chunk.decode("utf-8", errors="replace")
+                        if '"usage"' in decoded and '"completion_tokens"' in decoded:
+                            for line in decoded.split("\n"):
+                                if line.startswith("data: ") and line != "data: [DONE]":
+                                    try:
+                                        payload = _json.loads(line[6:])
+                                        usage = payload.get("usage") or {}
+                                        completion_tokens = usage.get("completion_tokens", 0)
+                                        model = payload.get("model", model)
+                                    except _json.JSONDecodeError:
+                                        pass
                         yield chunk
+                duration = time.time() - start
+                ttft = (first_byte - start) if first_byte else None
+                _record_request(start, ttft, duration, completion_tokens, model)
 
             return StreamingResponse(_stream_completions(), media_type="text/event-stream")
         else:
@@ -1895,6 +1915,7 @@ async def proxy_completions(
                 while not await _raw.is_disconnected():
                     await asyncio.sleep(0.5)
 
+            start = time.time()
             fetch_task = asyncio.ensure_future(_do_fetch_completions())
             disc_task = asyncio.ensure_future(_wait_disconnect_completions())
             done, pending = await asyncio.wait(
@@ -1908,7 +1929,12 @@ async def proxy_completions(
                     pass
             if disc_task in done and fetch_task not in done:
                 raise HTTPException(status_code=499, detail="Client disconnected")
-            return fetch_task.result()
+            data = fetch_task.result()
+            dur = time.time() - start
+            ct = (data.get("usage") or {}).get("completion_tokens", 0)
+            m = data.get("model", request.get("model", cfg.get("model", "")))
+            _record_request(start, None, dur, ct, m)
+            return data
     except HTTPException:
         raise
     except Exception as exc:
