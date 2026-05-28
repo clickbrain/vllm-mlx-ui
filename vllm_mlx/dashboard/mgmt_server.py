@@ -1727,20 +1727,21 @@ async def proxy_chat(
                 raise HTTPException(status_code=502, detail="Inference server request failed") from exc
 
     # ── Normal path (no model switch needed) ────────────────────────────────
-    # If the inference server is currently starting up (model loading from a
-    # dashboard-initiated switch), wait for it to become healthy before forwarding.
-    # Use asyncio.to_thread() so the sync check_health() call inside
-    # get_server_status() never blocks the event loop.
-    # Skip this for external API — there is no local server.
+    # Guard against the case where the inference server process is not yet
+    # alive (e.g. model still loading after a dashboard-initiated switch).
+    # IMPORTANT: do NOT call check_health() / get_server_status() here — those
+    # make an HTTP request to port 8000.  When the inference server is busy
+    # generating tokens the HTTP probe TIMES OUT → healthy=False → the old code
+    # entered a 60-iteration × 4 s wait loop (240 s!) before forwarding any
+    # request.  A PID-only liveness check avoids that entirely.
     if not _is_external_api_engine():
-        status = await asyncio.to_thread(sm.get_server_status)
-        if status.get("running") and not status.get("healthy"):
+        if not sm.is_server_process_running():
+            # Process not up yet — wait up to 120 s for it to start.
             for _ in range(60):
                 await asyncio.sleep(2)
-                status = await asyncio.to_thread(sm.get_server_status)
-                if status.get("healthy"):
+                if sm.is_server_process_running():
                     break
-            if not status.get("healthy"):
+            if not sm.is_server_process_running():
                 raise HTTPException(status_code=503, detail="Model is still loading — try again shortly")
             cfg = sm.load_config()
             target = sm.get_server_url(cfg)

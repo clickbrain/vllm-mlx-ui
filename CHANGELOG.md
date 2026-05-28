@@ -1,5 +1,24 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.26 — 2026-05-28
+
+### Fixed
+
+- **P0: 10+ minute request hangs when inference engine is actively generating** — Every request
+  through the `/v1/chat/completions` proxy triggered an HTTP health probe to port 8000 on the
+  inference server (`check_health()` → `GET /health`).  The vllm-mlx simple engine is
+  single-threaded: while generating tokens it cannot respond to `/health`, so the probe timed out
+  (2 s timeout) and returned `healthy: False`.  The proxy then entered a 60-iteration × 4 s retry
+  loop — up to **240 seconds** of waiting before forwarding a new request.  All concurrent
+  requests from Kilroy queued behind this loop, causing "no response for 10+ minutes" symptoms
+  despite the engine running at 71+ tok/s when measured directly.
+
+  Fixed by replacing the per-request HTTP health probe with a fast PID-only liveness check
+  (`is_server_process_running()` — no HTTP).  The wait loop now only activates when the inference
+  server process has not yet started (e.g. a model is still loading after a dashboard swap), which
+  is the only case where waiting is correct.  When the process is alive and generating, requests
+  are forwarded immediately without any blocking probe.
+
 ## v0.8.25 — 2026-05-27
 
 ### Fixed

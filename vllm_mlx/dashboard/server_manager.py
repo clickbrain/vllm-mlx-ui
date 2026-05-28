@@ -700,7 +700,23 @@ def check_health(config: dict[str, Any] | None = None) -> tuple[bool, dict]:
     return False, {}
 
 
-def set_server_healthy() -> None:
+def is_server_process_running() -> bool:
+    """Return True if the inference server process is alive (PID check only, no HTTP).
+
+    This is a fast, non-blocking check — never makes HTTP requests.  Use this
+    in the proxy hot-path to detect "process not yet started" without probing
+    the inference server while it may be busy generating tokens.
+    """
+    with _server_state_lock:
+        if _external_api_mode:
+            return _external_api_healthy
+    pid = _get_pid()
+    if pid is None:
+        return False
+    return _is_process_alive(pid)
+
+
+
     """Mark the external API engine as healthy (no local process)."""
     global _external_api_mode, _external_api_healthy
     with _server_state_lock:
