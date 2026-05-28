@@ -1,6 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.39 — 2026-05-28
+## v0.8.40 — 2026-05-28
+
+### Fixed
+
+- **Quality benchmark fails with "Connection refused" when server not running** — The benchmark endpoint only started the inference server when the requested model differed from the one in config. If the model already matched but the server was simply not running, it skipped the start block and immediately fired 20 HTTP requests at a closed port. Fixed: before each model run, the endpoint now checks if the server is actually accepting requests (`GET /v1/models`). If not responding, it starts the server unconditionally — regardless of whether the model needs to change.
+
 
 ### Fixed
 

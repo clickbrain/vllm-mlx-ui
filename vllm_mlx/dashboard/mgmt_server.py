@@ -2180,49 +2180,66 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
         switched = False
 
         try:
+            import requests as _req_mod
+
+            def _server_ready(host_addr: str, port: int) -> bool:
+                health_url = f"http://{host_addr}:{port}/v1/models"
+                try:
+                    r = _req_mod.get(health_url, timeout=2)
+                    return r.status_code == 200
+                except Exception:
+                    return False
+
+            def _wait_for_server(host_addr: str, port: int, label: str) -> bool:
+                health_url = f"http://{host_addr}:{port}/v1/models"
+                for _ in range(240):
+                    if stop_event.is_set():
+                        return False
+                    _t.sleep(0.5)
+                    try:
+                        r = _req_mod.get(health_url, timeout=2)
+                        if r.status_code == 200:
+                            return True
+                    except Exception:
+                        logger.debug("Waiting for model server at %s (not ready yet)", health_url)
+                return False
+
             for target_model in targets:
                 if stop_event.is_set():
                     break
 
-                current_model = sm.load_config().get("model", "")
-                if target_model and target_model != current_model:
-                    _cb(f"\n── Switching to {target_model} ──\n")
-                    cfg = sm.load_config()
-                    cfg["model"] = target_model
-                    sm.save_config(cfg)
-                    stop_ok, stop_msg = sm.stop_server()
-                    if not stop_ok:
-                        _cb(f"[⚠ stop_server: {stop_msg}]\n")
-                    ok, msg = sm.start_server(cfg)
-                    if not ok:
-                        _cb(f"[✗ Could not start {target_model}: {msg}]\n")
-                        continue
-                    switched = True
-                    # Wait up to 120 s for the inference port to accept requests.
-                    # sm.get_server_status() only checks if the process is alive —
-                    # the model may still be loading. Poll /v1/models instead.
-                    ready = False
-                    port = int(sm.load_config().get("port", 8000))
-                    host_addr = sm.load_config().get("host", "127.0.0.1")
-                    if host_addr == "0.0.0.0":
-                        host_addr = "127.0.0.1"
-                    health_url = f"http://{host_addr}:{port}/v1/models"
-                    import requests as _req_mod
-                    for _ in range(240):
-                        if stop_event.is_set():
-                            break
-                        _t.sleep(0.5)
-                        try:
-                            r = _req_mod.get(health_url, timeout=2)
-                            if r.status_code == 200:
-                                ready = True
-                                break
-                        except Exception:
-                            logger.debug("Waiting for model server at %s (not ready yet)", health_url)
-                    if ready:
-                        _cb(f"[✓ {target_model} ready]\n")
+                cfg = sm.load_config()
+                current_model = cfg.get("model", "")
+                port = int(cfg.get("port", 8000))
+                host_addr = cfg.get("host", "127.0.0.1")
+                if host_addr == "0.0.0.0":
+                    host_addr = "127.0.0.1"
+
+                needs_start = not _server_ready(host_addr, port)
+                needs_switch = bool(target_model and target_model != current_model)
+
+                if needs_switch or needs_start:
+                    if needs_switch:
+                        _cb(f"\n── Switching to {target_model} ──\n")
+                        cfg["model"] = target_model
+                        sm.save_config(cfg)
+                    elif needs_start:
+                        _cb(f"\n── Starting server for {target_model or current_model} ──\n")
+
+                    if needs_start or needs_switch:
+                        stop_ok, stop_msg = sm.stop_server()
+                        if not stop_ok:
+                            _cb(f"[⚠ stop_server: {stop_msg}]\n")
+                        ok, msg = sm.start_server(cfg)
+                        if not ok:
+                            _cb(f"[✗ Could not start {target_model}: {msg}]\n")
+                            continue
+                        switched = True
+
+                    if _wait_for_server(host_addr, port, target_model or current_model):
+                        _cb(f"[✓ {target_model or current_model} ready]\n")
                     else:
-                        _cb(f"[✗ Timeout waiting for {target_model} to start]\n")
+                        _cb(f"[✗ Timeout waiting for {target_model or current_model} to start]\n")
 
                 if len(targets) > 1:
                     _cb(f"\n{'─' * 40}\nModel: {target_model or 'current model'}\n{'─' * 40}\n")
