@@ -1,5 +1,30 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.23 — 2026-05-28
+
+### Fixed
+
+- **P0: External API calls (Kilroy, OpenAI SDK clients) received slow responses and duplicate replies**
+  — Root cause: `sm.get_server_status()` (synchronous, blocking HTTP) was called from the async
+  `proxy_chat` handler on **every request**, freezing the asyncio event loop for up to 2s per call
+  (full timeout if the inference server was busy). This cascaded: slow health check → 60-iteration
+  wait loop → Kilroy timeout → retry → both requests completed → duplicate replies.
+  Fix: wrapped all `sm.get_server_status()` calls in proxy hot-path with `asyncio.to_thread()`.
+
+- **P0: Client disconnect (timeout/abort) did not cancel upstream inference** — When a client
+  disconnected mid-stream, the proxy continued running the inference request to completion, holding
+  GPU/memory and queuing the client's retry behind it. Added `await request.is_disconnected()` checks
+  inside every streaming loop (`proxy_chat`, model-switch path, `proxy_completions`, `proxy_v1_passthrough`).
+
+- **P1: Non-streaming proxy path held resources after client disconnect** — Non-streaming
+  `proxy_chat` and `proxy_completions` now race the inference call against a disconnect poller;
+  if the client disconnects first, the fetch is cancelled (HTTP 499) and GPU is freed immediately.
+
+- **P1: `BaseHTTPMiddleware` created a task group + memory channel per request** — Each SSE chunk
+  flowed through an `anyio` memory object stream (one context switch per token). Replaced
+  `_PermissiveHeadersMiddleware` with a pure ASGI middleware that intercepts only the
+  `http.response.start` message to inject CORS headers. Zero per-chunk overhead.
+
 ## v0.8.22 — 2026-05-28
 
 ### Fixed

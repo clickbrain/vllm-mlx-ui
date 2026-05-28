@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx as _httpx
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -137,22 +137,32 @@ app.add_middleware(
 )
 
 
-# Remove X-Frame-Options so the management API can be embedded in iFrames
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request as _StarletteRequest
+# Remove X-Frame-Options so the management API can be embedded in iFrames.
+# Pure ASGI middleware — avoids BaseHTTPMiddleware's anyio task-group overhead
+# that serializes SSE chunk delivery (one context-switch per chunk per request).
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 
-class _PermissiveHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: _StarletteRequest, call_next):
-        response = await call_next(request)
-        # Allow framing from any origin.
-        # CSP frame-ancestors is the correct modern mechanism; some legacy
-        # clients still honour X-Frame-Options, so we remove it entirely
-        # (any value other than ALLOWALL would block iframes).
-        response.headers["Content-Security-Policy"] = "frame-ancestors *"
-        if "X-Frame-Options" in response.headers:
-            del response.headers["X-Frame-Options"]
-        return response
+class _PermissiveHeadersMiddleware:
+    """Inject CSP + remove X-Frame-Options without the BaseHTTPMiddleware overhead."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def _patched_send(message: dict) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["Content-Security-Policy"] = "frame-ancestors *"
+                headers.pop("X-Frame-Options", None)
+            await send(message)
+
+        await self.app(scope, receive, _patched_send)
 
 
 app.add_middleware(_PermissiveHeadersMiddleware)
@@ -1563,7 +1573,11 @@ def _sse_delta(content: str) -> str:
 
 
 @app.post("/v1/chat/completions")
-async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) -> Any:
+async def proxy_chat(
+    request: dict[str, Any],
+    _raw: Request,
+    _: None = Depends(_check_auth),
+) -> Any:
     """
     Proxy for /v1/chat/completions.
 
@@ -1665,6 +1679,8 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
                         timeout=300, json=req2, headers=req_headers,
                     ) as resp:
                         async for chunk in resp.aiter_bytes():
+                            if await _raw.is_disconnected():
+                                break
                             if first_byte is None:
                                 first_byte = time.time()
                             decoded = chunk.decode("utf-8", errors="replace")
@@ -1712,13 +1728,15 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
     # ── Normal path (no model switch needed) ────────────────────────────────
     # If the inference server is currently starting up (model loading from a
     # dashboard-initiated switch), wait for it to become healthy before forwarding.
+    # Use asyncio.to_thread() so the sync check_health() call inside
+    # get_server_status() never blocks the event loop.
     # Skip this for external API — there is no local server.
     if not _is_external_api_engine():
-        status = sm.get_server_status()
+        status = await asyncio.to_thread(sm.get_server_status)
         if status.get("running") and not status.get("healthy"):
             for _ in range(60):
                 await asyncio.sleep(2)
-                status = sm.get_server_status()
+                status = await asyncio.to_thread(sm.get_server_status)
                 if status.get("healthy"):
                     break
             if not status.get("healthy"):
@@ -1742,6 +1760,11 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
                     timeout=300, json=request, headers=req_headers,
                 ) as resp:
                     async for chunk in resp.aiter_bytes():
+                        # Stop forwarding if the client has gone away — this
+                        # cancels the upstream inference request and frees the
+                        # GPU for the next request instead of running to completion.
+                        if await _raw.is_disconnected():
+                            break
                         if first_byte is None:
                             first_byte = time.time()
                         # Parse usage from the final data chunk
@@ -1764,23 +1787,51 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
 
             return StreamingResponse(_stream(), media_type="text/event-stream")
         else:
+            # Non-streaming: race the fetch against client disconnect so we don't
+            # hold GPU/CPU resources after the client has given up and retried.
+            async def _do_fetch() -> Any:
+                r = await _get_httpx_client().post(
+                    f"{target}/v1/chat/completions",
+                    timeout=300, json=request, headers=req_headers,
+                )
+                return r.json()
+
+            async def _wait_disconnect() -> None:
+                while not await _raw.is_disconnected():
+                    await asyncio.sleep(0.5)
+
             start = time.time()
-            resp = await _get_httpx_client().post(
-                f"{target}/v1/chat/completions",
-                timeout=300, json=request, headers=req_headers,
+            fetch_task = asyncio.ensure_future(_do_fetch())
+            disc_task = asyncio.ensure_future(_wait_disconnect())
+            done, pending = await asyncio.wait(
+                {fetch_task, disc_task}, return_when=asyncio.FIRST_COMPLETED
             )
-            data = resp.json()
+            for t in pending:
+                t.cancel()
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+            if disc_task in done and fetch_task not in done:
+                raise HTTPException(status_code=499, detail="Client disconnected")
+            data = fetch_task.result()
             dur = time.time() - start
             ct = (data.get("usage") or {}).get("completion_tokens", 0)
             m = data.get("model", requested_model or cfg.get("model", ""))
             _record_request(start, None, dur, ct, m)
             return data
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/v1/completions")
-async def proxy_completions(request: dict[str, Any], _: None = Depends(_check_auth)) -> Any:
+async def proxy_completions(
+    request: dict[str, Any],
+    _raw: Request,
+    _: None = Depends(_check_auth),
+) -> Any:
     """Proxy for /v1/completions with the same auto model-switch behaviour as /v1/chat/completions."""
     requested_model = request.get("model", "").strip()
     cfg = sm.load_config()
@@ -1815,12 +1866,50 @@ async def proxy_completions(request: dict[str, Any], _: None = Depends(_check_au
             cfg = sm.load_config()
             target = sm.get_server_url(cfg)
 
+    client_wants_stream = bool(request.get("stream"))
     try:
-        resp = await _get_httpx_client().post(
-            f"{target}/v1/completions",
-            timeout=300, json=request, headers=req_headers,
-        )
-        return resp.json()
+        if client_wants_stream:
+            from fastapi.responses import StreamingResponse
+
+            async def _stream_completions():
+                async with _get_httpx_client().stream(
+                    "POST", f"{target}/v1/completions",
+                    timeout=300, json=request, headers=req_headers,
+                ) as resp:
+                    async for chunk in resp.aiter_bytes():
+                        if await _raw.is_disconnected():
+                            break
+                        yield chunk
+
+            return StreamingResponse(_stream_completions(), media_type="text/event-stream")
+        else:
+            async def _do_fetch_completions() -> Any:
+                r = await _get_httpx_client().post(
+                    f"{target}/v1/completions",
+                    timeout=300, json=request, headers=req_headers,
+                )
+                return r.json()
+
+            async def _wait_disconnect_completions() -> None:
+                while not await _raw.is_disconnected():
+                    await asyncio.sleep(0.5)
+
+            fetch_task = asyncio.ensure_future(_do_fetch_completions())
+            disc_task = asyncio.ensure_future(_wait_disconnect_completions())
+            done, pending = await asyncio.wait(
+                {fetch_task, disc_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            for t in pending:
+                t.cancel()
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+            if disc_task in done and fetch_task not in done:
+                raise HTTPException(status_code=499, detail="Client disconnected")
+            return fetch_task.result()
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -1857,7 +1946,6 @@ def set_auto_switch(data: dict[str, Any], _: None = Depends(_check_auth)) -> dic
 # handles its own API key checking.  The inference server's api_key (if set)
 # is forwarded automatically in the Authorization header.
 
-from fastapi import Request
 from fastapi.responses import Response as _FRsp
 
 
@@ -1915,6 +2003,8 @@ async def proxy_v1_passthrough(path: str, request: Request) -> _FRsp:
                 _pt_headers[0] = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
                 _pt_ct[0] = resp.headers.get("content-type", "application/octet-stream")
                 async for chunk in resp.aiter_bytes():
+                    if await request.is_disconnected():
+                        break
                     yield chunk
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"Inference server unreachable: {exc}") from exc
