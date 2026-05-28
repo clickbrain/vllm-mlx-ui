@@ -175,6 +175,21 @@ class VllmMlxEngine(BaseEngine):
         if config.get("auto_model_switch"):
             add_if_supported(cmd, probe, "--auto-model-switch")
 
+        # Default chat-template kwargs: controls enable_thinking, etc.
+        # Accepts a JSON string or a dict.
+        _ctk = config.get("default_chat_template_kwargs", "")
+        if _ctk:
+            import json as _json
+            if isinstance(_ctk, dict):
+                _ctk_str = _json.dumps(_ctk)
+            else:
+                _ctk_str = str(_ctk).strip()
+            if _ctk_str and _ctk_str not in ("{}", "null"):
+                add_if_supported(
+                    cmd, probe,
+                    "--default-chat-template-kwargs", [_ctk_str],
+                )
+
         return cmd
 
     def build_env(self, config: dict[str, Any]) -> dict[str, str] | None:

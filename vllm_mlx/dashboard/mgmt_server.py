@@ -890,7 +890,8 @@ def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
     try:
         presets = mm.get_model_presets(model_id)
         if presets.get("max_tokens"):
-            cfg["max_tokens"] = presets["max_tokens"]
+            # max_request_tokens = model's context window (what clients can request)
+            # max_tokens = default generation length — do NOT override; keep user's setting
             cfg["max_request_tokens"] = presets["max_tokens"]
     except Exception:
         logger.warning("Operation failed", exc_info=True)
@@ -1432,7 +1433,8 @@ def _hot_swap_if_needed(requested_model: str) -> None:
         try:
             presets = mm.get_model_presets(requested_model)
             if presets.get("max_tokens"):
-                cfg["max_tokens"] = presets["max_tokens"]
+                # max_request_tokens = model's context window (what clients can request)
+                # max_tokens = default generation length — do NOT override; keep user's setting
                 cfg["max_request_tokens"] = presets["max_tokens"]
         except Exception:
             logger.warning("Operation failed", exc_info=True)

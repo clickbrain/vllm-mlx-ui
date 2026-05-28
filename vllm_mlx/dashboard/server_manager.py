@@ -134,8 +134,13 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "port": 8000,
     "api_key": "",
     "continuous_batching": False,
-    "max_tokens": 32768,
+    "max_tokens": 16384,
     "max_request_tokens": 32768,
+    # Default chat template kwargs passed to every request that doesn't supply its own.
+    # Set to {"enable_thinking": false} to disable the reasoning/thinking phase globally
+    # (recommended for agent/tool workflows where thinking causes long delays).
+    # Leave as "" or null to use the model's default (thinking enabled for thinking models).
+    "default_chat_template_kwargs": "",
     "reasoning_parser": "",
     "tool_call_parser": "",
     "enable_auto_tool_choice": False,

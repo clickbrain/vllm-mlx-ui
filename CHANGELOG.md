@@ -1,5 +1,27 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.28 — 2026-05-28
+
+### Fixed
+
+- **Root cause of Kilroy / external API clients getting 37-minute responses** — Selecting
+  any model in the UI called `get_model_presets()` which reads the model's context window
+  from HuggingFace (e.g. 131,072 for Qwen3-based models) and silently overwrote **both**
+  `max_tokens` AND `max_request_tokens` in `server_config.json`.  These are two different
+  settings: `max_request_tokens` is the maximum context a client may send (correctly = context
+  window), but `max_tokens` is the **default generation length** used when a client sends
+  `max_tokens: null` — it should never be set to the full context window.  With
+  `max_tokens=131072`, every Kilroy request with no explicit token cap caused the thinking
+  model to fill the entire 131K context with `<think>` reasoning before attempting to
+  answer, taking ~37 minutes at 60 t/s and producing no visible reply.  Fix: selecting a
+  model now only updates `max_request_tokens` from the model's context window; `max_tokens`
+  (the generation cap) is never touched by model selection.
+
+- **`max_tokens` default lowered from 32768 to 16384** — The previous default of 32768 was
+  already too large for thinking models.  16384 provides a sane upper bound for generation
+  length (roughly 12,000 words of output) while still supporting multi-turn conversations
+  and tool-call chains without exhausting the context window.
+
 ## v0.8.27 — 2026-05-28
 
 ### Fixed
