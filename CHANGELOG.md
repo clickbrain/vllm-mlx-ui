@@ -1,6 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.23 — 2026-05-28
+## v0.8.24 — 2026-05-27
+
+### Fixed
+
+- **P0: All requests returned 500 after upgrade to v0.8.23** — `MutableHeaders` (Starlette)
+  does not have a `.pop()` method. The pure ASGI middleware replacement for `BaseHTTPMiddleware`
+  called `headers.pop("X-Frame-Options", None)` which raised `AttributeError` on every response.
+  Fixed to use `del headers["x-frame-options"]` with an existence check.
+
+## v0.8.23 — 2026-05-27
 
 ### Fixed
 

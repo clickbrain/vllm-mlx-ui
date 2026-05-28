@@ -159,7 +159,8 @@ class _PermissiveHeadersMiddleware:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
                 headers["Content-Security-Policy"] = "frame-ancestors *"
-                headers.pop("X-Frame-Options", None)
+                if "x-frame-options" in headers:
+                    del headers["x-frame-options"]
             await send(message)
 
         await self.app(scope, receive, _patched_send)
