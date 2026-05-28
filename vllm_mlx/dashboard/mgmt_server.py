@@ -289,7 +289,16 @@ def start(_: None = Depends(_check_auth)) -> dict:
     try:
         config = sm.load_config()
         if not config.get("model") and not _is_external_api_engine():
-            raise HTTPException(status_code=400, detail="No model selected. Set a model in config first.")
+            # Fixed-model engines (e.g. apple-fm) don't require a model selection —
+            # they expose a single built-in model.  Let start_server() handle them.
+            _has_fixed_model = False
+            try:
+                from vllm_mlx.dashboard.engines.registry import get_engine as _ge
+                _has_fixed_model = bool(_ge(config.get("engine_id", "vllm-mlx")).get_fixed_model_display())
+            except Exception:
+                pass
+            if not _has_fixed_model:
+                raise HTTPException(status_code=400, detail="No model selected. Set a model in config first.")
         if _is_external_api_engine():
             sm.set_server_healthy()
             return {"ok": True, "message": "External API is ready — remote endpoint will be used for inference"}
@@ -505,6 +514,21 @@ class DownloadRequest(BaseModel):
 
 _download_status: dict[str, Any] = {}
 _download_lock = threading.Lock()
+_DOWNLOAD_STATUS_TTL = 300  # seconds — prune done/error entries after 5 minutes
+
+
+def _prune_download_status() -> None:
+    """Remove completed/errored download entries older than _DOWNLOAD_STATUS_TTL seconds."""
+    import time as _t
+    now = _t.time()
+    with _download_lock:
+        stale = [
+            mid for mid, info in _download_status.items()
+            if info.get("status") in ("done", "error")
+            and now - info.get("completed_at", now) > _DOWNLOAD_STATUS_TTL
+        ]
+        for mid in stale:
+            del _download_status[mid]
 
 
 @app.post("/models/download")
@@ -546,20 +570,24 @@ def download_model(req: DownloadRequest, _: None = Depends(_check_auth)) -> dict
             threading.Thread(target=_monitor, daemon=True).start()
 
             mm.download_model_local(model_id, req.token or None)
+            import time as _t
             with _download_lock:
                 _download_status[model_id] = {
                     "status": "done",
                     "error": None,
                     "bytes_downloaded": mm.get_partial_download_bytes(model_id),
                     "total_bytes": total_bytes,
+                    "completed_at": _t.time(),
                 }
         except Exception as exc:
+            import time as _t
             with _download_lock:
                 _download_status[model_id] = {
                     "status": "error",
                     "error": str(exc),
                     "bytes_downloaded": 0,
                     "total_bytes": 0,
+                    "completed_at": _t.time(),
                 }
 
     # Run download in a background thread so the HTTP response returns immediately.
@@ -580,6 +608,7 @@ def download_status(model_id: str, _: None = Depends(_check_auth)) -> dict:
         Dict with keys: status (downloading/done/error/unknown), error, bytes_downloaded,
         total_bytes.
     """
+    _prune_download_status()
     with _download_lock:
         return _download_status.get(model_id, {"status": "unknown", "error": None})
 

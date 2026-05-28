@@ -58,7 +58,11 @@ class AppleFMEngine(BaseEngine):
         "tool_calls",
         "reasoning",
     })
-    install_method: ClassVar[str] = "external"
+    # apfel is installed via Homebrew — "brew" tells server_manager to launch
+    # it as a real local process (not skip it like "external"/"openai-compatible").
+    install_method: ClassVar[str] = "brew"
+    # apfel exposes an OpenAI-compatible API, not /health
+    health_path: ClassVar[str] = "/v1/models"
     homepage_url: ClassVar[str] = "https://github.com/Arthur-Ficial/apfel"
     release_url: ClassVar[str] = "https://github.com/Arthur-Ficial/apfel/releases"
 
@@ -142,29 +146,23 @@ class AppleFMEngine(BaseEngine):
         The rate-limit advisory is only shown when apfel is actually installed —
         there is no point warning about throttling before the binary is present.
         """
-        import os as _os
         warnings: list[str] = []
 
         # macOS 26+ version check
-        import platform as _platform
         try:
             ver = _platform.mac_ver()[0]
             if ver:
                 parts = [int(p) for p in ver.split(".") if p.isdigit()]
-                if parts and parts[0] == 26:
-                    pass  # macOS 26, good
-                elif parts and parts[0] > 26:
-                    pass  # Future macOS, should work
-                else:
+                if parts and parts[0] < 26:
                     warnings.append("Apple FM requires macOS 26 or later.")
         except Exception:
             pass
 
         # Apple Intelligence enabled check (heuristic: check for FM model cache dir)
-        fm_cache = _os.path.expanduser(
+        fm_cache = os.path.expanduser(
             "~/Library/Application Support/com.apple.spotlight/FoundationModel"
         )
-        if not _os.path.isdir(fm_cache):
+        if not os.path.isdir(fm_cache):
             warnings.append(
                 "Apple Intelligence may not be enabled. "
                 "Enable it in System Settings > Apple Intelligence & Siri."

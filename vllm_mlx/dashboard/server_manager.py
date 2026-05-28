@@ -882,18 +882,23 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
         engine_id = config.get("engine_id", "vllm-mlx")
         try:
             eng = get_engine(engine_id)
-            discovered = eng.get_discovered_models()
-            if discovered:
-                # Engine auto-discovers its model — populate config
-                m = discovered[0]
-                engine_settings = dict(config.get("engine_settings", {}))
-                engine_settings.setdefault(engine_id, {})
-                engine_settings[engine_id]["launch_model"] = m.get("path", m["id"])
-                config["model"] = m["id"]
-                config["engine_settings"] = engine_settings
-                save_config(config)
+            # Fixed-model engines (e.g. apple-fm) don't need a model ID — they
+            # expose a single built-in model.  Skip the "no model" check.
+            if eng.get_fixed_model_display():
+                pass  # proceed without a model ID
             else:
-                return False, "No model specified. Set a model in the configuration below."
+                discovered = eng.get_discovered_models()
+                if discovered:
+                    # Engine auto-discovers its model — populate config
+                    m = discovered[0]
+                    engine_settings = dict(config.get("engine_settings", {}))
+                    engine_settings.setdefault(engine_id, {})
+                    engine_settings[engine_id]["launch_model"] = m.get("path", m["id"])
+                    config["model"] = m["id"]
+                    config["engine_settings"] = engine_settings
+                    save_config(config)
+                else:
+                    return False, "No model specified. Set a model in the configuration below."
         except (KeyError, Exception):
             return False, "No model specified. Set a model in the configuration below."
 
@@ -933,6 +938,9 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
 
     # External API engines (openai-compatible) have no local process.
     # Return success immediately — the proxy layer handles routing.
+    # NOTE: only ExternalApiEngine uses install_method=="external".  Other
+    # brew-installed engines (apfel, ollama, llama-cpp, ds4) use "brew" and
+    # DO launch a local process — do not add them here.
     try:
         _ext_engine = get_engine(engine_id_for_check)
         if getattr(_ext_engine, "install_method", "") == "external":

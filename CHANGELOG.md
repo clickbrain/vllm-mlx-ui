@@ -1,5 +1,31 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.20 — 2026-05-30
+
+### Fixed
+
+- **Apple Foundation Model engine (apple-fm) never started** — `AppleFMEngine` had
+  `install_method = "external"` which caused `start_server()` to return
+  `"External API engine ready"` immediately without launching the `apfel serve` process.
+  Changed to `install_method = "brew"` (the correct value — apfel is a Homebrew binary).
+  The `ExternalApiEngine` ("openai-compatible") remains the only engine with
+  `install_method = "external"` and the guard remains valid for that engine.
+- **Apple FM health check targeting wrong endpoint** — Added `health_path = "/v1/models"`
+  to `AppleFMEngine`. The default was `/health` which apfel doesn't expose; it now hits
+  the correct OpenAI-compatible endpoint directly instead of relying on the fallback.
+- **Apple FM blocked by "No model selected" at start** — Fixed both the
+  `/start` endpoint pre-check and `start_server()` to skip the model-required gate for
+  engines that advertise a fixed built-in model via `get_fixed_model_display()`.
+  apple-fm (and any future single-model engine) can now start without a model being
+  configured by the user.
+- **`_download_status` memory leak** — Completed and errored download entries accumulated
+  in the in-memory dict indefinitely. Added `completed_at` timestamps and a 5-minute TTL
+  prune that runs on each `GET /models/download_status` poll.
+- **`check_warnings()` dead code in `apple_fm.py`** — Removed redundant `import os` and
+  `import platform` inside the function body (already imported at module level). Simplified
+  the macOS version check from a three-branch `if/elif/else` with two `pass` arms to a
+  single `if parts[0] < 26` guard.
+
 ## v0.8.19 — 2026-05-30
 
 ### Fixed
