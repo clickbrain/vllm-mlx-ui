@@ -118,8 +118,16 @@ def _strip_thinking(text: str) -> str:
     strip defensively here so graders only see the post-think text.
     If stripping leaves nothing useful, fall back to the raw text so we don't
     silently discard the whole response.
+
+    Handles two cases:
+    1. Closed block: <think>...</think> followed by answer
+    2. Unclosed block: model only emitted <think>... with no </think> or answer
+       In this case we strip everything from <think> to end-of-string.
     """
+    # Strip closed blocks first
     stripped = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    # Strip any remaining unclosed <think> block (model ran out of tokens mid-think)
+    stripped = re.sub(r"<think>.*", "", stripped, flags=re.DOTALL).strip()
     return stripped if stripped else text
 
 
@@ -687,6 +695,11 @@ def _stream_completion(
             "max_tokens": max_tokens,
             "stream": True,
             "stream_options": {"include_usage": True},
+            # Disable thinking mode on Qwen3/DeepSeek-R1 style models so the
+            # answer goes directly into content tokens rather than reasoning_content.
+            # Without this, thinking models may fill max_tokens with reasoning
+            # and emit no final answer, causing empty responses and 0% accuracy.
+            "chat_template_kwargs": {"enable_thinking": False},
         },
         stream=True,
         timeout=timeout,

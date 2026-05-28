@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.43 — 2026-05-28
+
+### Fixed
+
+- **Quality benchmark: ALL questions return "got ?, expected X" — root cause fixed** — The benchmark was routing ALL requests to the configured remote server URL (e.g. LM Studio at `http://127.0.0.1:1234`) instead of the local inference server it had just started. Root cause: `server_url` was captured once before the benchmark thread using `sm.get_server_url()`, which returns the remote URL when `remote_server_url` is set in config. Fixed: `server_url` is now computed inside the per-model loop as `http://{host}:{port}` — always targeting the local inference server that the benchmark started and is managing. This was the primary cause of 0% accuracy on all suites across all models.
+
+- **Thinking models burn all tokens on reasoning, emit no answer** — Models like Qwen3 with `enable_thinking=True` (the default) can fill `max_tokens` entirely with `<think>` reasoning tokens and emit zero answer tokens. Fixed: benchmark requests now include `"chat_template_kwargs": {"enable_thinking": false}` to disable thinking mode. This forces the answer into `content` tokens where the graders expect it.
+
+- **Unclosed `<think>` blocks produce empty graded text** — If a model emits `<think>...` but runs out of tokens before `</think>`, the previous `_strip_thinking()` regex left the entire thinking block in place. The second pass now strips `<think>.*` to end-of-string to handle this case.
+
 ## v0.8.42 — 2026-05-29
 
 ### Fixed

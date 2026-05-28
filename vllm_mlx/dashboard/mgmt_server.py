@@ -2167,7 +2167,6 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
     num_questions = int(req.get("num_questions", 20))
     label = req.get("label", "")
     model_ids: list[str] = req.get("model_ids", [])
-    server_url = sm.get_server_url()
 
     run_id = str(uuid.uuid4())[:8]
     stop_event = threading.Event()
@@ -2224,6 +2223,10 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
                 host_addr = cfg.get("host", "127.0.0.1")
                 if host_addr == "0.0.0.0":
                     host_addr = "127.0.0.1"
+                # Always benchmark against the LOCAL inference server regardless of
+                # any remote_server_url configured for the chat UI. Benchmarks start
+                # and manage their own local server instance.
+                server_url = f"http://{host_addr}:{port}"
 
                 needs_start = not _server_ready(host_addr, port)
                 needs_switch = bool(target_model and target_model != current_model)
