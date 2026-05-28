@@ -1,5 +1,32 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.35 — 2026-05-28
+
+### Fixed
+
+- **Start at login kills current session** — The LaunchAgent plist was written with
+  `RunAtLoad = True`. When `launchctl load -w` was called to activate the plist,
+  macOS immediately spawned a second `vllm-mlx-ui` process. That second instance
+  ran the startup logic ("Stopping previous instance(s)"), killed the running server,
+  and replaced the session — causing the Settings page to reload and show engines
+  (e.g. apfel) as "not installed". Fixed by removing `RunAtLoad` from the plist
+  (defaults to False). The LaunchAgent now starts only at actual login, not when
+  the toggle is first enabled.
+
+- **Start at login — engines show as "not installed" after login** — Processes
+  launched by launchctl have a minimal `PATH` that does not include
+  `/opt/homebrew/bin`. `shutil.which("apfel")` (and similar) returned `None`,
+  making Homebrew-installed engines appear uninstalled. Fixed by adding an explicit
+  `EnvironmentVariables.PATH` to the plist that includes all standard Homebrew and
+  system binary locations.
+
+- **LM Studio version still shows ASCII art** — ANSI stripping was working but the
+  semver regex `(\d+\.\d+\.\d+)` required three version parts and missed two-part
+  versions like `0.3`. Also, the fallback returned the first line of output even if
+  it was a pure ASCII-art line (`__ __ ___ ______`). Fixed the regex to accept
+  two-part versions (`v?(\d+\.\d+(?:\.\d+)?[\w.-]*)`) and the fallback now skips
+  lines consisting only of ASCII art characters.
+
 ## v0.8.34 — 2026-05-28
 
 ### Added

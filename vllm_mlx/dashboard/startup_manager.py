@@ -58,11 +58,19 @@ def enable() -> dict:
     os.makedirs(os.path.dirname(_PLIST_PATH), exist_ok=True)
     os.makedirs(os.path.dirname(_LOG_PATH), exist_ok=True)
 
+    # Build a PATH that includes Homebrew locations so engines installed via
+    # brew (e.g. apfel) are discoverable when the agent starts at login.
+    brew_path = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin"
+    env_path = f"{brew_path}:/usr/bin:/bin:/usr/sbin:/sbin"
+
     plist: dict = {
         "Label": _PLIST_LABEL,
         "ProgramArguments": [binary],
-        "RunAtLoad": True,
+        # RunAtLoad intentionally omitted (defaults False) so enabling this
+        # setting does NOT immediately spawn a second instance that would kill
+        # the currently-running session.  The agent will start at next login.
         "KeepAlive": False,
+        "EnvironmentVariables": {"PATH": env_path},
         "StandardOutPath": _LOG_PATH,
         "StandardErrorPath": _LOG_PATH,
     }
