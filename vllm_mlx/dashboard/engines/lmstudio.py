@@ -182,19 +182,17 @@ class LmStudioEngine(BaseEngine):
                 capture_output=True, text=True, timeout=5,
             )
             raw = (result.stdout or result.stderr).strip()
-            # Strip ANSI escape codes — lms version outputs a colour banner
+            # Strip all ANSI/VT escape sequences — lms version outputs a
+            # colour banner using 256-colour codes like \x1b[38;5;166m.
+            # Use the comprehensive CSI pattern: ESC [ <params> <final-byte>
             import re as _re
-            clean = _re.sub(r"\x1b\[[0-9;]*m", "", raw)
+            clean = _re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", raw)
             # Match 3-part (1.2.3) or 2-part (0.3) version strings
             m = _re.search(r"v?(\d+\.\d+(?:\.\d+)?[\w.-]*)", clean)
             if m:
                 return m.group(1)
-            # Fallback: return the first non-art line (skip lines that are
-            # purely ASCII art characters like _ - = | / \ # * + ~ ^ . space)
-            for line in clean.splitlines():
-                stripped = line.strip()
-                if stripped and not _re.match(r'^[_\s\-=|/\\#*+~^.]+$', stripped):
-                    return stripped
+            # No version number found — return None rather than returning an
+            # ASCII-art line as the "version" (the old fallback was unreliable).
             return None
         except Exception:
             return None

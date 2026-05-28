@@ -30,15 +30,21 @@ _LOG_PATH = os.path.expanduser("~/.vllm_mlx_ui/startup.log")
 
 
 def _resolve_binary() -> str | None:
-    """Return the absolute path of the vllm-mlx-ui binary, or None."""
-    path = shutil.which("vllm-mlx-ui")
-    if path:
-        return os.path.realpath(path)
-    # Homebrew standard location as a fallback
+    """Return the stable path of the vllm-mlx-ui binary, or None.
+
+    We intentionally do NOT call os.path.realpath() here.  On Homebrew
+    installs the symlink ``/opt/homebrew/bin/vllm-mlx-ui`` always points to
+    the currently-installed version, while its realpath resolves to a
+    versioned Cellar directory (e.g. ``.../0.8.35/bin/vllm-mlx-ui``).
+    Baking in the realpath means the LaunchAgent plist silently breaks after
+    every ``brew upgrade``.
+    """
+    # Prefer the Homebrew symlink so the plist survives upgrades
     hb = "/opt/homebrew/bin/vllm-mlx-ui"
     if os.path.isfile(hb):
         return hb
-    return None
+    path = shutil.which("vllm-mlx-ui")
+    return path or None
 
 
 def is_enabled() -> bool:
@@ -47,7 +53,12 @@ def is_enabled() -> bool:
 
 
 def enable() -> dict:
-    """Install the LaunchAgent and load it immediately.
+    """Write the LaunchAgent plist so the app starts automatically at login.
+
+    Does NOT call ``launchctl load`` — that would immediately spawn a second
+    instance that would kill the currently-running session.  macOS reads
+    ``~/Library/LaunchAgents/`` at login and starts everything with
+    ``RunAtLoad = true`` on its own.
 
     Returns a dict with ``ok`` (bool) and ``message`` (str).
     """
@@ -66,9 +77,12 @@ def enable() -> dict:
     plist: dict = {
         "Label": _PLIST_LABEL,
         "ProgramArguments": [binary],
-        # RunAtLoad intentionally omitted (defaults False) so enabling this
-        # setting does NOT immediately spawn a second instance that would kill
-        # the currently-running session.  The agent will start at next login.
+        # RunAtLoad = True is required for macOS to actually start the program
+        # at login.  Without it the LaunchAgent is registered but never runs.
+        # We do NOT call `launchctl load` after writing the plist (which would
+        # start a second instance immediately); macOS picks the plist up at
+        # next login automatically.
+        "RunAtLoad": True,
         "KeepAlive": False,
         "EnvironmentVariables": {"PATH": env_path},
         "StandardOutPath": _LOG_PATH,
@@ -81,18 +95,7 @@ def enable() -> dict:
     except OSError as exc:
         return {"ok": False, "message": f"Could not write plist: {exc}"}
 
-    # Load the agent so it takes effect without a logout/login cycle
-    try:
-        result = subprocess.run(
-            ["launchctl", "load", "-w", _PLIST_PATH],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode != 0:
-            logger.warning("launchctl load returned %d: %s", result.returncode, result.stderr)
-    except Exception as exc:
-        logger.warning("launchctl load failed: %s", exc)
-
-    return {"ok": True, "message": "vllm-mlx-ui will now start at login."}
+    return {"ok": True, "message": "vllm-mlx-ui will start automatically at your next login."}
 
 
 def disable() -> dict:

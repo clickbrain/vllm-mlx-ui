@@ -1,5 +1,35 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.36 — 2026-05-28
+
+### Fixed
+
+- **Start at login never actually starts the app** — `RunAtLoad` was intentionally
+  removed in v0.8.35 to prevent the plist-load from killing the current session.
+  But a LaunchAgent without `RunAtLoad = true` is never executed by macOS at login —
+  it is merely registered. The app appeared "enabled" but did nothing on restart.
+  Fixed: `RunAtLoad = true` is back in the plist. `launchctl load` is no longer
+  called when the toggle is enabled (so no double-start); macOS reads the plist at
+  the next login and starts the app then.
+
+- **Start at login silently breaks after `brew upgrade`** — `_resolve_binary()`
+  used `os.path.realpath()` which resolved the `/opt/homebrew/bin/vllm-mlx-ui`
+  symlink to its versioned Cellar path (e.g. `.../0.8.35/bin/vllm-mlx-ui`). After
+  a `brew upgrade` the plist still contained the old path, pointing to a
+  non-existent binary. Fixed: use the stable Homebrew symlink
+  `/opt/homebrew/bin/vllm-mlx-ui` directly, which always points to the
+  currently-installed version.
+
+- **LM Studio version shows ASCII art lines with `(` and `)`** — The previous
+  fix added a fallback that returned "the first non-art line", but the
+  ASCII-art filter regex `[_\s\-=|/\\#*+~^.]+` did not include `(` or `)`.
+  Lines like `/ / / |/ / / __/ /___ _____/ (_)__ / ___/ / / _/` passed the
+  filter and were returned as the version string. Removed the unreliable fallback
+  entirely — `get_version()` now returns `None` when no semver is found. Also
+  upgraded the ANSI escape-code stripper from `\x1b\[[0-9;]*m` (SGR only) to the
+  comprehensive CSI pattern `\x1b\[[0-?]*[ -/]*[@-~]` which handles all
+  VT100/ANSI control sequences, not just colour codes.
+
 ## v0.8.35 — 2026-05-28
 
 ### Fixed
