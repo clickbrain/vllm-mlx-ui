@@ -269,11 +269,19 @@ export const useServerStore = defineStore('server', () => {
         dashboard_version?: string | null;
       }>('/poll')
 
-      // Status
+      // Status — detect crash transition (was running, now crashed) to fire toast
+      const wasRunning = status.value?.running ?? false
       status.value = r.status
       if (r.status.running) {
         crashLog.value = null
       } else if (r.status.crash_log) {
+        const isNewCrash = wasRunning && !r.status.running
+        if (isNewCrash && !crashLog.value) {
+          try {
+            const toastStore = useToastStore()
+            toastStore.error('⚠️ Inference server crashed — check Serve page for logs')
+          } catch { /* toast store may not be ready */ }
+        }
         crashLog.value = r.status.crash_log
       }
       error.value = null

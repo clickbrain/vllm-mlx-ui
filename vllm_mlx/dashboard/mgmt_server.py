@@ -1135,7 +1135,7 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
                         f"\n── Model {idx + 1}/{len(model_ids)}: {model_id.split('/')[-1]} ──\n"
                     )
                 if server_running and running_model and running_model == model_id:
-                    br.run_live_benchmark(
+                    result = br.run_live_benchmark(
                         model_id,
                         server_url=server_url,
                         prompts=runs,
@@ -1143,10 +1143,20 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
                         label=label,
                         stop_event=_stop,
                         server_settings=server_settings_snapshot,
+                        output_callback=_output_cb,
                     )
+                    if not result.get("success"):
+                        err = result.get("error", "Unknown error")
+                        _output_cb(f"\n[✗ Benchmark failed: {err}]\n")
                 else:
-                    br.run_benchmark(model_id, prompts=runs, max_tokens=max_tokens,
+                    result = br.run_benchmark(model_id, prompts=runs, max_tokens=max_tokens,
                                      output_callback=_output_cb)
+                    if not result.get("success"):
+                        err = result.get("error", "Unknown error")
+                        if err == "out_of_memory":
+                            _output_cb(f"\n[✗ Out of memory — model too large for available RAM]\n")
+                        else:
+                            _output_cb(f"\n[✗ Benchmark failed: {err}]\n")
         finally:
             with _benchmark_lock:
                 _benchmark_running = False
@@ -2236,10 +2246,14 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
                             continue
                         switched = True
 
-                    if _wait_for_server(host_addr, port, target_model or current_model):
+                    server_ready = _wait_for_server(host_addr, port, target_model or current_model)
+                    if server_ready:
                         _cb(f"[✓ {target_model or current_model} ready]\n")
                     else:
-                        _cb(f"[✗ Timeout waiting for {target_model or current_model} to start]\n")
+                        err_msg = f"[✗ Server failed to start for {target_model or current_model} — aborting this model]\n"
+                        _cb(err_msg)
+                        _quality_runs[run_id]["error"] = f"Server failed to start for {target_model or current_model}"
+                        continue
 
                 if len(targets) > 1:
                     _cb(f"\n{'─' * 40}\nModel: {target_model or 'current model'}\n{'─' * 40}\n")
@@ -2386,32 +2400,63 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
         server_settings_snapshot["engine_id"] = base_cfg.get("engine_id", "vllm-mlx")
 
         try:
+            import requests as _req_inner
+            import time as _t_inner
+
+            def _custom_server_ready(url: str) -> bool:
+                try:
+                    r = _req_inner.get(f"{url}/v1/models", timeout=2)
+                    return r.status_code == 200
+                except Exception:
+                    return False
+
+            def _custom_wait_for_server(url: str) -> bool:
+                for _ in range(240):
+                    if stop_event.is_set():
+                        return False
+                    _t_inner.sleep(0.5)
+                    if _custom_server_ready(url):
+                        return True
+                return False
+
             for mid in models_to_run:
                 if stop_event.is_set():
                     break
-                current_model = sm.load_config().get("model", "")
-                if current_model != mid:
-                    _cb(f"\n── Loading {mid} ──\n")
-                    cfg = sm.load_config()
-                    cfg["model"] = mid
-                    sm.save_config(cfg)
-                    sm.stop_server()
-                    sm.start_server(cfg)
-                    switched = True
-                    import time as _t
-                    server_url_inner = f"http://127.0.0.1:{cfg.get('port', 8000)}"
-                    for _ in range(120):
-                        if stop_event.is_set():
-                            break
-                        try:
-                            import requests as _req
-                            r = _req.get(f"{server_url_inner}/v1/models", timeout=2)
-                            if r.status_code == 200:
-                                break
-                        except Exception:
-                            logger.debug("Waiting for model server at %s (not ready yet)", server_url_inner)
+                cfg = sm.load_config()
+                current_model = cfg.get("model", "")
+                port_inner = int(cfg.get("port", 8000))
+                host_inner = cfg.get("host", "127.0.0.1")
+                if host_inner == "0.0.0.0":
+                    host_inner = "127.0.0.1"
+                server_url_inner = f"http://{host_inner}:{port_inner}"
 
-                server_url = f"http://127.0.0.1:{sm.load_config().get('port', 8000)}"
+                needs_start = not _custom_server_ready(server_url_inner)
+                needs_switch = current_model != mid
+
+                if needs_switch or needs_start:
+                    if needs_switch:
+                        _cb(f"\n── Loading {mid} ──\n")
+                        cfg["model"] = mid
+                        sm.save_config(cfg)
+                    elif needs_start:
+                        _cb(f"\n── Starting server for {mid} ──\n")
+                    sm.stop_server()
+                    ok_start, start_msg = sm.start_server(cfg)
+                    if not ok_start:
+                        _cb(f"[✗ Could not start server: {start_msg}]\n")
+                        with _custom_lock:
+                            _custom_runs[run_id]["error"] = f"Could not start server: {start_msg}"
+                        continue
+                    switched = True
+                    if _custom_wait_for_server(server_url_inner):
+                        _cb(f"[✓ {mid} ready]\n")
+                    else:
+                        _cb(f"[✗ Server failed to start for {mid} — aborting this model]\n")
+                        with _custom_lock:
+                            _custom_runs[run_id]["error"] = f"Server failed to start for {mid}"
+                        continue
+
+                server_url = server_url_inner
                 _cb(f"\n── Running custom benchmark: {mid} ──\n")
                 res = br.run_custom_benchmark(
                     model_id=mid,

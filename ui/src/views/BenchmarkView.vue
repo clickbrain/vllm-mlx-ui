@@ -39,6 +39,7 @@ import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
 import type { QualitySuiteResult } from '@/stores/models'
 import { useBenchmarkRunStore } from '@/stores/benchmarkRun'
+import { useToastStore } from '@/stores/toast'
 import AppButton from '@/components/shared/AppButton.vue'
 import { api } from '@/api/client'
 
@@ -50,6 +51,7 @@ ChartJS.register(
 const serverStore = useServerStore()
 const modelsStore = useModelsStore()
 const benchmarkRunStore = useBenchmarkRunStore()
+const toastStore = useToastStore()
 const {
   benchRunning, speedPhase, qualityPhase, qualityLines,
   benchStopping, qualityRunId, lastRunQuality, lastRunSpeed,
@@ -361,13 +363,13 @@ function clearBenchModels() {
 }
 
 // qualityLogRef is a DOM ref — remains local to the component
-const qualityLogRef    = ref<HTMLPreElement | null>(null)
+const qualityLogRef    = ref<HTMLDivElement | null>(null)
 // benchRunName is local config, not persistent run state
 const benchRunName    = ref('')
 
 // ── Speed output log (streamed from /benchmark/output) ───────────────────────
 const speedLines       = ref<string[]>([])
-const speedLogRef      = ref<HTMLPreElement | null>(null)
+const speedLogRef      = ref<HTMLDivElement | null>(null)
 const speedCurrentModel = ref('')
 const speedModelIndex  = ref(0)
 const speedModelTotal  = ref(0)
@@ -385,7 +387,7 @@ const customRunId      = ref<string | null>(null)
 const customPhase      = ref<'idle' | 'running' | 'done' | 'error'>('idle')
 const customLines      = ref<string[]>([])
 const customAllResults = ref<any[]>([])
-const customLogRef     = ref<HTMLPreElement | null>(null)
+const customLogRef     = ref<HTMLDivElement | null>(null)
 let _customPollTimer: ReturnType<typeof setInterval> | null = null
 let _customLineOffset = 0
 
@@ -472,6 +474,10 @@ async function stopBenchmark() {
   if (customPhase.value === 'running') customPhase.value = 'error'
 }
 
+function isLogErrorLine(line: string): boolean {
+  return line.includes('[✗') || line.includes('request error:') || line.includes('✗ Benchmark failed') || line.includes('✗ Out of memory')
+}
+
 async function runBenchmark() {
   if (benchRunning.value) return
   if (benchSelectedModels.value.length === 0) return
@@ -530,18 +536,25 @@ async function runCustomBenchmark() {
         if (out.all_results?.length) customAllResults.value = out.all_results
         if (!out.running) {
           clearInterval(_customPollTimer!); _customPollTimer = null
-          customPhase.value = out.error ? 'error' : 'done'
+          if (out.error) {
+            customPhase.value = 'error'
+            toastStore.error(`Custom benchmark failed: ${out.error}`)
+          } else {
+            customPhase.value = 'done'
+          }
           benchRunning.value = false
           modelsStore.fetchBenchmarkResults()
         }
       } catch {
         clearInterval(_customPollTimer!); _customPollTimer = null
         customPhase.value = 'error'
+        toastStore.error('Custom benchmark lost connection to server')
         benchRunning.value = false
       }
     }, 1000)
   } catch {
     customPhase.value = 'error'
+    toastStore.error('Custom benchmark failed to start')
     benchRunning.value = false
   }
 }
@@ -573,6 +586,7 @@ async function _doBenchmarkRun() {
       })
     } catch {
       speedPhase.value = 'error'
+      toastStore.error('Speed benchmark failed to start. Check that the engine is installed.')
       speedDone = true
       checkDone()
     }
@@ -597,16 +611,29 @@ async function _doBenchmarkRun() {
 
           if (!status.running) {
             clearInterval(_speedPollTimer!); _speedPollTimer = null
-            speedPhase.value = 'done'
             await modelsStore.fetchBenchmarkResults()
             const hist = modelsStore.benchmarkHistory
             lastRunSpeed.value = hist.length ? hist[hist.length - 1] : null
+            // Check last result for errors (OOM, subprocess crash, etc.)
+            const lastResult = lastRunSpeed.value as any
+            if (lastResult && !lastResult.success) {
+              const err = lastResult.error || 'Unknown error'
+              speedPhase.value = 'error'
+              if (err === 'out_of_memory') {
+                toastStore.error('Benchmark failed: model too large for available RAM (out of memory)')
+              } else {
+                toastStore.error(`Speed benchmark failed: ${err}`)
+              }
+            } else {
+              speedPhase.value = 'done'
+            }
             speedDone = true
             checkDone()
           }
         } catch {
           clearInterval(_speedPollTimer!); _speedPollTimer = null
           speedPhase.value = 'error'
+          toastStore.error('Speed benchmark lost connection to server')
           speedDone = true
           checkDone()
         }
@@ -636,7 +663,12 @@ async function _doBenchmarkRun() {
           _lineOffset = out.total_lines
           if (!out.running) {
             clearInterval(_qualityPollTimer!); _qualityPollTimer = null
-            qualityPhase.value = out.error ? 'error' : 'done'
+            if (out.error) {
+              qualityPhase.value = 'error'
+              toastStore.error(`Quality benchmark failed: ${out.error}`)
+            } else {
+              qualityPhase.value = 'done'
+            }
             if (out.results) lastRunQuality.value = out.results
             qualityDone = true
             checkDone()
@@ -644,12 +676,14 @@ async function _doBenchmarkRun() {
         } catch {
           clearInterval(_qualityPollTimer!); _qualityPollTimer = null
           qualityPhase.value = 'error'
+          toastStore.error('Quality benchmark lost connection to server')
           qualityDone = true
           checkDone()
         }
       }, 1000)
     } catch {
       qualityPhase.value = 'error'
+      toastStore.error('Quality benchmark failed to start')
       qualityDone = true
       checkDone()
     }
@@ -1629,7 +1663,7 @@ watch(activeTab, (tab) => {
 
               <!-- Inline quality log -->
               <div v-if="benchMode !== 'speed' && (qualityPhase !== 'idle' || qualityLines.length > 0)" class="inline-log-wrap">
-                <pre ref="qualityLogRef" class="quality-log">{{ qualityLines.join('') }}</pre>
+                <div ref="qualityLogRef" class="quality-log"><span v-for="(line, i) in qualityLines" :key="i" :class="{ 'log-line-error': isLogErrorLine(line) }">{{ line }}</span></div>
                 <div v-if="qualityPhase === 'done' && lastRunQuality" class="quality-scores-inline">
                   <div v-for="(sr, key) in lastRunQuality.suites" :key="key" class="qsi">
                     <div class="qsi-name">{{ String(key).toUpperCase() }}</div>
@@ -1685,7 +1719,7 @@ watch(activeTab, (tab) => {
               </span>
             </div>
             <!-- Live output log during speed run -->
-            <pre v-if="speedLines.length" ref="speedLogRef" class="quality-log speed-log">{{ speedLines.join('') }}</pre>
+            <div v-if="speedLines.length" ref="speedLogRef" class="quality-log speed-log"><span v-for="(line, i) in speedLines" :key="i" :class="{ 'log-line-error': isLogErrorLine(line) }">{{ line }}</span></div>
             <div v-else-if="speedPhase === 'done' && lastRunSpeed" class="speed-result-inline">
               <div class="sri-stat">
                 <div class="sri-val mono">{{ (lastRunSpeed as any).avg_tps?.toFixed(1) ?? '—' }}</div>
@@ -1715,7 +1749,7 @@ watch(activeTab, (tab) => {
             </div>
 
             <!-- Live log during run -->
-            <pre v-if="customLines.length" ref="customLogRef" class="quality-log custom-log">{{ customLines.join('') }}</pre>
+            <div v-if="customLines.length" ref="customLogRef" class="quality-log custom-log"><span v-for="(line, i) in customLines" :key="i" :class="{ 'log-line-error': isLogErrorLine(line) }">{{ line }}</span></div>
 
             <!-- Per-prompt results table after done -->
             <div v-if="customPhase === 'done' && customPerPromptResults.length" class="custom-results-wrap">
@@ -2853,7 +2887,10 @@ th.sortable:not(.active) .sort-arrow::after { content: '▽'; opacity: .3; }
   font-family: var(--font-mono); font-size: 13px; line-height: 1.6;
   padding: 10px 12px; margin: 0; max-height: 240px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-word; border-radius: 0;
+  display: block;
 }
+.quality-log span { display: inline; white-space: pre-wrap; }
+.log-line-error { color: #f87171; font-weight: 500; }
 
 .quality-scores-inline {
   display: flex; gap: 12px; flex-wrap: wrap; padding: 8px 0 4px;

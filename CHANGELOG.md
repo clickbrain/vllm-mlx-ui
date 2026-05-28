@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.41 — 2026-05-28
+
+### Added
+
+- **Benchmark failure alerts** — benchmarks (speed, quality, custom) now immediately fire a toast notification when they fail, showing the specific error message (out of memory, connection refused, timeout, etc.) instead of silently showing only a red "Error" badge.
+- **Server crash toast** — when the inference server crashes unexpectedly while it was running, the dashboard now shows an error toast: "⚠️ Inference server crashed — check Serve page for logs". Previously there was no notification.
+- **Error line highlighting in benchmark output log** — lines containing errors (`[✗`, `request error:`, OOM messages) are now shown in red in the benchmark output log, making failures immediately visible in long output.
+- **OOM detection in speed benchmark results** — speed benchmark now checks the final result for `out_of_memory` error and shows a human-readable toast ("model too large for available RAM") instead of silently setting phase to 'done' with no result.
+- **Quality/custom benchmark abort on server timeout** — if the inference server does not start within the wait timeout, the benchmark now immediately aborts the affected model run and sets the error state (no more requests fired at a dead server).
+
 ## v0.8.40 — 2026-05-28
 
 ### Fixed
