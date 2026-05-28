@@ -930,6 +930,16 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
     # touching LOG_FILE or launching anything.  Returns a clean error
     # message instead of letting FileNotFoundError escape to the ASGI layer.
     engine_id_for_check = config.get("engine_id", "vllm-mlx")
+
+    # External API engines (openai-compatible) have no local process.
+    # Return success immediately — the proxy layer handles routing.
+    try:
+        _ext_engine = get_engine(engine_id_for_check)
+        if getattr(_ext_engine, "install_method", "") == "external":
+            return True, f"External API engine '{engine_id_for_check}' ready — no local process to start."
+    except (KeyError, Exception):
+        pass
+
     try:
         _chk_engine = get_engine(engine_id_for_check)
         if not _chk_engine.is_installed():
@@ -1002,19 +1012,39 @@ def stop_server() -> tuple[bool, str]:
     try:
         with _server_state_lock:
             _intentional_stop_in_progress = True
-        os.kill(pid, signal.SIGTERM)
+        # Kill the whole process group — start_new_session=True makes the child
+        # its own session/process group leader, so pid == pgid.  This ensures
+        # MLX/Metal worker subprocesses (which hold GPU memory) are also killed.
+        # Without this, workers survive as orphans and degrade TTFT on the next
+        # model load because they compete for the same GPU memory.
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass  # Already gone
         for _ in range(10):
             time.sleep(0.5)
             if not _is_process_alive(pid):
                 break
         else:
-            os.kill(pid, signal.SIGKILL)
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # Already gone
             # SIGKILL is asynchronous — wait for the kernel to actually kill the
-            # process and release its port before we return to the caller.
+            # process before we return to the caller.
             for _ in range(10):
                 time.sleep(0.2)
                 if not _is_process_alive(pid):
                     break
+        # Also wait for port release: the kernel may hold the listening socket
+        # briefly after process death, causing a spurious "port in use" error if
+        # start_server() is called immediately after.
+        port = int(cfg.get("port", 8000))
+        host = cfg.get("host", "127.0.0.1")
+        for _ in range(10):
+            if not _port_in_use(port, host):
+                break
+            time.sleep(0.2)
         _clear_server_state()
         return True, "Server stopped."
     except Exception as e:

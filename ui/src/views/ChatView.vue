@@ -279,6 +279,24 @@ async function scrollToBottom(force = false) {
   }
 }
 
+/**
+ * RAF-throttled scroll for use inside the hot streaming token loop.
+ * Batches many per-token calls into one scroll per animation frame, preventing
+ * layout thrashing at 50-100 tokens/second during generation.
+ */
+let _scrollRafPending = false
+function scheduleScrollToBottom() {
+  if (_scrollRafPending || !isAtBottom.value) return
+  _scrollRafPending = true
+  requestAnimationFrame(() => {
+    _scrollRafPending = false
+    const el = messagesEl.value
+    if (el && isAtBottom.value) {
+      el.scrollTop = el.scrollHeight
+    }
+  })
+}
+
 // ── Optimal settings ──────────────────────────────────────────────────────────
 async function applyOptimalSettings() {
   if (!modelId.value) return
@@ -431,7 +449,7 @@ async function sendStreaming(body: Record<string, unknown>) {
         if (delta?.content) {
           chatStore.updateLastMessage(delta.content)
           completionTokens++  // approximate chunk count (used only if server omits usage)
-          await scrollToBottom()
+          scheduleScrollToBottom()
         }
         if (chunk.usage) tokenUsage.value = chunk.usage
       } catch {}

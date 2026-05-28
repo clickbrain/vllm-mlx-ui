@@ -1,6 +1,39 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.18 — 2026-05-29
+## v0.8.19 — 2026-05-30
+
+### Fixed
+
+- **Orphan inference processes degrading TTFT after restart** — `stop_server()` was calling `os.kill(pid,
+  SIGTERM)` which only sends the signal to the top-level inference process. Since subprocesses are launched
+  with `start_new_session=True`, the child becomes its own session and process group leader — making `pid`
+  identical to the process group ID. MLX worker threads and Metal processes that the engine spawned
+  survived the stop, held GPU memory, and competed with the next model load. Fixed by switching to
+  `os.killpg(pid, signal.SIGTERM)` / `os.killpg(pid, signal.SIGKILL)` so the entire process group is
+  terminated. Wrapped in `try/except ProcessLookupError` for the already-dead case.
+- **Spurious "port already in use" error on quick restart** — after the inference process dies, the kernel
+  may hold the listening socket briefly before releasing the port. `stop_server()` now polls
+  `_port_in_use()` for up to 2 seconds after confirming process death, so `start_server()` gets a clean
+  port on immediate restart.
+- **External API engine launching a zombie `sleep(999999)` process** — `ExternalApiEngine.build_command()`
+  returns a no-op sleep process as a placeholder because the proxy layer handles routing. But
+  `start_server()` had no guard for engines with `install_method == "external"`, so any code path that
+  called it directly (e.g. benchmark compare) would spawn that sleep process. Fixed: `start_server()` now
+  returns `(True, "External API engine ready")` immediately for external engines without touching
+  subprocesses.
+- **Per-token layout thrashing during streaming** — `scrollToBottom()` was called on every SSE token delta
+  chunk (`await scrollToBottom()` inside the streaming for-loop). Each call forces `await nextTick()` and a
+  synchronous `el.scrollTop = el.scrollHeight` layout recalculation. At 50-100 tokens/second this fired
+  50-100 forced layout operations per second, causing visible jank and slowing the JS event loop during
+  generation. Fixed using a `requestAnimationFrame` throttle (`scheduleScrollToBottom()`): many per-token
+  calls coalesce into one scroll per animation frame (~16ms). Synchronous `scrollToBottom(force=true)` is
+  preserved for send/receive start/end/abort paths.
+- **`ollama.py` upgrade script TOCTOU race on temp files** — `tempfile.mktemp()` returns a path without
+  creating the file, leaving a race window where another process can claim the same name. Replaced with
+  `tempfile.NamedTemporaryFile(delete=False)` (atomically claims the temp file path) and
+  `tempfile.mkdtemp()` (atomically creates the temp directory).
+
+
 
 ### Fixed
 - **"Engine lm-studio is not installed" crash at startup** — `LmStudioEngine.is_installed()` was checking

@@ -156,8 +156,10 @@ if not dl_url:
             raise SystemExit(0)
     raise SystemExit(1)
 
-# Download
-tmp_file = tempfile.mktemp(suffix=os.path.splitext(dl_url)[1] or ".tmp")
+# Download — use NamedTemporaryFile to atomically claim a safe temp path
+# (avoids TOCTOU race that mktemp() has)
+with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(dl_url)[1] or ".tmp") as _ntf:
+    tmp_file = _ntf.name
 try:
     urllib.request.urlretrieve(dl_url, tmp_file)
 except Exception:
@@ -173,8 +175,8 @@ except Exception:
             raise SystemExit(0)
     raise SystemExit(1)
 
-# Extract to temp dir
-tmp_dir = tempfile.mktemp(suffix=".ollama")
+# Extract to temp dir — mkdtemp() atomically creates the directory (no TOCTOU race)
+tmp_dir = tempfile.mkdtemp(suffix=".ollama")
 try:
     if dl_url.endswith(".zip"):
         with zipfile.ZipFile(tmp_file, "r") as zf:
