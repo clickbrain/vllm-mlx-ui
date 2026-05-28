@@ -134,22 +134,14 @@ class AppleFMEngine(BaseEngine):
         except Exception:
             pass
 
-        # Check if apfel is in brew
-        try:
-            result = subprocess.run(
-                ["brew", "tap", "Arthur-Ficial/apfel"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode != 0:
-                # Tap not added yet — not a hard requirement, but warn
-                pass
-        except Exception:
-            pass
-
         return issues
 
     def check_warnings(self) -> list[str]:
-        """Warn about Apple CLI rate limiting and single-model constraint."""
+        """Warn about Apple CLI rate limiting and single-model constraint.
+
+        The rate-limit advisory is only shown when apfel is actually installed —
+        there is no point warning about throttling before the binary is present.
+        """
         import os as _os
         warnings: list[str] = []
 
@@ -178,12 +170,13 @@ class AppleFMEngine(BaseEngine):
                 "Enable it in System Settings > Apple Intelligence & Siri."
             )
 
-        # Rate-limit advisory
-        warnings.append(
-            "Apple applies rate limits to non-GUI tools. "
-            "The apfel server runs as a background process and may be throttled. "
-            "For heavy usage, run the apfel GUI app instead."
-        )
+        # Rate-limit advisory — only relevant when apfel is installed.
+        if self.is_installed():
+            warnings.append(
+                "Apple applies rate limits to non-GUI tools. "
+                "The apfel server runs as a background process and may be throttled. "
+                "For heavy usage, run the apfel GUI app instead."
+            )
 
         return warnings
 

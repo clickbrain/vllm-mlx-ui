@@ -130,6 +130,19 @@ def _kill_stale_ui(ui_pid_file: Path) -> bool:
 
 
 
+def _is_external_engine(engine_id: str) -> bool:
+    """Return True when the engine_id is the remote API proxy (no local process)."""
+    return engine_id == "openai-compatible"
+
+
+def _start_or_mark_external(cfg: dict, start_server, sm) -> tuple[bool, str]:
+    """Start the inference server or, for external API engines, just mark it healthy."""
+    if _is_external_engine(cfg.get("engine_id", "")):
+        sm.set_server_healthy()
+        return True, "External API is ready — configure your API key and base URL in Settings → Engine."
+    return start_server(cfg)
+
+
 def _should_engine_fallback(cfg: dict, msg: str) -> bool:
     """Return True when a startup failure looks like an engine-level problem.
 
@@ -151,17 +164,24 @@ def _should_engine_fallback(cfg: dict, msg: str) -> bool:
     return False
 
 
-def _try_engine_fallback(cfg, _msg, load_config, save_config, start_server):
+def _try_engine_fallback(cfg, _msg, load_config, save_config, start_server, sm=None):
     """When the configured engine is not installed, auto-switch to the first installed one.
 
     Returns (updated_cfg, ok, message) so the caller can print the final result.
     Saves the new engine_id to config so the fallback persists across restarts.
+
+    Skips ExternalApiEngine ("openai-compatible") — it requires manual user
+    configuration (API key + base URL) and spawns no real process.
     """
     try:
         from vllm_mlx.dashboard.engines.registry import ENGINES
         configured_engine = cfg.get("engine_id", "vllm-mlx")
         for eid, engine in ENGINES.items():
-            if eid != configured_engine and engine.is_installed():
+            if eid == configured_engine:
+                continue
+            if eid == "openai-compatible":
+                continue  # skip — requires manual config, not a real local engine
+            if engine.is_installed():
                 print(
                     f"[vllm-mlx] 🔄 Engine '{configured_engine}' not found — "
                     f"switching to '{eid}'. Update Settings → Engine to keep this choice.",
@@ -170,7 +190,7 @@ def _try_engine_fallback(cfg, _msg, load_config, save_config, start_server):
                 cfg = load_config()
                 cfg["engine_id"] = eid
                 save_config(cfg)
-                ok, msg = start_server(cfg)
+                ok, msg = _start_or_mark_external(cfg, start_server, sm) if sm else start_server(cfg)
                 return cfg, ok, msg
     except Exception as exc:
         logger.warning("Engine fallback failed: %s", exc, exc_info=True)
@@ -277,6 +297,7 @@ def main() -> None:
 
     # Auto-start inference server if configured
     try:
+        import vllm_mlx.dashboard.server_manager as _sm_mod
         from vllm_mlx.dashboard.server_manager import (
             AUTO_START_FLAG,
             load_config,
@@ -286,21 +307,26 @@ def main() -> None:
         if AUTO_START_FLAG.exists():
             AUTO_START_FLAG.unlink(missing_ok=True)
             _cfg = load_config()
-            if _cfg.get("model"):
-                print(f"[vllm-mlx] 🔄 Auto-starting inference server: {_cfg['model']}")
+            if _cfg.get("model") or _is_external_engine(_cfg.get("engine_id", "")):
+                print(f"[vllm-mlx] 🔄 Auto-starting inference server: {_cfg.get('model', '(external API)')}")
                 _time.sleep(0.5)
-                _ok, _msg = start_server(_cfg)
+                _ok, _msg = _start_or_mark_external(_cfg, start_server, _sm_mod)
                 if not _ok and _should_engine_fallback(_cfg, _msg):
-                    _cfg, _ok, _msg = _try_engine_fallback(_cfg, _msg, load_config, save_config, start_server)
+                    _cfg, _ok, _msg = _try_engine_fallback(_cfg, _msg, load_config, save_config, start_server, _sm_mod)
                 print(f"[vllm-mlx] {'✅' if _ok else '⚠️ '} {_msg}")
         else:
             _cfg = load_config()
-            if _cfg.get("startup_model_behavior", "auto") == "auto" and _cfg.get("model", "").strip():
-                print(f"[vllm-mlx] 🔄 startup_model_behavior=auto — starting: {_cfg['model']}")
+            _engine_id = _cfg.get("engine_id", "")
+            _is_external = _is_external_engine(_engine_id)
+            if _cfg.get("startup_model_behavior", "auto") == "auto" and (
+                _cfg.get("model", "").strip() or _is_external
+            ):
+                _label = _cfg.get("model", "(external API)") if not _is_external else "(external API)"
+                print(f"[vllm-mlx] 🔄 startup_model_behavior=auto — starting: {_label}")
                 _time.sleep(0.5)
-                _ok, _msg = start_server(_cfg)
+                _ok, _msg = _start_or_mark_external(_cfg, start_server, _sm_mod)
                 if not _ok and _should_engine_fallback(_cfg, _msg):
-                    _cfg, _ok, _msg = _try_engine_fallback(_cfg, _msg, load_config, save_config, start_server)
+                    _cfg, _ok, _msg = _try_engine_fallback(_cfg, _msg, load_config, save_config, start_server, _sm_mod)
                 print(f"[vllm-mlx] {'✅' if _ok else '⚠️ '} {_msg}")
     except Exception as _exc:
         print(f"[vllm-mlx] ⚠️  Auto-start check failed: {_exc}", file=sys.stderr)

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time as _time
 from typing import Any, ClassVar
 
 from .base import BaseEngine
@@ -38,6 +39,12 @@ _KNOWN_LMS_PATHS: list[str] = [
     "/usr/local/bin/lms",
     os.path.expanduser("~/.lmstudio/bin/lms"),
 ]
+
+# TTL cache for _is_daemon_running() — lms server status is a slow subprocess call.
+# Caching for 5 seconds avoids repeated calls from is_installed() + check_requirements()
+# firing in the same list_engines() pass.
+_daemon_cache: tuple[float, bool] | None = None
+_DAEMON_CACHE_TTL = 5.0  # seconds
 
 
 class LmStudioEngine(BaseEngine):
@@ -97,33 +104,45 @@ class LmStudioEngine(BaseEngine):
         launch_model = engine_settings.get("launch_model", "").strip()
 
         if launch_model:
-            # Load then start.  We use a shell-free two-step via a small wrapper
-            # so the mgmt server doesn't need shell=True.
-            # NOTE: lms load may take a while; the fail-fast check in start_server
-            # (3 s timeout) will NOT kill it — lms exits once loading finishes,
-            # then "lms server start" is a separate invocation.  We concatenate
-            # both commands via the system sh for simplicity.
+            # Load model then start the server.  We use a shell wrapper so both
+            # steps happen in one Popen call.  The final command uses `exec` so
+            # the shell is replaced by the lms process — the stored PID then
+            # points to lms itself, not to sh, making SIGTERM work correctly.
             import shutil
             sh = shutil.which("sh") or "/bin/sh"
-            return [sh, "-c", f"{lms_bin} load {_shell_quote(launch_model)} && {lms_bin} server start --port {port}"]
+            return [sh, "-c", f"{lms_bin} load {_shell_quote(launch_model)} && exec {lms_bin} server start --port {port}"]
 
         return [lms_bin, "server", "start", "--port", str(port)]
 
     def _is_daemon_running(self) -> bool:
-        """Return True if the LM Studio daemon is reachable via lms server status."""
+        """Return True if the LM Studio daemon is reachable via lms server status.
+
+        Result is cached for ``_DAEMON_CACHE_TTL`` seconds to avoid redundant
+        subprocess calls when both ``is_installed()`` and ``check_requirements()``
+        run in the same ``list_engines()`` pass.
+        """
+        global _daemon_cache
+        now = _time.monotonic()
+        if _daemon_cache is not None:
+            ts, result = _daemon_cache
+            if now - ts < _DAEMON_CACHE_TTL:
+                return result
         lms = self._find_lms()
         if not lms:
+            _daemon_cache = (now, False)
             return False
         try:
-            result = subprocess.run(
+            proc = subprocess.run(
                 [lms, "server", "status"],
                 capture_output=True,
                 text=True,
                 timeout=3,
             )
-            return result.returncode == 0
+            result = proc.returncode == 0
         except Exception:
-            return False
+            result = False
+        _daemon_cache = (now, result)
+        return result
 
     def is_installed(self) -> bool:
         """Return True only if lms binary exists AND the LM Studio daemon is running.

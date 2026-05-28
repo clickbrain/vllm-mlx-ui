@@ -1,6 +1,44 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.15 — 2026-05-27
+## v0.8.16 — 2026-05-28
+
+### Fixed
+- **External API engine auto-start spawned useless sleep process** — When `engine_id = "openai-compatible"`
+  was set and `startup_model_behavior=auto`, the CLI auto-start path called `start_server()` which spawns
+  `python -c "import time; time.sleep(999999)"`. This process was alive but useless — `_external_api_mode`
+  was never set, health checks failed, and the UI showed wrong status. Now `_start_or_mark_external()`
+  calls `sm.set_server_healthy()` directly for external API engines — no local process, correct status.
+- **Fallback priority wrong — experimental engines were chosen before stable ones** — `_BUILTINS` order
+  put `AppleFMEngine` and `Ds4M5Engine` ahead of `VllmMlxEngine` and `RapidMlxEngine`. Auto-fallback
+  iterates ENGINES in insertion order, so users with `apfel` installed could get `apple-fm` as the
+  fallback engine instead of the bundled, stable `vllm-mlx`. New order: `vllm-mlx`, `rapid-mlx`,
+  `ollama`, `lm-studio`, `llama-cpp`, `ds4-m5`, `openai-compatible`, `apple-fm`.
+- **`openai-compatible` engine selected as auto-fallback** — `ExternalApiEngine.is_installed()` always
+  returns `True` (it has no binary), so it could be picked as fallback for broken engines. It requires
+  manual API key + base URL configuration and cannot meaningfully auto-start. `_try_engine_fallback()`
+  now explicitly skips `openai-compatible` as a fallback candidate.
+- **`LmStudioEngine._is_daemon_running()` called twice per `list_engines()` pass** — both `is_installed()`
+  and `check_requirements()` ran `lms server status` (3s subprocess) in the same request. Added 5-second
+  TTL cache at module level so the subprocess fires at most once per 5 seconds.
+- **`LmStudioEngine.build_command()` sh PID mismatch** — When `launch_model` was set, the command used
+  `sh -c "lms load X && lms server start"`. The stored PID pointed to `sh`, not `lms`, so SIGTERM killed
+  the shell but left the `lms server start` process as an orphan. Fixed with `exec lms server start` as
+  the final command so the shell is replaced by the lms process.
+- **`AppleFMEngine.check_warnings()` always showed rate-limit advisory** — Even on machines without
+  `apfel` installed, the rate-limit warning was unconditionally appended. Now gated on `is_installed()`.
+- **`AppleFMEngine.check_requirements()` ran `brew tap` subprocess unnecessarily** — This added latency
+  and spawned a subprocess just to silently ignore the result (`if result.returncode != 0: pass`). Removed.
+- **`list_engines()` blocked on network calls every request** — `latest_version()` made PyPI/GitHub API
+  calls synchronously for every engine on every `/engines` request. Added a 5-minute TTL cache so
+  network calls happen at most once per engine per 5 minutes.
+- **`_is_external_api_engine()` read config file on every proxy request** — Called `sm.load_config()`
+  (disk I/O) on every `/v1/chat/completions` proxy. Added a 2-second TTL cache; cache is invalidated
+  immediately when `engine_id` changes via `POST /config`.
+
+### Added
+- **17 new tests** in `tests/test_engine_management_fixes.py` covering all 7 fixes above.
+
+
 
 ### Fixed
 - **LM Studio daemon check** — `LmStudioEngine.is_installed()` now verifies the LM Studio

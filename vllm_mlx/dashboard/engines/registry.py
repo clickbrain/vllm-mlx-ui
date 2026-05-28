@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time as _time
 import threading
 from typing import TYPE_CHECKING
 
@@ -41,15 +42,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ── Built-in engines (always present) ─────────────────────────────────────────
+# Order matters for auto-fallback: stable local engines first, specialised/remote last.
 _BUILTINS: list[BaseEngine] = [
-    AppleFMEngine(),
-    Ds4M5Engine(),
-    VllmMlxEngine(),
-    RapidMlxEngine(),
-    OllamaEngine(),
-    LmStudioEngine(),
-    LlamaCppEngine(),
-    ExternalApiEngine(),
+    VllmMlxEngine(),     # bundled Python-based engine — most stable, always first
+    RapidMlxEngine(),    # pip-based Apple Silicon engine
+    OllamaEngine(),      # popular desktop app, reliable
+    LmStudioEngine(),    # desktop GUI app
+    LlamaCppEngine(),    # llama.cpp CLI
+    Ds4M5Engine(),       # M5-optimised DeepSeek V4 Flash (best on M5+)
+    ExternalApiEngine(), # remote API proxy — requires user config, never auto-fallback
+    AppleFMEngine(),     # macOS 26+ only — put last to avoid premature fallback
 ]
 
 # ── Global registry state ─────────────────────────────────────────────────────
@@ -161,6 +163,31 @@ def get_engine(engine_id: str) -> BaseEngine:
         ) from None
 
 
+# ── latest_version() TTL cache ────────────────────────────────────────────────
+# latest_version() makes network calls (PyPI, GitHub API). Caching for 5 minutes
+# prevents multiple slow network calls per /engines request.
+_latest_version_cache: dict[str, tuple[float, str | None]] = {}
+_latest_version_cache_lock = threading.Lock()
+_LATEST_VERSION_TTL = 300.0  # 5 minutes
+
+
+def _cached_latest_version(engine: "BaseEngine") -> str | None:
+    now = _time.monotonic()
+    eid = engine.id
+    with _latest_version_cache_lock:
+        if eid in _latest_version_cache:
+            ts, version = _latest_version_cache[eid]
+            if now - ts < _LATEST_VERSION_TTL:
+                return version
+    # Fetch outside the lock so other threads aren't blocked by network I/O.
+    version = None
+    with contextlib.suppress(Exception):
+        version = engine.latest_version()
+    with _latest_version_cache_lock:
+        _latest_version_cache[eid] = (now, version)
+    return version
+
+
 def list_engines() -> list[dict]:
     """Return summary dicts for all registered engines (for the /engines endpoint)."""
     with _registry_lock:
@@ -176,10 +203,9 @@ def list_engines() -> list[dict]:
                 version = engine.get_version()
         except Exception as e:
             logger.warning("Engine probe failed for %s: %s", engine.id, e)
-        # Get latest version (may be None if network unavailable)
-        latest = None
-        with contextlib.suppress(Exception):
-            latest = engine.latest_version()
+        # Get latest version — use cached value to avoid blocking network calls
+        # on every /engines request (PyPI + GitHub lookups can be slow).
+        latest = _cached_latest_version(engine)
         req_errors: list[str] = []
         try:
             req_errors = engine.check_requirements()

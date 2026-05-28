@@ -362,6 +362,9 @@ def set_config(data: dict[str, Any], _: None = Depends(_check_auth)) -> dict:
     existing = load_config()
     merged = {**existing, **filtered}
     sm.save_config(merged)
+    # Invalidate the engine cache if engine_id changed.
+    if "engine_id" in filtered:
+        _invalidate_external_engine_cache()
     return {"ok": True}
 
 
@@ -1416,10 +1419,37 @@ def _fire_warmup() -> None:
         logger.debug("Warm-up request failed (non-critical)", exc_info=True)
 
 
+import time as _time_mod
+
+# Cache for _is_external_api_engine(): avoid reading config.json on every
+# proxy request (which is the hot path for /v1/chat/completions).
+_external_engine_cache: tuple[float, bool] | None = None
+_EXTERNAL_ENGINE_CACHE_TTL = 2.0  # seconds
+
+
 def _is_external_api_engine() -> bool:
-    """Return True when the current engine is the remote API proxy engine."""
+    """Return True when the current engine is the remote API proxy engine.
+
+    Result is cached for 2 seconds to avoid config file reads on every proxy
+    request — the engine_id rarely changes between requests.
+    """
+    global _external_engine_cache
+    import time as _t
+    now = _t.monotonic()
+    if _external_engine_cache is not None:
+        ts, result = _external_engine_cache
+        if now - ts < _EXTERNAL_ENGINE_CACHE_TTL:
+            return result
     cfg = sm.load_config()
-    return cfg.get("engine_id", "").strip() == "openai-compatible"
+    result = cfg.get("engine_id", "").strip() == "openai-compatible"
+    _external_engine_cache = (now, result)
+    return result
+
+
+def _invalidate_external_engine_cache() -> None:
+    """Invalidate the engine cache — call after engine_id changes in config."""
+    global _external_engine_cache
+    _external_engine_cache = None
 
 
 def _get_external_target(cfg: dict[str, Any]) -> str | None:
