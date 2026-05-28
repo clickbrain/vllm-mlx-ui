@@ -182,20 +182,49 @@ class LmStudioEngine(BaseEngine):
                 capture_output=True, text=True, timeout=5,
             )
             raw = (result.stdout or result.stderr).strip()
-            # Strip all ANSI/VT escape sequences — lms version outputs a
-            # colour banner using 256-colour codes like \x1b[38;5;166m.
-            # Use the comprehensive CSI pattern: ESC [ <params> <final-byte>
-            import re as _re
-            clean = _re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", raw)
-            # Match 3-part (1.2.3) or 2-part (0.3) version strings
-            m = _re.search(r"v?(\d+\.\d+(?:\.\d+)?[\w.-]*)", clean)
-            if m:
-                return m.group(1)
-            # No version number found — return None rather than returning an
-            # ASCII-art line as the "version" (the old fallback was unreliable).
-            return None
+            ver = self._parse_lms_version(raw)
+            if ver:
+                return ver
+            # Fallback: newer CLIs may use --version flag
+            result2 = subprocess.run(
+                [lms_bin, "--version"],
+                capture_output=True, text=True, timeout=5,
+            )
+            raw2 = (result2.stdout or result2.stderr).strip()
+            return self._parse_lms_version(raw2)
         except Exception:
             return None
+
+    @staticmethod
+    def _parse_lms_version(raw: str) -> str | None:
+        """Extract a version number from lms version output.
+
+        lms emits ANSI colours and may render an ASCII-art banner before or
+        around the version number.  We:
+          1. Strip all CSI (ESC [ …) escape sequences.
+          2. Split into lines and discard lines that are almost entirely
+             ASCII-art characters (/, \\, |, _, -, space).
+          3. Scan surviving lines for a semver-shaped token.
+        """
+        import re as _re
+
+        # Strip CSI / OSC / other common escape sequences
+        clean = _re.sub(r"\x1b[\[)(][0-?]*[ -/]*[@-~]?", "", raw)
+        clean = _re.sub(r"\x1b[PX^_].*?\x1b\\", "", clean)  # DCS/PM/APC
+        clean = _re.sub(r"\x1b[^\[\\]", "", clean)           # lone ESC sequences
+
+        for line in clean.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # Skip ASCII-art lines: ≥70 % of printable chars are art characters
+            art_chars = sum(1 for c in stripped if c in r"/\_|-* ")
+            if len(stripped) > 0 and art_chars / len(stripped) > 0.70:
+                continue
+            m = _re.search(r"v?(\d+\.\d+(?:\.\d+)?[\w.-]*)", stripped)
+            if m:
+                return m.group(1)
+        return None
 
     def config_schema(self) -> list[dict[str, Any]]:
         return [

@@ -2368,6 +2368,33 @@ watch(activeTab, (tab) => {
     </div>
 
   </div>
+
+  <!-- Floating selection bar — visible whenever history items are checked -->
+  <Teleport to="body">
+    <Transition name="sel-bar">
+      <div v-if="historySelected.size >= 1" class="selection-bar">
+        <span class="sel-count">{{ historySelected.size }} selected</span>
+        <div class="sel-actions">
+          <AppButton
+            v-if="historySelected.size >= 2"
+            variant="secondary"
+            size="sm"
+            @click="scrollToCompare"
+          >Compare</AppButton>
+          <AppButton
+            v-else-if="historySelected.size === 1"
+            variant="secondary"
+            size="sm"
+            @click="scrollToDetail"
+          >View details</AppButton>
+          <AppButton variant="danger" size="sm" @click="deleteSelectedRuns">
+            Delete {{ historySelected.size }}
+          </AppButton>
+          <button class="sel-clear icon-btn" @click="historySelected = new Set()" title="Clear selection">✕</button>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -3297,4 +3324,21 @@ th.sortable:not(.active) .sort-arrow::after { content: '▽'; opacity: .3; }
   cursor: default;
 }
 .row-error td { color: var(--tx-muted); font-style: italic; }
+
+/* ── Floating selection bar ──────────────────────────────────────────────── */
+.selection-bar {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px;
+  background: var(--bg-overlay, #1e1e24); border: 1px solid var(--bd-default);
+  border-radius: 999px; padding: 8px 16px; box-shadow: 0 4px 24px rgba(0,0,0,.45);
+  z-index: 200; white-space: nowrap;
+}
+.sel-count { font-size: 13px; font-weight: 600; color: var(--tx-primary); }
+.sel-actions { display: flex; align-items: center; gap: 8px; }
+.sel-clear { font-size: 13px; color: var(--tx-muted); padding: 2px 6px; background: none; border: none; cursor: pointer; }
+.sel-clear:hover { color: var(--tx-primary); }
+
+.sel-bar-enter-active, .sel-bar-leave-active { transition: opacity .18s, transform .18s; }
+.sel-bar-enter-from { opacity: 0; transform: translateX(-50%) translateY(16px); }
+.sel-bar-leave-to   { opacity: 0; transform: translateX(-50%) translateY(16px); }
 </style>

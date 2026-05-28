@@ -77,7 +77,18 @@ class AppleFMEngine(BaseEngine):
         return ["apfel", "serve", "--host", host, "--port", port]
 
     def is_installed(self) -> bool:
-        return shutil.which("apfel") is not None
+        # shutil.which() may miss Homebrew paths if the Python process PATH
+        # is stripped (e.g. when launched as a LaunchAgent at login).
+        if shutil.which("apfel") is not None:
+            return True
+        for candidate in (
+            "/opt/homebrew/bin/apfel",
+            "/usr/local/bin/apfel",
+            os.path.expanduser("~/.local/bin/apfel"),
+        ):
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return True
+        return False
 
     def get_version(self) -> str | None:
         try:

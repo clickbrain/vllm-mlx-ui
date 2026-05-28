@@ -273,8 +273,8 @@ const activeEngineInfo = computed(() =>
 const activeCaps = computed(() => new Set(activeEngineInfo.value?.capabilities ?? []))
 
 const heroModelName = computed(() =>
-  serverStore.modelId ??
   activeEngineInfo.value?.fixed_model_display ??
+  serverStore.modelId ??
   'Unknown model'
 )
 

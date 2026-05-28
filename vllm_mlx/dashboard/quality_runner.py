@@ -676,6 +676,7 @@ def _stream_completion(
     t_start = _time.monotonic()
     t_first: float | None = None
     chunks: list[str] = []
+    reasoning_chunks: list[str] = []
 
     with requests.post(
         f"{server_url}/v1/chat/completions",
@@ -710,15 +711,27 @@ def _stream_completion(
                 choices = obj.get("choices") or []
                 delta = choices[0].get("delta", {}) if choices else {}
                 content = delta.get("content") or ""
+                reasoning = delta.get("reasoning_content") or ""
                 if content:
                     if t_first is None:
                         t_first = _time.monotonic()
                     chunks.append(content)
+                # Always accumulate reasoning_content for fallback (thinking models
+                # that embed the answer in reasoning and produce empty content)
+                if reasoning:
+                    if t_first is None:
+                        t_first = _time.monotonic()
+                    reasoning_chunks.append(reasoning)
             except Exception:
                 logger.warning("Could not parse SSE chunk from inference server", exc_info=True)
 
     t_end = _time.monotonic()
     text = "".join(chunks)
+    # Fallback for thinking models that never emit content tokens: use the
+    # reasoning text (which already has <think> tags stripped by the server).
+    # Grade functions will find the answer in the last part of the reasoning.
+    if not text.strip() and reasoning_chunks:
+        text = "".join(reasoning_chunks)
     ttft_ms = (t_first - t_start) * 1000.0 if t_first is not None else None
     total_ms = (t_end - t_start) * 1000.0
     # Prefer server-reported completion_tokens; fall back to char-count estimate

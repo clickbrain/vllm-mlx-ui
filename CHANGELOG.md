@@ -1,5 +1,19 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.42 — 2026-05-29
+
+### Fixed
+
+- **Quality benchmark: all answers "?" for thinking models** — Models like Qwen3, gpt-oss-20b, and other chain-of-thought models send their actual answer inside `delta.reasoning_content` with an empty `delta.content`. Every grader returned "?" because `content` was blank. Fixed: `_stream_completion()` now accumulates `reasoning_content` chunks and falls back to using the full reasoning text as the answer when `content` is empty. Benchmarks now score correctly for all thinking models.
+
+- **LM Studio version shows ASCII art banner** — Newer `lms` CLI versions output a figlet/slant-font banner around the version. The dashboard was extracting raw output lines including the banner, showing garbage like `/ / / |/ / / __/ /___ _____/ (_)__ /` in the LM Studio card. Fixed: `get_version()` now strips ANSI escapes, filters out lines where ≥70% of characters are ASCII-art characters (`/\_|-* `), then applies the semver regex to clean lines only. Falls back to `lms --version` if `lms version` yields nothing.
+
+- **Apple FM shows "not installed" after Save & Restart or Start at Login** — `is_installed()` used only `shutil.which("apfel")` which relies on the process PATH. The management server process (started from Homebrew or as a LaunchAgent) often runs with a minimal PATH that excludes `/opt/homebrew/bin`. After a page refresh the engine appeared uninstalled. Fixed: `is_installed()` now also checks `/opt/homebrew/bin/apfel`, `/usr/local/bin/apfel`, and `~/.local/bin/apfel` as fallbacks.
+
+- **Serve page shows wrong model name for Apple FM engine** — When Apple Foundation Model engine was active, the hero model name showed the stale config `model_id` from the previous engine session (e.g. "Olmo-3-7B-Instruct-8bit") instead of "Apple On-Device LLM (~3B)". Fixed: `heroModelName` now prefers the engine's `fixed_model_display` over the raw config model ID for fixed-model engines.
+
+- **Benchmark history: floating delete bar not visible when scrolled** — The "Delete N selected" toolbar existed at the top of the history list but disappeared off-screen as users scrolled down to check items. Fixed: added a `<Teleport to="body">` floating action bar (fixed position, bottom-center) that appears whenever any history runs are selected, with Compare / View Details / Delete buttons and a clear (✕) button. Slides in with a smooth transition.
+
 ## v0.8.41 — 2026-05-28
 
 ### Added
