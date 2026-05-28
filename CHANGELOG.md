@@ -1,5 +1,55 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.22 — 2026-05-28
+
+### Fixed
+
+- **P0: All engines except `openai-compatible` silently failed to start (regression from v0.8.20)**
+  — The `install_method == "external"` guard added for apple-fm inadvertently caught ollama,
+  llama-cpp, ds4, and lm-studio (which have had `install_method = "external"` since day one).
+  Guard is now ID-based: only `"openai-compatible"` gets the no-op bypass. Also updated
+  `install_method` to `"brew"` in `ollama.py`, `llama_cpp.py`, and `ds4_m5.py` for correctness.
+
+- **P1: `/v1/{path}` catch-all proxy was buffered** — The passthrough route used
+  `.request()` which waited for the full response body before streaming, breaking SSE clients
+  and causing long delays on streaming completions routed through this path. Rewrote to use
+  `.stream()` with `StreamingResponse`.
+
+- **P1: Quality benchmark emitted timeout/ready log messages on every poll tick** — `_cb()`
+  was called inside the wait loop body rather than after it. Timeout and "ready" messages now
+  fire exactly once at the correct outcome.
+
+- **P2: Polling overlap in frontend** — `startPolling()` had no in-flight guard. On slow
+  connections, multiple overlapping `/poll` requests could queue up and arrive out of order.
+  Fixed with `_inFlight` boolean flag.
+
+- **P2: `restartTimer` interval never cleared in `SettingsView.vue`** — The engine restart
+  countdown `setInterval` was not cleaned up on component unmount, causing a memory leak.
+  Added `onUnmounted` cleanup.
+
+- **P2: `stop_server()` did not clear state file on unexpected exceptions** — If an error
+  occurred during the kill sequence, `_clear_server_state()` was never called, leaving a
+  stale PID file that would cause "server already running" errors on the next start.
+
+- **P2: `_quality_runs` dict accessed without holding `_quality_lock`** — The poll endpoint
+  `quality_benchmark_output` and `stop_quality_benchmark` read/mutated `_quality_runs` without
+  the lock. All three access sites now hold `_quality_lock`.
+
+- **P2: `_prune_quality_runs()` iterated/deleted `_quality_runs` without the lock** — Fixed
+  to hold `_quality_lock` during the prune sweep.
+
+### Performance
+
+- **Inference process orphan prevention** — `stop_server()` now calls `os.killpg(pid, SIGTERM)`
+  (kill whole process group) instead of `os.kill(pid, SIGTERM)`. Since `start_new_session=True`
+  makes the engine its own session leader, only `killpg` reliably kills MLX/Metal worker
+  subprocesses that hold GPU memory. Without this, orphaned workers degraded TTFT on the next
+  model load.
+
+- **Port release wait after stop** — After confirming process death, `stop_server()` now waits
+  up to 2 s for the listening port to be released before returning. Eliminates the spurious
+  "⚠️ Port already in use" error when restarting an engine immediately after stopping it.
+
 ## v0.8.21 — 2026-05-27
 
 ### Performance

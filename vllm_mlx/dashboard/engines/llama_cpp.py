@@ -47,7 +47,7 @@ class LlamaCppEngine(BaseEngine):
         "continuous_batching",
         "prefix_cache",
     })
-    install_method: ClassVar[str] = "external"
+    install_method: ClassVar[str] = "brew"
     is_builtin: ClassVar[bool] = True
     homepage_url: ClassVar[str] = "https://github.com/ggerganov/llama.cpp"
     release_url: ClassVar[str] = "https://github.com/ggerganov/llama.cpp/releases"

@@ -11,7 +11,7 @@
   next server restart depending on the setting type.
 -->
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useMachinesStore } from '@/stores/machines'
 import type { Machine } from '@/stores/machines'
 import { useServerStore } from '@/stores/server'
@@ -499,6 +499,13 @@ async function doRestart() {
     }
   }, 1000)
 }
+
+onUnmounted(() => {
+  if (restartTimer !== null) {
+    clearInterval(restartTimer)
+    restartTimer = null
+  }
+})
 </script>
 
 <template>

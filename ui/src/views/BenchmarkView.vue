@@ -1576,7 +1576,7 @@ watch(activeTab, (tab) => {
                       <span class="qsi-speed-val">{{ lastRunQuality.overall_speed.avg_tokens_per_sec }}</span>
                       <span class="qsi-speed-lbl">tok/s</span>
                     </span>
-                    <span v-if="lastRunQuality.overall_speed.avg_ttft_ms" class="qsi-speed-stat">
+                    <span v-if="lastRunQuality.overall_speed.avg_ttft_ms != null" class="qsi-speed-stat">
                       <span class="qsi-speed-val">{{ lastRunQuality.overall_speed.avg_ttft_ms }}</span>
                       <span class="qsi-speed-lbl">ms TTFT</span>
                     </span>
@@ -1611,7 +1611,7 @@ watch(activeTab, (tab) => {
                 <div class="sri-val mono">{{ (lastRunSpeed as any).avg_tps?.toFixed(1) ?? '—' }}</div>
                 <div class="sri-label">avg t/s</div>
               </div>
-              <div v-if="(lastRunSpeed as any).avg_ttft_ms" class="sri-stat">
+              <div v-if="(lastRunSpeed as any).avg_ttft_ms != null" class="sri-stat">
                 <div class="sri-val mono">{{ Math.round((lastRunSpeed as any).avg_ttft_ms) }}ms</div>
                 <div class="sri-label">avg TTFT</div>
               </div>
@@ -1768,7 +1768,7 @@ watch(activeTab, (tab) => {
                     <span v-if="hasStaleMetrics(run)" class="stale-warn">⚠</span>
                   </span>
                 </td>
-                <td class="num mono">{{ run.avg_ttft_ms ? Math.round(run.avg_ttft_ms) + 'ms' : '—' }}</td>
+                <td class="num mono">{{ run.avg_ttft_ms != null ? Math.round(run.avg_ttft_ms) + "ms" : "—" }}</td>
                 <td class="num mono">{{ run.max_tokens ?? '—' }}</td>
                 <td class="num mono">{{ run.enable_thinking != null ? (run.enable_thinking ? '✓' : '✗') : '—' }}</td>
                 <td class="num mono">
@@ -1863,7 +1863,7 @@ watch(activeTab, (tab) => {
                 <span v-if="hasStaleMetrics(selectedRun)" class="stale-warn" title="tok/s may be inaccurate — recorded before v0.3.80 fix">⚠ pre-fix</span>
               </span>
             </div>
-            <div class="detail-kv" v-if="selectedRun.avg_ttft_ms">
+            <div class="detail-kv" v-if="selectedRun.avg_ttft_ms != null">
               <span class="detail-k">Avg TTFT</span>
               <span class="detail-v mono">{{ Math.round(selectedRun.avg_ttft_ms) }}ms</span>
             </div>

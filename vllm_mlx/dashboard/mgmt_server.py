@@ -1892,24 +1892,49 @@ async def proxy_v1_passthrough(path: str, request: Request) -> _FRsp:
 
     body = await request.body()
 
+    # Streaming pass-through: avoids buffering entire response body (critical for SSE)
+    from fastapi.responses import StreamingResponse as _SRsp_pt
+
+    _pt_status = [200]
+    _pt_headers = [{}]
+    _pt_ct = ["application/octet-stream"]
+
+    async def _passthrough():
+        try:
+            async with _get_httpx_client().stream(
+                request.method,
+                f"{target}/v1/{path}",
+                timeout=120,
+                headers=headers,
+                content=body if body else None,
+                params=dict(request.query_params),
+            ) as resp:
+                excluded = {"transfer-encoding", "connection", "keep-alive", "upgrade",
+                            "proxy-authenticate", "proxy-authorization", "te", "trailers"}
+                _pt_status[0] = resp.status_code
+                _pt_headers[0] = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
+                _pt_ct[0] = resp.headers.get("content-type", "application/octet-stream")
+                async for chunk in resp.aiter_bytes():
+                    yield chunk
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Inference server unreachable: {exc}") from exc
+
+    gen = _passthrough()
     try:
-        resp = await _get_httpx_client().request(
-            request.method, f"{target}/v1/{path}",
-            timeout=120, headers=headers,
-            content=body if body else None,
-            params=dict(request.query_params),
-        )
-        # Filter out hop-by-hop headers that must not be forwarded
-        excluded = {"transfer-encoding", "connection", "keep-alive", "upgrade", "proxy-authenticate", "proxy-authorization", "te", "trailers"}
-        fwd_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
-        return _FRsp(
-            content=resp.content,
-            status_code=resp.status_code,
-            headers=fwd_headers,
-            media_type=resp.headers.get("content-type", "application/json"),
-        )
+        first_chunk = await gen.__anext__()
+    except StopAsyncIteration:
+        first_chunk = b""
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Inference server unreachable: {exc}") from exc
+
+    async def _chain():
+        yield first_chunk
+        async for c in gen:
+            yield c
+
+    return _SRsp_pt(_chain(), status_code=_pt_status[0], headers=_pt_headers[0], media_type=_pt_ct[0])
 
 
 # ── Quality benchmarks ────────────────────────────────────────────────────────
@@ -1921,9 +1946,10 @@ _quality_lock = threading.Lock()
 def _prune_quality_runs() -> None:
     """Remove completed quality benchmark runs older than 30 minutes to prevent unbounded dict growth."""
     cutoff = time.time() - 1800
-    stale = [k for k, v in _quality_runs.items() if not v.get("running") and v.get("ts", 0) < cutoff]
-    for k in stale:
-        _quality_runs.pop(k, None)
+    with _quality_lock:
+        stale = [k for k, v in _quality_runs.items() if not v.get("running") and v.get("ts", 0) < cutoff]
+        for k in stale:
+            _quality_runs.pop(k, None)
 
 
 @app.post("/quality-benchmark/run")
@@ -2000,9 +2026,10 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
                                 break
                         except Exception:
                             logger.debug("Waiting for model server at %s (not ready yet)", health_url)
+                    if ready:
+                        _cb(f"[✓ {target_model} ready]\n")
+                    else:
                         _cb(f"[✗ Timeout waiting for {target_model} to start]\n")
-                        continue
-                    _cb(f"[✓ {target_model} ready]\n")
 
                 if len(targets) > 1:
                     _cb(f"\n{'─' * 40}\nModel: {target_model or 'current model'}\n{'─' * 40}\n")
@@ -2053,28 +2080,31 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
 @app.get("/quality-benchmark/output/{run_id}")
 def quality_benchmark_output(run_id: str, since: int = 0, _: None = Depends(_check_auth)) -> dict:
     """Return output lines since `since` index, plus running status and results when done."""
-    if run_id not in _quality_runs:
-        raise HTTPException(status_code=404, detail="Unknown run_id")
-    run = _quality_runs[run_id]
-    lines = run["lines"][since:]
-    return {
-        "running": run["running"],
-        "lines": lines,
-        "results": run.get("results"),
-        "error": run.get("error"),
-        "total_lines": len(run["lines"]),
-    }
+    with _quality_lock:
+        if run_id not in _quality_runs:
+            raise HTTPException(status_code=404, detail="Unknown run_id")
+        run = _quality_runs[run_id]
+        lines = run["lines"][since:]
+        return {
+            "running": run["running"],
+            "lines": lines,
+            "results": run.get("results"),
+            "error": run.get("error"),
+            "total_lines": len(run["lines"]),
+        }
 
 
 @app.post("/quality-benchmark/stop/{run_id}")
 def stop_quality_benchmark(run_id: str, _: None = Depends(_check_auth)) -> dict:
     """Set the stop flag on a running quality benchmark."""
-    if run_id not in _quality_runs:
-        raise HTTPException(status_code=404, detail="Unknown run_id")
-    stop_event = _quality_runs[run_id].get("stop_event")
+    with _quality_lock:
+        if run_id not in _quality_runs:
+            raise HTTPException(status_code=404, detail="Unknown run_id")
+        stop_event = _quality_runs[run_id].get("stop_event")
+        run_flag_ref = _quality_runs[run_id]
     if stop_event:
         stop_event.set()
-    _quality_runs[run_id]["running"] = False
+    run_flag_ref["running"] = False
     return {"ok": True}
 
 

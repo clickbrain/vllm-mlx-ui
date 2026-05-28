@@ -965,17 +965,12 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
     # message instead of letting FileNotFoundError escape to the ASGI layer.
     engine_id_for_check = config.get("engine_id", "vllm-mlx")
 
-    # External API engines (openai-compatible) have no local process.
-    # Return success immediately — the proxy layer handles routing.
-    # NOTE: only ExternalApiEngine uses install_method=="external".  Other
-    # brew-installed engines (apfel, ollama, llama-cpp, ds4) use "brew" and
-    # DO launch a local process — do not add them here.
-    try:
-        _ext_engine = get_engine(engine_id_for_check)
-        if getattr(_ext_engine, "install_method", "") == "external":
-            return True, f"External API engine '{engine_id_for_check}' ready — no local process to start."
-    except (KeyError, Exception):
-        pass
+    # "openai-compatible" is the only engine with no local process to start.
+    # The proxy layer routes requests directly to the configured remote URL.
+    # All other engines (ollama, llama-cpp, ds4, lmstudio, apple-fm, etc.)
+    # DO launch a local process via build_command() and must not be short-circuited here.
+    if engine_id_for_check == "openai-compatible":
+        return True, "External API engine 'openai-compatible' ready — no local process to start."
 
     try:
         _chk_engine = get_engine(engine_id_for_check)
@@ -1085,6 +1080,7 @@ def stop_server() -> tuple[bool, str]:
         _clear_server_state()
         return True, "Server stopped."
     except Exception as e:
+        _clear_server_state()  # clear stale state even on unexpected error
         return False, f"Error stopping server: {e}"
     finally:
         with _server_state_lock:

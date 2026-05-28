@@ -312,7 +312,7 @@ class Ds4M5Engine(BaseEngine):
         "mtp",
         "prefix_cache",
     })
-    install_method: ClassVar[str] = "external"
+    install_method: ClassVar[str] = "brew"
     is_builtin: ClassVar[bool] = True
     homepage_url: ClassVar[str] = "https://github.com/antirez/ds4"
     release_url: ClassVar[str] = "https://github.com/antirez/ds4/releases"

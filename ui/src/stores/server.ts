@@ -330,22 +330,27 @@ export const useServerStore = defineStore('server', () => {
    * Returns a cleanup function to stop polling entirely.
    */
   function startPolling(intervalMs = 3000): () => void {
-    let currentInterval: ReturnType<typeof setInterval> = setInterval(() => {
-      fetchAllBatched()
-    }, intervalMs)
+    let _inFlight = false
+
+    async function _safeFetch() {
+      if (_inFlight) return
+      _inFlight = true
+      try { await fetchAllBatched() }
+      finally { _inFlight = false }
+    }
+
+    let currentInterval: ReturnType<typeof setInterval> = setInterval(_safeFetch, intervalMs)
 
     // Initial fetch
-    fetchAllBatched()
+    _safeFetch()
 
     const onVisibilityChange = () => {
       if (document.hidden) {
         clearInterval(currentInterval)
       } else {
         // Resume: immediate fetch then restart interval
-        fetchAllBatched()
-        currentInterval = setInterval(() => {
-          fetchAllBatched()
-        }, intervalMs)
+        _safeFetch()
+        currentInterval = setInterval(_safeFetch, intervalMs)
       }
     }
     document.addEventListener('visibilitychange', onVisibilityChange)

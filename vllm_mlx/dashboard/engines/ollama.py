@@ -54,7 +54,7 @@ class OllamaEngine(BaseEngine):
         "embedding",
         "prefix_cache",
     })
-    install_method: ClassVar[str] = "external"
+    install_method: ClassVar[str] = "brew"
     is_builtin: ClassVar[bool] = True
     homepage_url: ClassVar[str] = "https://github.com/ollama/ollama"
     release_url: ClassVar[str] = "https://github.com/ollama/ollama/releases"
