@@ -1,5 +1,22 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.30 — 2026-05-28
+
+### Fixed
+
+- **Reverted v0.8.29 cap on `max_request_tokens`** — v0.8.29 capped `max_request_tokens`
+  at 32,768 and rejected any client request above that with HTTP 400.  This was wrong:
+  clients that explicitly send a large `max_tokens` should get what they asked for.  The
+  correct behaviour is to honor client-specified values while only protecting the case
+  where no `max_tokens` is sent at all (fixed in v0.8.28 via the 16,384 default).
+  `max_request_tokens` is restored to the model's context window (131,072 for 131K
+  context models) so clients can request any output length the model supports.
+
+- **Restored `max_request_tokens` preset from model context window** — When a model is
+  selected, `max_request_tokens` is correctly set to the model's context window so the
+  engine knows its ceiling.  `max_tokens` (the default generation length used when the
+  client sends none) remains at 16,384 and is never overwritten by model selection.
+
 ## v0.8.29 — 2026-05-28
 
 ### Fixed
