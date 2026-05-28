@@ -1,5 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.45 — 2026-05-28
+
+### Fixed
+
+- **In-app upgrade silently aborts on Apple Silicon** — The upgrade command included `pip install --upgrade ... vllm` where `vllm` is the Linux/NVIDIA GPU inference engine (no macOS ARM wheel). On Apple Silicon this pip step could hang trying to build from source, eventually hitting the 300-second timeout. When the timeout fires, the upgrade thread returns early — the `RELAUNCH_FLAG` is never written and the app never restarts. Fixed: removed `vllm` from the pip install step in both the Homebrew and pip upgrade paths.
+
+- **Homebrew upgrade ran unnecessary pip step** — After `brew upgrade vllm-mlx-ui` the command also ran `pip install --upgrade mlx-lm huggingface-hub` inside the Homebrew cellar venv. `brew upgrade` already pins and installs all formula dependencies; the extra pip step could override managed versions with incompatible ones. Fixed: Homebrew upgrade path now runs only `git pull && brew upgrade vllm-mlx-ui`.
+
 ## v0.8.44 — 2026-05-28
 
 ### Fixed

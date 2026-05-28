@@ -838,17 +838,19 @@ def upgrade_command() -> list[str]:
                     tap_dir = candidate
                     break
         git_pull = f"cd {tap_dir} && git fetch origin && git checkout main && git pull origin main"
-        base = (
-            f"{git_pull} && brew upgrade vllm-mlx-ui"
-            f" && {pip_cmd} install --upgrade mlx-lm huggingface-hub vllm"
-        )
+        # brew upgrade reinstalls the formula including all pip deps — no
+        # separate pip step needed (and running pip in the cellar venv risks
+        # overriding managed deps with incompatible versions).
+        base = f"{git_pull} && brew upgrade vllm-mlx-ui"
         return ["sh", "-c", base]
     # pip install path — upgrade engine dependencies unconditionally.
     # The UI itself is not on PyPI; pip-installed users run from source and
     # must `git pull` manually to upgrade the app.
     # Engine-specific upgrades (vllm-mlx, ollama, ds4, etc.) are handled
     # separately by engine_upgrade_commands() — one source of truth per engine.
-    return ["sh", "-c", f"{pip_cmd} install --upgrade mlx-lm huggingface-hub vllm"]
+    # NOTE: do NOT include "vllm" here — that is the Linux/NVIDIA GPU inference
+    # engine (no macOS ARM wheel) and will fail or hang on Apple Silicon.
+    return ["sh", "-c", f"{pip_cmd} install --upgrade mlx-lm huggingface-hub"]
 
 
 def relaunch() -> None:
