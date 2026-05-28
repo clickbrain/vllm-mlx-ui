@@ -25,8 +25,10 @@ class TestIdentity:
     def test_name_mentions_apple(self, engine):
         assert "Apple" in engine.name or "apple" in engine.name.lower()
 
-    def test_install_method_is_external(self, engine):
-        assert engine.install_method == "external"
+    def test_install_method_is_brew(self, engine):
+        # apple-fm runs a real local process (apfel serve) — install_method must
+        # be "brew" so start_server() actually spawns the process.
+        assert engine.install_method == "brew"
 
     def test_capabilities_include_tool_calls(self, engine):
         assert "tool_calls" in engine.capabilities

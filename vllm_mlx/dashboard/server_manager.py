@@ -95,6 +95,15 @@ def _force_ipv4_url(url: str) -> str:
 _resolved_urls: dict[str, str] = {}  # cache: original_url → ipv4_url
 _resolved_urls_lock = threading.Lock()
 
+# Short TTL cache for load_config() in local (non-Streamlit) mode.
+# The /poll endpoint fires every 3 s; without this cache every poll read the
+# config file from disk.  save_config() resets _local_cfg_ts to force a
+# re-read on the next call.
+_local_cfg_cache: dict[str, Any] | None = None
+_local_cfg_ts: float = 0.0
+_local_cfg_lock = threading.Lock()
+_LOCAL_CFG_TTL: float = 1.5  # seconds — short enough that config changes propagate quickly
+
 
 def _mgmt_url(base: str) -> str:
     """Return an IPv4-resolved version of the mgmt base URL (cached)."""
@@ -344,12 +353,23 @@ def load_config() -> dict[str, Any]:
     address used to reach the remote machine is never overwritten.
 
     A 10-second session-state cache prevents repeated HTTP calls on fast Streamlit
-    reruns (fragment auto-refresh fires every 5 s).
+    reruns (fragment auto-refresh fires every 5 s).  A 1.5-second in-process cache
+    covers local mode (mgmt_server /poll fires every 3 s and calls load_config).
 
     Returns:
         Merged config dict with all DEFAULT_CONFIG keys guaranteed present.
     """
+    global _local_cfg_cache, _local_cfg_ts
     _ensure_state_dir()
+
+    # Fast path: in non-Streamlit context (mgmt_server uvicorn) return the
+    # in-process cached config to avoid a disk read on every /poll cycle.
+    # save_config() resets _local_cfg_ts to 0.0 to force a re-read.
+    if not _in_streamlit():
+        with _local_cfg_lock:
+            if _local_cfg_cache is not None and time.monotonic() - _local_cfg_ts < _LOCAL_CFG_TTL:
+                return _local_cfg_cache
+
     local: dict[str, Any] = DEFAULT_CONFIG.copy()
     if CONFIG_FILE.exists():
         try:
@@ -401,6 +421,12 @@ def load_config() -> dict[str, Any]:
                 return result
         except Exception:
             logger.warning("Operation failed", exc_info=True)  # Fall back to local config silently
+
+    # Store in in-process cache for non-Streamlit context.
+    if not _in_streamlit():
+        with _local_cfg_lock:
+            _local_cfg_cache = local
+            _local_cfg_ts = time.monotonic()
     return local
 
 
@@ -440,7 +466,10 @@ def save_config(config: dict[str, Any]) -> None:
             logger.warning("Operation failed", exc_info=True)
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
-    # Invalidate the config cache so the next load_config() fetches fresh data.
+    # Invalidate all config caches so the next load_config() fetches fresh data.
+    global _local_cfg_ts
+    with _local_cfg_lock:
+        _local_cfg_ts = 0.0  # force re-read on next load_config() call
     if _in_streamlit():
         try:
             import streamlit as _st

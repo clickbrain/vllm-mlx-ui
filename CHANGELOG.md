@@ -1,5 +1,29 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.21 — 2026-05-27
+
+### Performance
+
+- **`load_config()` disk I/O on every `/poll` call eliminated** — Added a 1.5-second
+  in-process TTL cache for local mode config reads. The `/poll` endpoint fires every 3 s;
+  without this cache it read `server_config.json` from disk on every cycle.
+  `save_config()` resets the cache timestamp to ensure config changes propagate within
+  1.5 s. Remote/Streamlit mode is unaffected — it uses the existing 10 s session_state cache.
+
+### Fixed
+
+- **`model_manager._mgmt_base()` skipped IPv4 URL cache** — The duplicate helper in
+  `model_manager.py` called `_force_ipv4_url()` directly instead of delegating to
+  `server_manager._mgmt_url()` (which caches the DNS result). On `.local` mDNS hostnames
+  this caused a full DNS lookup on every model operation. Simplified both `_mgmt_base()`
+  and `_mgmt_headers()` in `model_manager.py` to delegate to the server_manager equivalents.
+
+### Tests
+
+- Fixed `test_apple_fm_engine.py::TestIdentity::test_install_method_is_external` — this
+  test was asserting the old buggy value (`"external"`); updated to assert `"brew"` which
+  is the correct value required for `apfel serve` to actually launch.
+
 ## v0.8.20 — 2026-05-30
 
 ### Fixed

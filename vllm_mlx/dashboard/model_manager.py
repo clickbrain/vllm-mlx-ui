@@ -83,42 +83,18 @@ _BITS_PER_QUANT: dict[str, float] = {
 }
 
 
-# Duplicated from server_manager to avoid circular imports.
-# Both versions check Streamlit context + session_state to route model
-# operations to the remote mgmt API when in remote mode.
-# IMPORTANT: if the logic changes in server_manager._mgmt_base(), update here too.
+# Delegates to server_manager to avoid code duplication and to get IPv4 URL
+# caching for .local mDNS hostnames.  The lazy import breaks the circular
+# dependency (model_manager ← server_manager would otherwise be circular).
 def _mgmt_base() -> str | None:
-    """Return the management API base URL if remote mode is active.
-
-    Returns None when not in an active Streamlit browser session (prevents
-    the mgmt API server itself from recursively calling itself).
-    Returns None when the UI session has the connection toggle set to "local".
-    """
+    """Return the management API base URL if remote mode is active."""
     from . import server_manager as sm
-
-    if not sm._in_streamlit():
-        return None
-    try:
-        import streamlit as _st
-
-        if _st.session_state.get("connection_mode", "local") == "local":
-            return None
-    except Exception as e:
-        logger.warning("Operation failed: %s", e, exc_info=True)
-        return None
-    cfg = sm._load_local_config()
-    url = cfg.get("remote_mgmt_url", "").strip()
-    if not url:
-        return None
-    return sm._force_ipv4_url(url.rstrip("/"))
+    return sm._mgmt_base()
 
 
 def _mgmt_headers() -> dict[str, str]:
     from . import server_manager as sm
-
-    cfg = sm._load_local_config()
-    key = cfg.get("mgmt_api_key", "").strip()
-    return {"X-Api-Key": key} if key else {}
+    return sm._mgmt_headers()
 
 
 def search_mlx_models(query: str = "", limit: int = 50) -> list[dict[str, Any]]:
