@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.33 — 2026-05-28
+
+### Fixed
+
+- **Apple Foundation Model install fails** — `install_command()` used
+  `brew install Arthur-Ficial/apfel/apfel` which requires a tap repo named
+  `homebrew-apfel` that does not exist. The correct tap is
+  `Arthur-Ficial/tap` (`homebrew-tap`). Fixed to
+  `brew install Arthur-Ficial/tap/apfel`.
+
 ## v0.8.32 — 2026-05-28
 
 ### Fixed

@@ -10,7 +10,7 @@ Requirements:
   - macOS 26.0+
   - Apple Silicon (M1+)
   - Apple Intelligence enabled in System Settings
-  - ``brew install apfel`` (community wrapper: github.com/Arthur-Ficial/apfel)
+  - ``brew install Arthur-Ficial/tap/apfel`` (community wrapper: github.com/Arthur-Ficial/apfel)
 
 Capabilities:
   - Single ~3B parameter on-device LLM (no model selection)
@@ -52,7 +52,7 @@ class AppleFMEngine(BaseEngine):
         "``apfel`` tool. Requires macOS\u00a026, Apple\u00a0Silicon, and "
         "Apple\u00a0Intelligence enabled. "
         "Single fixed model (Apple\u2019s own) \u2014 no model selection. "
-        "Install with: brew install Arthur-Ficial/apfel/apfel"
+        "Install with: brew install Arthur-Ficial/tap/apfel"
     )
     capabilities: ClassVar[frozenset[str]] = frozenset({
         "tool_calls",
@@ -107,7 +107,7 @@ class AppleFMEngine(BaseEngine):
         return ["brew", "upgrade", "apfel"]
 
     def install_command(self) -> list[str]:
-        return ["brew", "install", "Arthur-Ficial/apfel/apfel"]
+        return ["brew", "install", "Arthur-Ficial/tap/apfel"]
 
     def uninstall_command(self) -> list[str]:
         if shutil.which("apfel"):
