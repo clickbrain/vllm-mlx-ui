@@ -15,6 +15,7 @@ local dashboard uses.
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
 import re
 import threading
@@ -74,6 +75,7 @@ def _get_live_metrics() -> dict[str, Any]:
     window = [r for r in recent if r["ts"] > cutoff]
 
     ttfts = [r["ttft_ms"] for r in window if r["ttft_ms"] is not None]
+    ttfts_sorted = sorted(ttfts)
 
     tps_vals: list[float] = []
     for r in window:
@@ -81,28 +83,41 @@ def _get_live_metrics() -> dict[str, Any]:
         c = r["completion_tokens"]
         if d > 0 and c > 0:
             tps_vals.append(c / d)
+    tps_sorted = sorted(tps_vals)
 
     return {
-        "ttft_ms_avg": round(sum(ttfts) / len(ttfts), 1) if ttfts else None,
-        "ttft_ms_p50": round(sorted(ttfts)[len(ttfts) // 2], 1) if ttfts else None,
-        "tps_avg": round(sum(tps_vals) / len(tps_vals), 2) if tps_vals else None,
-        "tps_p50": round(sorted(tps_vals)[len(tps_vals) // 2], 2) if tps_vals else None,
+        "ttft_ms_avg": round(sum(ttfts_sorted) / len(ttfts_sorted), 1) if ttfts_sorted else None,
+        "ttft_ms_p50": round(ttfts_sorted[len(ttfts_sorted) // 2], 1) if ttfts_sorted else None,
+        "tps_avg": round(sum(tps_sorted) / len(tps_sorted), 2) if tps_sorted else None,
+        "tps_p50": round(tps_sorted[len(tps_sorted) // 2], 2) if tps_sorted else None,
         "requests_window": len(window),
         "requests_total": len(recent),
         "ttft_ms_p95": (
-            round(sorted(ttfts)[int(len(ttfts) * 0.95)], 1) if len(ttfts) >= 20 else None
+            round(ttfts_sorted[int(len(ttfts_sorted) * 0.95)], 1) if len(ttfts_sorted) >= 20 else None
         ),
     }
 
 
 _httpx_client: _httpx.AsyncClient | None = None
+_warmup_http_client: _httpx.Client | None = None
 
 
 def _get_httpx_client() -> _httpx.AsyncClient:
     global _httpx_client
     if _httpx_client is None:
-        _httpx_client = _httpx.AsyncClient()
+        _httpx_client = _httpx.AsyncClient(
+            limits=_httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            timeout=_httpx.Timeout(300.0, connect=10.0),
+        )
     return _httpx_client
+
+
+def _get_warmup_client() -> _httpx.Client:
+    """Return a long-lived sync httpx.Client for warm-up requests."""
+    global _warmup_http_client
+    if _warmup_http_client is None:
+        _warmup_http_client = _httpx.Client(timeout=30.0)
+    return _warmup_http_client
 
 app = FastAPI(
     title="vllm-mlx Management API",
@@ -851,7 +866,21 @@ def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
     if not ok:
         raise HTTPException(status_code=500, detail=msg)
 
-    _fire_warmup()
+    # Schedule warmup in a background thread — start_server() is non-blocking
+    # so the server is not healthy yet.  The thread polls until healthy, then
+    # fires the warm-up request.
+    import threading as _threading
+
+    def _deferred_warmup() -> None:
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            if sm.get_server_status().get("healthy"):
+                _fire_warmup()
+                return
+            time.sleep(2)
+        logger.debug("Deferred warmup: server did not become healthy within 120 s")
+
+    _threading.Thread(target=_deferred_warmup, daemon=True, name="deferred-warmup").start()
 
     return {"ok": True, "model": model_id, "restarted": True}
 
@@ -1405,16 +1434,15 @@ def _fire_warmup() -> None:
         host = cfg.get("host", "127.0.0.1")
         if not sm.get_server_status().get("healthy"):
             return
-        with _httpx.Client(timeout=30.0) as client:
-            client.post(
-                f"http://{host}:{port}/v1/chat/completions",
-                json={
-                    "model": cfg.get("model", ""),
-                    "messages": [{"role": "user", "content": "hi"}],
-                    "max_tokens": 1,
-                    "stream": False,
-                },
-            )
+        _get_warmup_client().post(
+            f"http://{host}:{port}/v1/chat/completions",
+            json={
+                "model": cfg.get("model", ""),
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 1,
+                "stream": False,
+            },
+        )
     except Exception:
         logger.debug("Warm-up request failed (non-critical)", exc_info=True)
 
@@ -1471,13 +1499,19 @@ def _get_external_models(cfg: dict[str, Any]) -> list[str]:
     return [m.strip() for m in raw.split(",") if m.strip()] if raw else []
 
 
-def _needs_hot_swap(requested_model: str) -> bool:
+def _needs_hot_swap(requested_model: str, cfg: dict[str, Any] | None = None) -> bool:
     """Return True if requested_model differs from the currently loaded model
     and is available in the local cache or (for external API) in the enabled
-    models list.  Does NOT acquire _swap_lock."""
+    models list.  Does NOT acquire _swap_lock.
+
+    Args:
+        requested_model: The model ID requested by the client.
+        cfg: Optional pre-loaded config dict. If None, loaded from disk.
+    """
     if not requested_model:
         return False
-    cfg = sm.load_config()
+    if cfg is None:
+        cfg = sm.load_config()
     if cfg.get("model", "").strip() == requested_model:
         return False
     # External API: check against enabled models list
@@ -1492,12 +1526,11 @@ def _needs_hot_swap(requested_model: str) -> bool:
 
 def _sse_delta(content: str) -> str:
     """Format a single assistant content delta as an SSE data line."""
-    import json as _j
     payload = {
         "object": "chat.completion.chunk",
         "choices": [{"index": 0, "delta": {"role": "assistant", "content": content}, "finish_reason": None}],
     }
-    return f"data: {_j.dumps(payload)}\n\n"
+    return f"data: {_json.dumps(payload)}\n\n"
 
 
 @app.post("/v1/chat/completions")
@@ -1506,22 +1539,19 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
     Proxy for /v1/chat/completions.
 
     Auto model-switch behaviour (when auto_model_switch is enabled):
-      • stream:true  — immediately opens SSE, sends a "switching model" notification
-                       then streams the real reply. Client gets live feedback.
+      • stream:true  — immediately opens SSE with heartbeats during the swap,
+                       then streams the real reply.
       • stream:false — waits for the swap to complete (up to 120 s), then returns
-                       a plain JSON response. No notification is possible since the
-                       client is waiting for a single response body.
+                       a plain JSON response.
 
     For requests that do NOT require a model switch the proxy passes through
     verbatim, respecting the client's stream preference.
     """
     requested_model = request.get("model", "").strip()
-    cfg_check = sm.load_config()
-    auto_switch = cfg_check.get("auto_model_switch", False)
-    needs_switch = bool(requested_model and auto_switch and _needs_hot_swap(requested_model))
-    client_wants_stream = bool(request.get("stream"))
-
     cfg = sm.load_config()
+    auto_switch = cfg.get("auto_model_switch", False)
+    needs_switch = bool(requested_model and auto_switch and _needs_hot_swap(requested_model, cfg))
+    client_wants_stream = bool(request.get("stream"))
 
     # External API engine: route to configured remote URL
     if _is_external_api_engine():
@@ -1563,11 +1593,10 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
             from fastapi.responses import StreamingResponse
 
             async def _switch_and_stream():
-                notice = (
-                    f"⏳ Switching model to **{requested_model}** — "
-                    "please wait while it loads…"
-                )
-                yield _sse_delta(notice)
+                # Send a keep-alive SSE comment immediately so the connection
+                # doesn't stall while the model loads.  Using a comment (": ...")
+                # keeps the stream open without injecting text into the chat reply.
+                yield f": switching-to {requested_model}\n\n"
 
                 swap_done = asyncio.Event()
                 swap_error: list[str] = []
@@ -1589,11 +1618,9 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
                         yield ": heartbeat\n\n"
 
                 if swap_error:
-                    yield _sse_delta(f"\n\n❌ Model switch failed: {swap_error[0]}")
+                    yield _sse_delta(f"❌ Model switch failed: {swap_error[0]}")
                     yield "data: [DONE]\n\n"
                     return
-
-                yield _sse_delta("\n\n")
 
                 cfg2 = sm.load_config()
                 target2 = sm.get_server_url(cfg2)
@@ -1615,20 +1642,19 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
                             if '"usage"' in decoded and '"completion_tokens"' in decoded:
                                 for line in decoded.split("\n"):
                                     if line.startswith("data: ") and line != "data: [DONE]":
-                                        import json
                                         try:
-                                            payload = json.loads(line[6:])
+                                            payload = _json.loads(line[6:])
                                             usage = payload.get("usage") or {}
                                             completion_tokens = usage.get("completion_tokens", 0)
                                             model = payload.get("model", model)
-                                        except json.JSONDecodeError:
+                                        except _json.JSONDecodeError:
                                             pass
                             yield chunk
                     duration = time.time() - start
                     ttft = (first_byte - start) if first_byte else None
                     _record_request(start, ttft, duration, completion_tokens, model)
                 except Exception as exc:
-                    yield _sse_delta(f"\n\n❌ Request failed after model switch: {exc}")
+                    yield _sse_delta(f"❌ Request failed after model switch: {exc}")
                     yield "data: [DONE]\n\n"
 
             return StreamingResponse(_switch_and_stream(), media_type="text/event-stream")
@@ -1694,13 +1720,12 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
                         if '"usage"' in decoded and '"completion_tokens"' in decoded:
                             for line in decoded.split("\n"):
                                 if line.startswith("data: ") and line != "data: [DONE]":
-                                    import json
                                     try:
-                                        payload = json.loads(line[6:])
+                                        payload = _json.loads(line[6:])
                                         usage = payload.get("usage") or {}
                                         completion_tokens = usage.get("completion_tokens", 0)
                                         model = payload.get("model", model)
-                                    except json.JSONDecodeError:
+                                    except _json.JSONDecodeError:
                                         pass
                         yield chunk
 
@@ -1719,7 +1744,7 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
             dur = time.time() - start
             ct = (data.get("usage") or {}).get("completion_tokens", 0)
             m = data.get("model", requested_model or cfg.get("model", ""))
-            _record_request(start, dur, dur, ct, m)
+            _record_request(start, None, dur, ct, m)
             return data
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -1729,11 +1754,9 @@ async def proxy_chat(request: dict[str, Any], _: None = Depends(_check_auth)) ->
 async def proxy_completions(request: dict[str, Any], _: None = Depends(_check_auth)) -> Any:
     """Proxy for /v1/completions with the same auto model-switch behaviour as /v1/chat/completions."""
     requested_model = request.get("model", "").strip()
-    cfg_check = sm.load_config()
-    auto_switch = cfg_check.get("auto_model_switch", False)
-    needs_switch = bool(requested_model and auto_switch and _needs_hot_swap(requested_model))
-
     cfg = sm.load_config()
+    auto_switch = cfg.get("auto_model_switch", False)
+    needs_switch = bool(requested_model and auto_switch and _needs_hot_swap(requested_model, cfg))
 
     if _is_external_api_engine():
         base = _get_external_target(cfg)

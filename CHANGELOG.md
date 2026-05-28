@@ -1,6 +1,36 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.16 — 2026-05-28
+## v0.8.17 — 2026-05-28
+
+### Fixed
+- **Duplicate reply bug** — `_switch_and_stream()` was yielding `_sse_delta(notice)` + `_sse_delta("\n\n")`
+  before the real inference stream. ChatView appends every `delta.content` to the same message bubble, so
+  users saw "⏳ Switching model…\n\nActual response" concatenated together. The notice is now sent as an
+  SSE comment (`": switching-to MODEL\n\n"`) which all SSE clients silently ignore, and the `"\n\n"` delta
+  is removed entirely.
+- **Pre-warm was always a no-op from `/server/load`** — `start_server()` is non-blocking; the immediate
+  `_fire_warmup()` call after it always found `healthy = False` and returned early. Fixed by replacing
+  the direct call with a background thread that polls until healthy (up to 120 s), then fires warmup.
+  Warmup from `_hot_swap_if_needed()` already worked correctly and is unchanged.
+- **3× `load_config()` disk reads per proxy request** — `proxy_chat()` called `sm.load_config()` twice
+  at lines 1519 and 1524, and `_needs_hot_swap()` called it a third time internally. All three reads are
+  now merged into one; `_needs_hot_swap()` accepts an optional pre-loaded `cfg` dict to avoid the
+  redundant disk read.
+- **Same double `load_config()` in `proxy_completions()`** — same fix applied.
+- **`import json` inside streaming chunk generators** — the `json` module was imported inside the hot
+  streaming loop in both `_switch_and_stream()` and the normal `_stream()` generator. Changed to use the
+  top-level `_json` alias.
+- **Non-streaming TTFT inflated** — `_record_request(start, dur, dur, ct, m)` was passing full request
+  duration as the TTFT for non-streaming responses. Non-streaming has no "first byte" concept, so TTFT
+  is now `None` for this path, keeping aggregate TTFT averages accurate.
+- **`_sse_delta()` had inline `import json as _j`** — moved to top-level `_json` alias.
+- **`_fire_warmup()` created a new `httpx.Client` on every call** — replaced with a module-level
+  `_warmup_http_client` singleton via `_get_warmup_client()`.
+- **`_get_httpx_client()` had no connection pool config** — added
+  `Limits(max_connections=20, max_keepalive_connections=10)` and explicit 300 s / 10 s connect timeout
+  to reduce TCP overhead for high-frequency proxy calls.
+
+
 
 ### Fixed
 - **External API engine auto-start spawned useless sleep process** — When `engine_id = "openai-compatible"`
