@@ -1,6 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.38 — 2026-05-28
+## v0.8.39 — 2026-05-28
+
+### Fixed
+
+- **Benchmark History: selecting runs had no delete action** — Checking one or more runs in the History tab showed "Compare N runs" / "View details" but provided no way to act on the selection with a delete. Added a red "Delete N selected" button to the toolbar that appears whenever any runs are checked. It clears the selection immediately (so the UI is responsive) then deletes each run in sequence.
+
 
 ### Fixed
 

@@ -990,6 +990,14 @@ function toggleHistorySelect(id: number) {
   historySelected.value = s
 }
 
+async function deleteSelectedRuns() {
+  const ids = [...historySelected.value]
+  historySelected.value = new Set()
+  for (const id of ids) {
+    await modelsStore.deleteBenchmarkResult(id)
+  }
+}
+
 function scrollToCompare() {
   nextTick(() => comparePanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 }
@@ -1788,6 +1796,14 @@ watch(activeTab, (tab) => {
             @click="scrollToDetail"
           >
             View details
+          </AppButton>
+          <AppButton
+            v-if="historySelected.size >= 1"
+            variant="danger"
+            size="sm"
+            @click="deleteSelectedRuns"
+          >
+            Delete {{ historySelected.size }} selected
           </AppButton>
           <AppButton variant="ghost" size="sm" @click="exportCSV">Export CSV</AppButton>
           <AppButton variant="ghost" size="sm" @click="exportJSON">Export JSON</AppButton>
