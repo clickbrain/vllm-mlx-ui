@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.31 — 2026-05-28
+
+### Fixed
+
+- **Apple Foundation Model warning label** — Engine cards showing `requirements_warnings`
+  displayed a hardcoded "⚡ Low Available Memory" title for all warnings regardless of
+  content. The Apple FM engine's warnings (e.g. "Apple Intelligence may not be enabled")
+  have nothing to do with memory. Changed to generic "⚠ Warnings" label that fits all
+  engines.
+
 ## v0.8.30 — 2026-05-28
 
 ### Fixed

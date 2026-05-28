@@ -633,7 +633,7 @@ onUnmounted(() => {
             </ul>
           </div>
           <div v-if="eng.requirements_warnings && eng.requirements_warnings.length" class="engine-req-warnings">
-            <div class="engine-req-warning-title">⚡ Low Available Memory</div>
+            <div class="engine-req-warning-title">⚠ Warnings</div>
             <ul class="engine-req-warning-list">
               <li v-for="warn in eng.requirements_warnings" :key="warn">{{ warn }}</li>
             </ul>
