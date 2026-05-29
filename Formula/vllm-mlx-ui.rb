@@ -71,6 +71,18 @@ class VllmMlxUi < Formula
            "mlx-lm>=0.31.0",
            "huggingface-hub>=0.23.0"
 
+    # Homebrew's relocation step rewrites @rpath install-name IDs to absolute
+    # paths, but orjson's .so has no room in its Mach-O header for the long
+    # absolute path (/opt/homebrew/Cellar/.../orjson.cpython-311-darwin.so).
+    # Pre-patching to @loader_path-relative makes Homebrew skip it entirely —
+    # the relocator only matches @rpath and @executable_path prefixes.
+    # Python loads extension modules via dlopen(full_path) so this is safe.
+    orjson_so = venv/"lib/python3.11/site-packages/orjson/orjson.cpython-311-darwin.so"
+    if orjson_so.exist?
+      system "install_name_tool", "-id",
+             "@loader_path/orjson.cpython-311-darwin.so", orjson_so.to_s
+    end
+
     # Install stable launcher scripts into Homebrew's bin.
     #
     # We deliberately DO NOT use write_env_script / write_exec_script here.

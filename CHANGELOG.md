@@ -1,5 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.50 — 2026-05-28
+
+### Fixed
+
+- **Homebrew install exits cleanly** — `brew upgrade` was returning exit code 1 after every install due to orjson's compiled `.so` file not having enough Mach-O header space for Homebrew's dylib relocation step. Added a pre-patch in the formula's `install` hook that changes the orjson install-name ID from `@rpath/...` to `@loader_path/...` before Homebrew's relocator runs. The relocator only rewrites `@rpath` and `@executable_path` entries, so it now skips orjson entirely. Python loads extension modules via `dlopen(full_path)` so this change has no runtime effect.
+
 ## v0.8.49 — 2026-05-28
 
 ### Fixed
