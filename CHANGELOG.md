@@ -1,5 +1,14 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.60 — 2026-05-30
+
+### Fixed
+- **MTPLX load: "nothing happens" when `engine_id` is already `lightning-mlx`** — When the user's saved config had `engine_id = "lightning-mlx"` (from a previous auto-switch) but lightning-mlx was not installed, `_apply_mtplx_engine_switch` returned early with no warning, causing `start_server()` to fail with a 500 error that showed an unhelpful banner instead of the install modal. Now checks `is_installed()` even when the config already says `lightning-mlx` — returns `{needs_install}` in both cases.
+
+### Added
+- **MTPLX badge on model cards** — Models whose name contains "mtplx" now show an "⚡ Lightning MLX" chip in the model list, making it immediately clear they require the lightning-mlx engine.
+- **Benchmark auto-switch for MTPLX models** — When a benchmark run includes an MTPLX model and lightning-mlx is installed, the benchmark system automatically switches to the lightning-mlx engine, starts the server, runs the benchmark, then restores the original engine for any subsequent non-MTPLX models. If lightning-mlx is not installed, the benchmark continues with vllm-mlx and warns about degraded performance.
+
 ## v0.8.59 — 2026-05-30
 
 ### Fixed

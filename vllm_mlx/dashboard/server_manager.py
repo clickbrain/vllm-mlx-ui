@@ -863,13 +863,21 @@ def _apply_mtplx_engine_switch(config: dict[str, Any]) -> tuple[dict[str, Any], 
         return config, ""
 
     current_engine = config.get("engine_id", "vllm-mlx")
-    if current_engine == "lightning-mlx":
-        return config, ""  # already on the right engine
-
     try:
         lm_eng = get_engine("lightning-mlx")
     except KeyError:
         return config, "⚠️ lightning-mlx engine not registered — cannot auto-switch for MTPLX model."
+
+    if current_engine == "lightning-mlx":
+        # Engine is already set to lightning-mlx — verify it's actually installed.
+        if not lm_eng.is_installed():
+            return config, (
+                "⚠️ lightning-mlx is configured but is not installed.\n"
+                "Install it with:\n"
+                "  pip install git+https://github.com/samuelfaj/lightning-mlx.git\n"
+                "Then reload the model."
+            )
+        return config, ""  # already on the right engine and installed
 
     if not lm_eng.is_installed():
         return config, (

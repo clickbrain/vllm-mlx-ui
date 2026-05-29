@@ -68,6 +68,9 @@ const fitInfo = computed(() => {
 
 /** Best benchmark result for this model from history, for the inline badge. */
 const bestBench = computed(() => modelsStore.bestBenchmarkPerModel.get(props.modelId) ?? null)
+
+/** True when this model requires the lightning-mlx MTPLX serving path. */
+const isMtplx = computed(() => props.modelId.toLowerCase().includes('mtplx'))
 </script>
 
 <template>
@@ -78,6 +81,7 @@ const bestBench = computed(() => modelsStore.bestBenchmarkPerModel.get(props.mod
         <span class="org-prefix">{{ org }}/</span><span class="model-name">{{ shortName }}</span>
       </a>
       <span class="meta-chip q-chip">{{ quantLabel }}</span>
+      <span v-if="isMtplx" class="meta-chip mtplx-chip" title="Requires Lightning MLX engine">⚡ Lightning MLX</span>
       <AppBadge v-if="isRestarting" variant="warning" size="sm">Restarting…</AppBadge>
       <AppBadge v-else-if="active" variant="success" size="sm">Serving</AppBadge>
     </div>
@@ -201,6 +205,19 @@ const bestBench = computed(() => modelsStore.bestBenchmarkPerModel.get(props.mod
   font-size: 14px;
   color: var(--tx-secondary);
   font-weight: 500;
+}
+
+.mtplx-chip {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cu-400, #f59e0b);
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 4px;
+  padding: 1px 6px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .meta-sep {

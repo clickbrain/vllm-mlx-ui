@@ -1203,6 +1203,49 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
                         err = result.get("error", "Unknown error")
                         _output_cb(f"\n[✗ Benchmark failed: {err}]\n")
                 else:
+                    # Auto-switch to lightning-mlx for MTPLX models if installed.
+                    if sm._is_mtplx_model(model_id):
+                        try:
+                            from vllm_mlx.dashboard.engines.registry import get_engine as _get_engine
+                            lm_eng = _get_engine("lightning-mlx")
+                            if lm_eng.is_installed():
+                                _output_cb(f"[⚡ MTPLX model — switching to lightning-mlx engine]\n")
+                                orig_cfg = sm.load_config()
+                                lm_cfg = dict(orig_cfg)
+                                lm_cfg["engine_id"] = "lightning-mlx"
+                                lm_cfg["model"] = model_id
+                                _output_cb(f"[⚡ Starting lightning-mlx server for {model_id.split('/')[-1]}…]\n")
+                                ok, start_msg = sm.start_server(lm_cfg)
+                                if ok:
+                                    lm_url = sm.get_server_url()
+                                    lm_snap = {k: lm_cfg.get(k) for k in _SETTINGS_KEYS if lm_cfg.get(k) is not None}
+                                    lm_snap["engine_id"] = "lightning-mlx"
+                                    result = br.run_live_benchmark(
+                                        model_id,
+                                        server_url=lm_url,
+                                        prompts=runs,
+                                        max_tokens=max_tokens,
+                                        label=label,
+                                        stop_event=_stop,
+                                        server_settings=lm_snap,
+                                        output_callback=_output_cb,
+                                    )
+                                    if not result.get("success"):
+                                        err = result.get("error", "Unknown error")
+                                        _output_cb(f"\n[✗ Benchmark failed: {err}]\n")
+                                    # Restore original server if there are more models.
+                                    if idx < len(model_ids) - 1:
+                                        _output_cb(f"[⚡ Restoring previous engine after lightning-mlx benchmark]\n")
+                                        sm.stop_server()
+                                        if orig_cfg.get("model"):
+                                            sm.start_server(orig_cfg)
+                                    continue
+                                else:
+                                    _output_cb(f"[⚠ Could not start lightning-mlx: {start_msg} — falling back to vllm-mlx]\n")
+                            else:
+                                _output_cb(f"[⚠ lightning-mlx not installed — benchmarking with vllm-mlx (degraded performance for MTPLX models)]\n")
+                        except Exception as exc:
+                            _output_cb(f"[⚠ MTPLX auto-switch error: {exc} — falling back to vllm-mlx]\n")
                     result = br.run_benchmark(model_id, prompts=runs, max_tokens=max_tokens,
                                      output_callback=_output_cb)
                     if not result.get("success"):
