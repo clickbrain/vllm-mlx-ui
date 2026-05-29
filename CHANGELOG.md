@@ -1,5 +1,31 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.63 — 2026-05-29
+
+### Fixed
+- **InstallEngineModal timer fires after user closes modal** — A 1200ms `setTimeout` in
+  `InstallEngineModal` was firing even after the user clicked Close, calling
+  `retryLoadAfterInstall()` with a null `pendingInstall` reference.  The model silently never
+  loaded.  Fixed: `retryTimer` ref is now cleared in both `handleCancel()` and `onUnmounted()`.
+- **retryLoadAfterInstall infinite loop** — If the backend kept returning `needs_install` after
+  installation, `retryLoadAfterInstall()` would spin indefinitely with no user feedback.  Fixed:
+  max 2 retry attempts; surfaces an error message after 3 failed attempts.
+- **ChatView model dropdown stuck on wrong model after needs_install** — After a `needs_install`
+  response the `<select>` `:value` binding didn't re-render because the bound value hadn't changed.
+  Fixed: `switchingModel` ref in `switchModel()` forces a re-render via try/finally flip.
+- **ModelsView stale error banner during install** — The `loadError` banner from a previous crash
+  stayed visible when the install modal opened.  Fixed: `loadError` is cleared in the
+  `needs_install` branch of `handleLoad()`.
+
+### Infrastructure
+- **QA sign-off gate in release.sh** — `scripts/release.sh` now requires a green sign-off token
+  from the QA Guardian before any release.  Missing, stale, or RED sign-offs hard-block the
+  script.  Sign-off is written by `scripts/qa-sign-off.sh`.
+- **Release script hardening** — Added branch guard (must be on `main`), clean working-tree check
+  (no uncommitted WIP in the release), and pre-flight divergence check that replaces the
+  mid-release `git pull --rebase`.  Added partial-failure recovery hints to tarball timeout and
+  formula update steps.
+
 ## v0.8.62 — 2026-05-29
 
 ### Fixed
