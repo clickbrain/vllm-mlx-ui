@@ -1,5 +1,19 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.68 — 2026-05-29
+
+### Added
+- **Persistent request log** (`~/.vllm_mlx_ui/request_log.jsonl`): Every inference request
+  proxied through port 8502 is now appended to a JSONL log file that survives server restarts.
+  Rotates at 5 MB (keeps the latter half). Fields per record: `time`, `ttft_ms`, `duration_ms`,
+  `tps`, `proxy_overhead_ms`, `stream`, `user_agent`, `client_ip`, `completion_tokens`, `model`.
+- **Live request stream** (`GET /debug/requests/stream`): SSE endpoint that emits each request
+  as it completes. Watch in real-time with `curl -N http://localhost:8502/debug/requests/stream`.
+  Replays the last 10 entries on connect so you have immediate context.
+- **`GET /debug/requests`** now reads from the persistent log file (survives restarts) and
+  defaults to returning the last 100 entries. Returns `log_path` in the response so you know
+  where to `tail -f` directly.
+
 ## v0.8.67 — 2026-05-29
 
 ### Added

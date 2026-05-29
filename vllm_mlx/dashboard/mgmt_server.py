@@ -18,9 +18,11 @@ import asyncio
 import datetime
 import json as _json
 import logging
+import os as _os
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx as _httpx
@@ -43,10 +45,35 @@ from . import startup_manager as _startup_mgr
 logger = logging.getLogger(__name__)
 
 # ── Request metrics tracker ──────────────────────────────────────────────
+# Requests are recorded in two places:
+#   1. _RECENT_REQUESTS — in-memory deque (fast reads for /live/metrics)
+#   2. REQUEST_LOG_PATH — append-only JSONL file (survives restarts, tailable)
+#
+# The log file rotates at _REQUEST_LOG_MAX_BYTES. Reads for /debug/requests
+# come from the file so history is never lost on restart.
 
 _RECENT_REQUESTS: list[dict[str, Any]] = []
 _RECENT_REQUESTS_LOCK = threading.Lock()
-_MAX_RECENT = 200
+_MAX_RECENT = 500
+
+_REQUEST_LOG_PATH: Path | None = None        # set in _init_request_log()
+_REQUEST_LOG_MAX_BYTES = 5 * 1024 * 1024     # 5 MB then rotate
+
+
+def _init_request_log() -> None:
+    """Create the request log directory/file on first use."""
+    global _REQUEST_LOG_PATH
+    try:
+        from vllm_mlx.dashboard.server_manager import STATE_DIR as _sd
+        log_dir = Path(_sd)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        _REQUEST_LOG_PATH = log_dir / "request_log.jsonl"
+    except Exception:
+        pass  # log path stays None; file logging silently disabled
+
+
+# Initialize immediately at import time (also called again at startup to be safe)
+_init_request_log()
 
 
 def _record_request(
@@ -61,23 +88,71 @@ def _record_request(
     client_ip: str = "",
     proxy_overhead_ms: float | None = None,
 ) -> None:
+    record: dict[str, Any] = {
+        "ts": time.time(),
+        "start": round(start, 3),
+        "time": datetime.datetime.now().strftime("%H:%M:%S"),
+        "ttft_ms": round(ttft * 1000, 1) if ttft is not None else None,
+        "duration_ms": round(duration * 1000, 1),
+        "proxy_overhead_ms": round(proxy_overhead_ms, 1) if proxy_overhead_ms is not None else None,
+        "completion_tokens": completion_tokens,
+        "tps": round(completion_tokens / (duration or 1), 1),
+        "model": model,
+        "stream": stream,
+        "user_agent": user_agent,
+        "client_ip": client_ip,
+    }
     with _RECENT_REQUESTS_LOCK:
-        _RECENT_REQUESTS.append({
-            "start": start,
-            "ttft_ms": round(ttft * 1000, 1) if ttft is not None else None,
-            "duration_ms": round(duration * 1000, 1),
-            "completion_tokens": completion_tokens,
-            "model": model,
-            "stream": stream,
-            "user_agent": user_agent,
-            "client_ip": client_ip,
-            # proxy_overhead_ms: time from HTTP request received → engine request start.
-            # For model-switch requests this also includes model swap time (30–120 s).
-            "proxy_overhead_ms": round(proxy_overhead_ms, 1) if proxy_overhead_ms is not None else None,
-            "ts": time.time(),
-        })
+        _RECENT_REQUESTS.append(record)
         if len(_RECENT_REQUESTS) > _MAX_RECENT:
             _RECENT_REQUESTS[:] = _RECENT_REQUESTS[-_MAX_RECENT:]
+    # Append to persistent JSONL log (non-blocking best-effort)
+    _append_request_log(record)
+
+
+def _append_request_log(record: dict[str, Any]) -> None:
+    """Append one record to the JSONL log file; rotate if over size limit."""
+    if _REQUEST_LOG_PATH is None:
+        return
+    try:
+        line = _json.dumps(record) + "\n"
+        # Rotate: if over limit, keep the last half of lines
+        if _REQUEST_LOG_PATH.exists() and _REQUEST_LOG_PATH.stat().st_size > _REQUEST_LOG_MAX_BYTES:
+            try:
+                lines = _REQUEST_LOG_PATH.read_text().splitlines(keepends=True)
+                keep = lines[len(lines) // 2:]
+                _REQUEST_LOG_PATH.write_text("".join(keep))
+            except Exception:
+                pass
+        with _REQUEST_LOG_PATH.open("a") as fh:
+            fh.write(line)
+    except Exception:
+        pass
+
+
+def _read_request_log(n: int = 200) -> list[dict[str, Any]]:
+    """Read the last N records from the JSONL log file."""
+    if _REQUEST_LOG_PATH is None or not _REQUEST_LOG_PATH.exists():
+        # Fall back to in-memory if file not available
+        with _RECENT_REQUESTS_LOCK:
+            records = list(_RECENT_REQUESTS)
+        return records[-n:] if n > 0 else records
+    try:
+        lines = _REQUEST_LOG_PATH.read_text().splitlines()
+        tail = lines[-n:] if n > 0 else lines
+        result = []
+        for ln in tail:
+            ln = ln.strip()
+            if ln:
+                try:
+                    result.append(_json.loads(ln))
+                except _json.JSONDecodeError:
+                    pass
+        return result
+    except Exception:
+        with _RECENT_REQUESTS_LOCK:
+            records = list(_RECENT_REQUESTS)
+        return records[-n:] if n > 0 else records
 
 
 def _get_live_metrics() -> dict[str, Any]:
@@ -235,6 +310,8 @@ def _start_background_scheduler() -> None:
     )
     t.start()
     _update_scheduler_thread = t
+    # Initialize persistent request log
+    _init_request_log()
     # Reinstall any pip engines that were dropped during a brew upgrade.
     # This is a no-op on first boot or when no brew upgrade happened.
     try:
@@ -1059,39 +1136,84 @@ def live_metrics(_: None = Depends(_check_auth)) -> dict:
 
 @app.get("/debug/requests")
 def debug_requests(
-    n: int = 50,
+    n: int = 100,
     _: None = Depends(_check_auth),
 ) -> dict:
-    """Diagnostic endpoint: last N inference requests with full timing breakdown.
+    """Last N inference requests with full timing breakdown (reads from disk log).
 
-    Each record includes:
+    Records persist across server restarts. Each record includes:
+    - ``time``              – human-readable HH:MM:SS timestamp
     - ``ttft_ms``           – time to first token from the engine (engine latency)
     - ``duration_ms``       – total request duration including all token generation
+    - ``tps``               – tokens per second
     - ``proxy_overhead_ms`` – time from HTTP request received → engine request start
                               (covers auth check + config read + process check).
-                              For model-switch requests, also includes model load time
-                              (30–120 s) — filter by ``model`` to distinguish.
+                              For model-switch requests, also includes model load time.
     - ``stream``            – whether the client used SSE streaming
-    - ``user_agent``        – client User-Agent header (identifies Kilroy vs chat)
+    - ``user_agent``        – client User-Agent (identifies Kilroy vs built-in chat)
     - ``client_ip``         – client IP address
     - ``completion_tokens`` – tokens generated
     - ``model``             – model ID
 
-    Use this to compare requests from Kilroy vs the built-in chat side-by-side.
-    A large ``proxy_overhead_ms`` (excluding model-switch) → bottleneck in the proxy layer.
-    A large ``ttft_ms`` relative to benchmarks → engine bottleneck.
-    ``stream: false`` → client waits for ALL tokens before seeing any output.
+    Log file: ~/.vllm_mlx_ui/request_log.jsonl
+    Live stream: GET /debug/requests/stream  (SSE — use curl -N or browser)
     """
-    with _RECENT_REQUESTS_LOCK:
-        recent = list(_RECENT_REQUESTS)
-    records = recent[-n:] if n > 0 else recent
+    records = _read_request_log(n)
     return {
         "count": len(records),
-        "requests": [
-            {**r, "time": datetime.datetime.fromtimestamp(r["ts"]).strftime("%H:%M:%S")}
-            for r in records
-        ],
+        "log_path": str(_REQUEST_LOG_PATH) if _REQUEST_LOG_PATH else None,
+        "requests": records,
     }
+
+
+@app.get("/debug/requests/stream")
+async def debug_requests_stream(
+    _: None = Depends(_check_auth),
+) -> Any:
+    """Live SSE stream of inference requests as they complete.
+
+    Each event is a JSON object with the same fields as /debug/requests.
+    Use ``curl -N http://localhost:8502/debug/requests/stream`` to watch live.
+    """
+    from fastapi.responses import StreamingResponse
+
+    async def _event_stream():
+        # Send last 10 entries immediately so the client has context
+        for r in _read_request_log(10):
+            yield f"data: {_json.dumps(r)}\n\n"
+
+        # Track the current log file size and tail new lines
+        last_size = 0
+        if _REQUEST_LOG_PATH and _REQUEST_LOG_PATH.exists():
+            last_size = _REQUEST_LOG_PATH.stat().st_size
+
+        while True:
+            await asyncio.sleep(0.5)
+            if _REQUEST_LOG_PATH is None or not _REQUEST_LOG_PATH.exists():
+                yield ": waiting\n\n"
+                continue
+            try:
+                current_size = _REQUEST_LOG_PATH.stat().st_size
+                if current_size > last_size:
+                    with _REQUEST_LOG_PATH.open() as fh:
+                        fh.seek(last_size)
+                        new_data = fh.read()
+                    last_size = current_size
+                    for line in new_data.splitlines():
+                        line = line.strip()
+                        if line:
+                            try:
+                                _json.loads(line)  # validate
+                                yield f"data: {line}\n\n"
+                            except _json.JSONDecodeError:
+                                pass
+                elif current_size < last_size:
+                    # File was rotated — reset position
+                    last_size = current_size
+            except Exception:
+                yield ": error\n\n"
+
+    return StreamingResponse(_event_stream(), media_type="text/event-stream")
 
 
 @app.get("/poll")
@@ -3363,8 +3485,6 @@ def fleet_discover(_: None = Depends(_check_auth)) -> list:
 # Serve the built Vue UI from ui/dist/ at the root path.
 # API routes (/status, /memory, etc.) take priority because they are registered
 # first. The catch-all "/" route returns index.html for SPA client-side routing.
-
-import os as _os
 
 from fastapi.responses import PlainTextResponse
 
