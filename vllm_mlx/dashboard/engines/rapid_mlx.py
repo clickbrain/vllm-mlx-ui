@@ -200,8 +200,7 @@ class RapidMlxEngine(BaseEngine):
         return [sys.executable, "-m", "pip", "install", "--upgrade", "rapid-mlx"]
 
     def is_installed(self) -> bool:
-        import shutil
-        if shutil.which("rapid-mlx"):
+        if self._which("rapid-mlx"):
             return True
         try:
             result = subprocess.run(

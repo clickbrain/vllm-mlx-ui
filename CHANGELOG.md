@@ -1,6 +1,35 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.63 — 2026-05-29
+## v0.8.64 — 2026-05-29
+
+### Fixed
+- **MTPLX / lightning-mlx 500 error on load — root cause fix**: When lightning-mlx was installed
+  via pip into the Homebrew venv, its binary (`lightning-mlx`) resided in the venv's `bin/`
+  directory which is NOT on `$PATH`.  `shutil.which("lightning-mlx")` returned `None`; the
+  `lightning_mlx.cli` Python module fallback also doesn't exist.  `_resolve_cmd()` returned `[]`,
+  causing `build_command()` to raise a `RuntimeError`, which propagated uncaught to a HTTP 500.
+  **Fix**: `BaseEngine._which()` now also checks `os.path.join(os.path.dirname(sys.executable), cmd)`
+  — i.e. the same venv `bin/` where `pip install` places binaries.  This fixes both
+  `lightning-mlx` and `rapid-mlx` (which had the same latent bug).
+- **`rapid-mlx` venv bin detection**: `RapidMlxEngine.is_installed()` also used `shutil.which`
+  directly — updated to use `self._which()` for consistent venv-aware detection.
+- **lightning-mlx wrong model alias**: The `_HF_TO_ALIAS` map incorrectly mapped the 8-bit MTPLX
+  models (e.g. `samuelfaj/Qwopus3.6-35B-A3B-v1-8bit-MTPLX-Optimized-Speed`) to the generic alias
+  `qwopus3.6-35b`, which in lightning-mlx 0.6.10 resolves to the 6-bit variant.  Updated aliases
+  to use the explicit `-8bit` and `-4bit` suffixed aliases (e.g. `qwopus3.6-35b-8bit`), ensuring
+  the correct quantization is loaded from cache.  For models not in the alias map, the full HF
+  repo ID is passed directly (lightning-mlx accepts both aliases and HF repo IDs).
+- **`_build_command()` raises unhandled RuntimeError**: Added try/except around the
+  `_build_command(config)` call in `start_server()` so that engine command-building failures
+  surface as clean `(False, "Failed to build launch command …")` return values instead of
+  propagating as uncaught exceptions to FastAPI (which then returns a raw 500 with no detail).
+- **`apple_fm.py` build command uses bare `"apfel"` string**: `build_command()` passed the string
+  `"apfel"` directly to Popen instead of resolving the binary path. Now uses `self._which("apfel") or "apfel"`
+  for consistent venv-aware lookup. `is_installed()` also simplified to use `self._which()`.
+- **Dead code in `lightning_mlx.py`**: Removed duplicate `return False`, dead `importlib.util.find_spec`
+  branch (lightning-mlx has no `lightning_mlx` Python module), and dead `enable_ngram` elif branch
+  (key not in `config_schema`).
+
 
 ### Fixed
 - **InstallEngineModal timer fires after user closes modal** — A 1200ms `setTimeout` in

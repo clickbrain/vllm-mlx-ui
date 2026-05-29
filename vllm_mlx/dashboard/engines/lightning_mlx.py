@@ -29,14 +29,19 @@ from typing import Any, ClassVar
 from .base import BaseEngine
 
 # Curated alias → canonical HF repo ID map (from lightning-mlx README).
+# IMPORTANT: Only include aliases where the mapping is exact and bidirectional.
+# Prefer passing the full HF repo ID when in doubt — lightning-mlx accepts
+# both aliases and canonical HF repo IDs, and the alias can change between
+# lightning-mlx versions.
 LIGHTNING_MLX_ALIASES: dict[str, str] = {
-    "qwopus3.6-35b":             "samuelfaj/Qwopus3.6-35B-A3B-v1-8bit-MTPLX-Optimized-Speed",
-    "ornstein3.6-35b-saber":     "samuelfaj/Ornstein3.6-35B-A3B-v1-8bit-MTPLX-Optimized-Speed",
-    "qwen3.6-35b-nsc-ace-saber": "samuelfaj/Qwen3.6-35B-A3B-NSC-ACE-Saber-8bit-MTPLX-Optimized-Speed",
-    "ornstein3.6-27b-nsc-ace-saber": "samuelfaj/Ornstein3.6-27B-NSC-ACE-Saber-8bit-MTPLX-Optimized-Speed",
-    "qwen3.6-35b":               "mlx-community/Qwen3.6-35B-A3B-4bit",
-    "qwen3.6-35b-8bit":          "samuelfaj/Qwen3.6-35B-A3B-8bit-MTPLX-Optimized-Speed",
-    "qwen3.6-27b":               "mlx-community/Qwen3.6-27B-4bit",
+    "qwopus3.6-35b-8bit":            "samuelfaj/Qwopus3.6-35B-A3B-v1-8bit-MTPLX-Optimized-Speed",
+    "qwopus3.6-35b-4bit":            "samuelfaj/Qwopus3.6-35B-A3B-v1-4bit-MTPLX-Optimized-Speed",
+    "ornstein3.6-35b-saber-8bit":    "samuelfaj/Ornstein3.6-35B-A3B-SABER-8bit-MTPLX-Optimized-Speed",
+    "ornstein3.6-35b-saber-4bit":    "samuelfaj/Ornstein3.6-35B-A3B-SABER-4bit-MTPLX-Optimized-Speed",
+    "qwen3.6-35b-nsc-ace-saber-8bit": "samuelfaj/Qwen3.6-35B-A3B-NSC-ACE-SABER-MLX-8bit-MTPLX-Optimized-Speed",
+    "qwen3.6-35b-nsc-ace-saber-4bit": "samuelfaj/Qwen3.6-35B-A3B-NSC-ACE-SABER-MLX-4bit-MTPLX-Optimized-Speed",
+    "ornstein3.6-27b-nsc-ace-saber-8bit": "samuelfaj/Ornstein3.6-27B-MTP-NSC-ACE-SABER-8bit-MTPLX-Optimized-Speed",
+    "ornstein3.6-27b-nsc-ace-saber-4bit": "samuelfaj/Ornstein3.6-27B-MTP-NSC-ACE-SABER-4bit-MTPLX-Optimized-Speed",
 }
 
 # Inverse map for alias lookup by canonical HF repo ID.
@@ -69,17 +74,9 @@ class LightningMlxEngine(BaseEngine):
     # ── BaseEngine implementation ─────────────────────────────────────────────
 
     def _resolve_cmd(self) -> list[str]:
-        """Return the argv prefix for lightning-mlx (binary or module fallback)."""
+        """Return the argv prefix for lightning-mlx binary."""
         found = self._which("lightning-mlx")
-        if found:
-            return [found]
-        try:
-            import importlib.util
-            if importlib.util.find_spec("lightning_mlx") is not None:
-                return [sys.executable, "-m", "lightning_mlx.cli"]
-        except ImportError:
-            pass
-        return []
+        return [found] if found else []
 
     def build_command(self, config: dict[str, Any]) -> list[str]:
         """Build the lightning-mlx serve command."""
@@ -108,8 +105,6 @@ class LightningMlxEngine(BaseEngine):
         # --- N-gram speculation ---
         if es.get("disable_ngram", False):
             cmd += ["--disable-ngram"]
-        elif es.get("enable_ngram", False):
-            cmd += ["--enable-ngram"]
 
         # --- Prefill step size ---
         prefill = es.get("prefill_step_size", 0)
@@ -156,8 +151,7 @@ class LightningMlxEngine(BaseEngine):
         ]
 
     def is_installed(self) -> bool:
-        import shutil
-        if shutil.which("lightning-mlx"):
+        if self._which("lightning-mlx"):
             return True
         try:
             result = subprocess.run(
@@ -167,11 +161,6 @@ class LightningMlxEngine(BaseEngine):
             if result.returncode == 0:
                 return True
         except Exception:
-            pass
-        try:
-            import lightning_mlx  # noqa: F401
-            return True
-        except ImportError:
             pass
         return False
 

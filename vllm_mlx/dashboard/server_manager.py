@@ -1186,7 +1186,11 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
     except KeyError:
         pass  # unknown engine — let _build_command handle it
 
-    cmd = _build_command(config)
+    try:
+        cmd = _build_command(config)
+    except Exception as exc:
+        logger.error("Failed to build command for engine %r: %s", engine_id_for_check, exc, exc_info=True)
+        return False, f"Failed to build launch command for engine '{engine_id_for_check}': {exc}"
     env = _build_env(config)
     cwd = _build_cwd(config)
     try:

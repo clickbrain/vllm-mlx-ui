@@ -312,8 +312,23 @@ class BaseEngine(ABC):
         return None
 
     def _which(self, cmd: str) -> str | None:
-        """Locate *cmd* on PATH; returns None if not found."""
-        return shutil.which(cmd)
+        """Locate *cmd* on PATH or in the current venv's bin directory.
+
+        When the dashboard runs inside a virtualenv (e.g. a Homebrew Cellar
+        venv), the venv's ``bin/`` is typically NOT on ``$PATH``.  Binaries
+        installed by ``pip install`` into that venv (e.g. ``lightning-mlx``,
+        ``rapid-mlx``) won't be found by a plain ``shutil.which()``.  We
+        derive the venv bin path from ``sys.executable`` as a fallback.
+        """
+        import os
+        found = shutil.which(cmd)
+        if found:
+            return found
+        venv_bin = os.path.dirname(sys.executable)
+        candidate = os.path.join(venv_bin, cmd)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+        return None
 
     def __repr__(self) -> str:
         installed = "(installed)" if self.is_installed() else "(not installed)"
