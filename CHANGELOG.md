@@ -1,5 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.56 — 2026-05-29
+
+### Fixed
+
+- **Benchmark model-switch: false `⚠ stop_server` warning** — During multi-model benchmark runs, switching models emitted `[⚠ stop_server: Error stopping server: [Errno 1] Operation not permitted]` before proceeding to load the next model successfully. Root cause: `os.killpg()` raised `PermissionError` when the inference server's PID had already exited and been reused by an unrelated process (stale state file). Fixes: (1) `PermissionError` is now caught alongside `ProcessLookupError` in both SIGTERM and SIGKILL paths in `stop_server()` — treated as "already gone, clear state and continue"; (2) the `⚠ stop_server` warning in the benchmark stream is now suppressed when the subsequent `start_server()` succeeds, since the stop failure was non-fatal.
+
+- **Benchmark quality: false MTPLX incompatibility warning** — Removed incorrect pre-suite warning that claimed MTPLX-named models require a `lightning-mlx` runtime and would produce 0% accuracy. This was based on an incorrect hypothesis from a prior session. MTPLX models run fine on standard mlx-lm/vllm-mlx.
+
 ## v0.8.55 — 2026-05-29
 
 ### Improved

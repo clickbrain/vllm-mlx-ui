@@ -2280,10 +2280,10 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
 
                     if needs_start or needs_switch:
                         stop_ok, stop_msg = sm.stop_server()
-                        if not stop_ok:
-                            _cb(f"[⚠ stop_server: {stop_msg}]\n")
                         ok, msg = sm.start_server(cfg)
                         if not ok:
+                            if not stop_ok:
+                                _cb(f"[⚠ stop_server: {stop_msg}]\n")
                             _cb(f"[✗ Could not start {target_model}: {msg}]\n")
                             continue
                         switched = True

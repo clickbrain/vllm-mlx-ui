@@ -1105,6 +1105,11 @@ def stop_server() -> tuple[bool, str]:
             os.killpg(pid, signal.SIGTERM)
         except ProcessLookupError:
             pass  # Already gone
+        except PermissionError:
+            # PID was reused by an unrelated process — the original server
+            # already exited.  Fall through: _is_process_alive will be False
+            # and we'll skip the SIGKILL loop.
+            pass
         for _ in range(10):
             time.sleep(0.5)
             if not _is_process_alive(pid):
@@ -1112,8 +1117,8 @@ def stop_server() -> tuple[bool, str]:
         else:
             try:
                 os.killpg(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass  # Already gone
+            except (ProcessLookupError, PermissionError):
+                pass  # Already gone or PID reused
             # SIGKILL is asynchronous — wait for the kernel to actually kill the
             # process before we return to the caller.
             for _ in range(10):

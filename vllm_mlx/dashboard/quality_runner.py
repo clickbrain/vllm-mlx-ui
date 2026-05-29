@@ -675,8 +675,6 @@ def _check_server_reachable(server_url: str, model: str) -> tuple[bool, str]:
     A non-empty warning string means the model may be incompatible but
     we still let the suite run so the user sees real output.
     """
-    # Connectivity check only — single GET, no generation (avoids adding
-    # latency for models that are already working correctly).
     try:
         requests.get(f"{server_url}/v1/models", timeout=5).raise_for_status()
     except requests.exceptions.ConnectionError:
@@ -686,17 +684,6 @@ def _check_server_reachable(server_url: str, model: str) -> tuple[bool, str]:
         )
     except Exception as e:
         return False, f"Inference server unreachable: {e}"
-
-    # Known-incompatible architecture detection by model name.
-    # MTPLX models require the lightning-mlx runtime; standard mlx-lm
-    # loads them as plain Qwen3 but crashes at generation time (0 tokens).
-    m_lower = (model or "").lower()
-    if "mtplx" in m_lower or "mtp-lx" in m_lower:
-        return True, (
-            f"⚠️  Model '{model}' uses the MTPLX/MTP architecture which requires "
-            "the lightning-mlx runtime. Standard mlx-lm may produce empty responses. "
-            "Results are likely to show 0% accuracy."
-        )
 
     return True, ""
 
