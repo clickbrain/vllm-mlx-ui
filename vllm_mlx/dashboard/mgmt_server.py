@@ -205,6 +205,13 @@ def _start_background_scheduler() -> None:
     )
     t.start()
     _update_scheduler_thread = t
+    # Reinstall any pip engines that were dropped during a brew upgrade.
+    # This is a no-op on first boot or when no brew upgrade happened.
+    try:
+        from vllm_mlx.dashboard.server_manager import process_pending_engine_reinstalls as _proc_pending
+        _proc_pending()
+    except Exception as exc:
+        logger.warning("process_pending_engine_reinstalls failed: %s", exc, exc_info=True)
     # Initialize chat history DB
     try:
         cs.init_db()
@@ -2886,6 +2893,14 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
         _uc.upgrade_status = "upgrading"
         # Snapshot engine config schemas so we can detect new settings post-upgrade
         _uc.snapshot_engine_schemas()
+        # For brew installs: save installed pip engines so the new venv can
+        # reinstall them on first boot (brew upgrade creates a fresh venv that
+        # doesn't inherit pip-installed extras like rapid-mlx or lightning-mlx).
+        try:
+            from vllm_mlx.dashboard.server_manager import save_pending_engine_reinstalls as _save_pending
+            _save_pending()
+        except Exception as _e:
+            logger.warning("Failed to save pending engine reinstalls: %s", _e)
         try:
             main_result = _sp.run(cmd, timeout=300, check=False)
             if main_result.returncode != 0:

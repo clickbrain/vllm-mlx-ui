@@ -1,6 +1,16 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.60 — 2026-05-30
+## v0.8.61 — 2026-05-29
+
+### Fixed
+- **Rapid MLX (and other pip engines) not persisting after Install Updates & Restart** — When using
+  a Homebrew install, clicking "Install Updates & Restart" runs `brew upgrade vllm-mlx-ui` which
+  creates a fresh venv.  Pip-installed engines (rapid-mlx, lightning-mlx) were upgraded into the
+  _old_ venv but the app restarted into the _new_ venv where they were missing.  Fix: before the
+  upgrade, the list of installed pip engines is saved to
+  `~/.vllm_mlx_ui/pending_engine_reinstalls.json`.  On first startup in the new venv that file is
+  detected and each engine is automatically reinstalled via `pip install --upgrade <pkg>` in a
+  background thread, then the file is deleted.  This is a no-op for non-brew installs.
 
 ### Fixed
 - **MTPLX load: "nothing happens" when `engine_id` is already `lightning-mlx`** — When the user's saved config had `engine_id = "lightning-mlx"` (from a previous auto-switch) but lightning-mlx was not installed, `_apply_mtplx_engine_switch` returned early with no warning, causing `start_server()` to fail with a 500 error that showed an unhelpful banner instead of the install modal. Now checks `is_installed()` even when the config already says `lightning-mlx` — returns `{needs_install}` in both cases.

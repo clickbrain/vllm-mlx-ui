@@ -38,6 +38,8 @@ CONFIG_FILE = STATE_DIR / "server_config.json"
 LOG_FILE = STATE_DIR / "server.log"
 AUTO_START_FLAG = STATE_DIR / "auto_start_after_relaunch.flag"
 RELAUNCH_FLAG   = STATE_DIR / "relaunch_pending.flag"
+# Written before brew upgrade so the new venv can reinstall pip engines on first boot.
+PENDING_ENGINE_REINSTALLS_FILE = STATE_DIR / "pending_engine_reinstalls.json"
 
 # ── Persistent HTTP session ────────────────────────────────────────────────────
 # A single Session is reused across all remote API calls so TCP connections stay
@@ -346,6 +348,83 @@ def _load_local_config() -> dict[str, Any]:
         except Exception:
             logger.warning("Operation failed", exc_info=True)
     return DEFAULT_CONFIG.copy()
+
+
+def save_pending_engine_reinstalls() -> None:
+    """Record installed pip engines before a brew upgrade so the new venv can reinstall them.
+
+    brew upgrade creates a fresh venv that doesn't inherit pip-installed engines like
+    rapid-mlx or lightning-mlx.  Calling this before the upgrade writes a list of
+    package names so process_pending_engine_reinstalls() can restore them on first boot.
+    """
+    try:
+        from vllm_mlx.dashboard.engines.registry import ENGINES, _registry_lock
+        with _registry_lock:
+            engines_snapshot = dict(ENGINES)
+        packages: list[str] = []
+        for engine in engines_snapshot.values():
+            if engine.install_method != "pip":
+                continue
+            try:
+                if not engine.is_installed():
+                    continue
+                pkg = engine.get_package_name()
+                if pkg:
+                    packages.append(pkg)
+            except Exception:
+                continue
+        if packages:
+            STATE_DIR.mkdir(parents=True, exist_ok=True)
+            PENDING_ENGINE_REINSTALLS_FILE.write_text(
+                json.dumps({"packages": packages}), encoding="utf-8"
+            )
+            logger.info("Saved pending engine reinstalls: %s", packages)
+    except Exception as exc:
+        logger.warning("save_pending_engine_reinstalls failed: %s", exc, exc_info=True)
+
+
+def process_pending_engine_reinstalls() -> None:
+    """On startup, reinstall any pip engines that were lost during a brew upgrade.
+
+    After brew upgrade, the new venv doesn't have user-installed pip engines.
+    This function reads the pending reinstall list (written before the upgrade),
+    installs each package into the current venv, then deletes the list.
+    Runs in a background thread to avoid blocking server startup.
+    """
+    if not PENDING_ENGINE_REINSTALLS_FILE.exists():
+        return
+
+    def _reinstall() -> None:
+        try:
+            import subprocess as _sp
+            data = json.loads(PENDING_ENGINE_REINSTALLS_FILE.read_text(encoding="utf-8"))
+            packages = data.get("packages", [])
+            if not packages:
+                PENDING_ENGINE_REINSTALLS_FILE.unlink(missing_ok=True)
+                return
+            logger.info("Post-upgrade: reinstalling pip engines into new venv: %s", packages)
+            for pkg in packages:
+                try:
+                    result = _sp.run(
+                        [sys.executable, "-m", "pip", "install", "--upgrade", pkg],
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                    )
+                    if result.returncode == 0:
+                        logger.info("Post-upgrade: reinstalled %s", pkg)
+                    else:
+                        logger.warning(
+                            "Post-upgrade: reinstall of %s failed (exit %d): %s",
+                            pkg, result.returncode, result.stderr[:500],
+                        )
+                except Exception as exc:
+                    logger.warning("Post-upgrade: reinstall of %s failed: %s", pkg, exc)
+            PENDING_ENGINE_REINSTALLS_FILE.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.warning("process_pending_engine_reinstalls failed: %s", exc, exc_info=True)
+
+    threading.Thread(target=_reinstall, daemon=True, name="engine-reinstall").start()
 
 
 def load_config() -> dict[str, Any]:
