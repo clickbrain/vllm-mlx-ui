@@ -15,6 +15,7 @@ import { ref, computed, onMounted, onActivated, watch, defineOptions } from 'vue
 defineOptions({ name: 'ModelsView' })
 import { useModelsStore } from '@/stores/models'
 import { useServerStore } from '@/stores/server'
+import { useToastStore } from '@/stores/toast'
 import { useRouter } from 'vue-router'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
@@ -29,6 +30,7 @@ import { findBestChoices, type ModelBadge } from '@/composables/useModelScoring'
 
 const modelsStore = useModelsStore()
 const serverStore = useServerStore()
+const toastStore = useToastStore()
 const router = useRouter()
 
 const { selectedUseCase, maxAgeMonths } = usePreferences()
@@ -315,6 +317,10 @@ async function handleLoad(modelId: string) {
   loadToast.value = `Switching to ${modelName}…`
   try {
     const result = await modelsStore.loadModel(modelId)
+    // Notify when engine was auto-switched (e.g. lightning-mlx for MTPLX models)
+    if (result?.engine_id && result.engine_id !== 'vllm-mlx') {
+      toastStore.info(`Auto-switched to ${result.engine_id} engine for this model.`)
+    }
     if (!result?.restarted) {
       loadToast.value = 'Model loaded'
       setTimeout(() => { loadToast.value = null }, 3000)

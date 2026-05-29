@@ -1,6 +1,16 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.57 — 2026-05-29
+## v0.8.58 — 2026-05-29
+
+### Fixed
+
+- **MTPLX load: 500 error with no message** — When loading an MTPLX model from the Models page, the app returned "API error 500: /server/load" with no further information. Root cause: the API client threw `new Error('API error 500: ...')` without reading FastAPI's `{"detail": "..."}` response body. Fixed `client.ts` to parse the error body and surface the `detail` string directly.
+
+- **MTPLX load: server killed before checking lightning-mlx** — `/server/load` stopped the currently running server (`stop_server()`) before calling `start_server()`, which then failed the lightning-mlx check and left nothing running. Reordered: MTPLX engine check now runs first; if lightning-mlx is not installed, returns HTTP 422 with install instructions WITHOUT stopping the running server.
+
+- **MTPLX load: config saved with wrong engine_id** — Config was saved to disk with the old `engine_id` (vllm-mlx) before the engine auto-switch logic ran. Config is now saved after the engine switch so the engine selector updates correctly.
+
+- **MTPLX load: engine switch not shown** — When lightning-mlx IS installed, the engine switch was silently applied with no user feedback. Now shows a toast notification and returns `engine_id` in the response so the Models page can display it.
 
 ### Added
 

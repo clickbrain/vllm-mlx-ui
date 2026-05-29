@@ -952,9 +952,6 @@ def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
     try:
         presets = mm.get_model_presets(model_id)
         if presets.get("max_tokens"):
-            # max_request_tokens = model's context window — the ceiling clients can request.
-            # max_tokens = default generation length when the client doesn't specify one.
-            # Never override max_tokens from presets; that's a user-controlled generation cap.
             cfg["max_request_tokens"] = presets["max_tokens"]
         if presets.get("context_length"):
             cfg["context_length"] = presets["context_length"]
@@ -962,6 +959,14 @@ def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
         logger.warning("Operation failed", exc_info=True)
 
     cfg["model"] = model_id
+
+    # Apply MTPLX engine switch BEFORE saving config or stopping the server.
+    # If lightning-mlx is not installed, we fail early — the current server
+    # stays running and the user gets an actionable error message.
+    cfg, mtplx_msg = sm._apply_mtplx_engine_switch(cfg)
+    if mtplx_msg.startswith("⚠️"):
+        raise HTTPException(status_code=422, detail=mtplx_msg)
+
     sm.save_config(cfg)
 
     if was_running:
@@ -988,7 +993,7 @@ def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
 
     _threading.Thread(target=_deferred_warmup, daemon=True, name="deferred-warmup").start()
 
-    return {"ok": True, "model": model_id, "restarted": True}
+    return {"ok": True, "model": model_id, "engine_id": cfg.get("engine_id", "vllm-mlx"), "restarted": True}
 
 
 # ── Memory ────────────────────────────────────────────────────────────────────

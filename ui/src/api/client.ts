@@ -64,7 +64,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     authRequired.value = true
     throw new Error('AUTH_REQUIRED')
   }
-  if (!res.ok) throw new Error(`API error ${res.status}: ${path}`)
+  if (!res.ok) {
+    // Try to extract FastAPI's `detail` field for a human-readable message.
+    let detail = ''
+    try {
+      const errBody = await res.json()
+      detail = typeof errBody?.detail === 'string' ? errBody.detail : JSON.stringify(errBody.detail)
+    } catch { /* body wasn't JSON */ }
+    throw new Error(detail || `API error ${res.status}: ${path}`)
+  }
   const text = await res.text()
   return (text ? JSON.parse(text) : undefined) as T
 }

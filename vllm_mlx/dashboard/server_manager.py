@@ -984,6 +984,8 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
         if mtplx_msg.startswith("⚠️"):
             return False, mtplx_msg
         if mtplx_msg:
+            # Engine was switched — persist it so the UI reflects the change
+            save_config(config)
             logger.info(mtplx_msg)
     # ──────────────────────────────────────────────────────────────────────────
 
