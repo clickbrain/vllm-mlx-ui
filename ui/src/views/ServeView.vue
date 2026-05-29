@@ -15,6 +15,7 @@ import { computed, ref, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
+import { useTourStore } from '@/stores/tour'
 import StatusPill from '@/components/shared/StatusPill.vue'
 import AppButton from '@/components/shared/AppButton.vue'
 import CollapsibleSection from '@/components/shared/CollapsibleSection.vue'
@@ -29,6 +30,7 @@ const router = useRouter()
 
 const serverStore = useServerStore()
 const modelsStore = useModelsStore()
+const tourStore = useTourStore()
 
 interface EngineInfo {
   id: string
@@ -47,6 +49,7 @@ const copiedUrl = ref<string | null>(null)
 
 // Engine + model selection
 const engines = ref<EngineInfo[]>([])
+const enginesLoaded = ref(false)
 const selectedEngine = ref('')
 const engineChanged = computed(() => selectedEngine.value && selectedEngine.value !== serverStore.engineId)
 const applyPending = ref(false)
@@ -90,6 +93,7 @@ async function fetchEngines() {
       selectedEngine.value = serverStore.engineId
     }
   } catch { /* non-critical */ }
+  finally { enginesLoaded.value = true }
 }
 
 async function saveEngineAndRestart() {
@@ -252,12 +256,19 @@ function connectionUrl(ip: string) {
 
 // Show the setup guide if vllm-mlx (or any engine) is not installed
 const showSetupGuide = computed(() =>
+  enginesLoaded.value &&
   serverStore.config !== null &&
   !serverStore.isRunning &&
   !serverStore.loading &&
   engines.value.length === 0 &&
   localStorage.getItem('vmui_setup_complete') !== '1'
 )
+
+// When the setup guide is active, dismiss any concurrent tour overlay.
+// Both activate on first run; the setup guide takes full screen priority.
+watch(showSetupGuide, (val) => {
+  if (val && tourStore.isActive) tourStore.skip()
+}, { immediate: true })
 
 // ── Running status hero ───────────────────────────────────────────────────────
 const showHero = computed(() => serverStore.isRunning)

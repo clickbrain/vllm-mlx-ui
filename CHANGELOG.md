@@ -1,5 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.54 — 2026-05-29
+
+### Fixed
+
+- **Onboarding: TourOverlay blocks SetupGuide on fresh install** — On a true fresh install, both `TourOverlay` (triggered by missing `vllm-mlx-ui-tour-completed` in localStorage) and `SetupGuide` activated simultaneously. Because `TourOverlay` uses `z-index: 9999` and teleports to `<body>`, it completely covered the SetupGuide, making onboarding invisible to new users. Fix: added a `watch` on `showSetupGuide` in `ServeView.vue` that calls `tourStore.skip()` when the setup guide is active. The tour is suppressed; users will encounter it after setup when the main UI is functional.
+
+- **Onboarding: SetupGuide flash on existing install** — `showSetupGuide` evaluated before `fetchEngines()` completed, causing a brief flash of the setup guide even on machines with engines installed. Fixed by adding `enginesLoaded` ref (set in `fetchEngines()` finally block) as a gate condition.
+
 ## v0.8.53 — 2026-05-29
 
 ### Added
