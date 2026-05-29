@@ -258,6 +258,16 @@ const mtpDraftTokens = ref(1)
 const prefillStepSize = ref(0)
 const enableMetrics = ref(false)
 
+const cacheBrowsing = ref(false)
+async function browseCacheDir() {
+  cacheBrowsing.value = true
+  try {
+    const result = await api.get<{ path: string }>('/browse-directory')
+    if (result?.path) cachePathInput.value = result.path
+  } catch { /* user cancelled or unsupported */ }
+  finally { cacheBrowsing.value = false }
+}
+
 const ssdBrowsing = ref(false)
 async function browseSsdDir() {
   ssdBrowsing.value = true
@@ -847,7 +857,10 @@ onUnmounted(() => {
               structure (<code>models--org--name/</code>). GGUF files can coexist as flat files
               in the same directory. Ollama uses its own <code>~/.ollama/models/</code> store.
             </span>
-            <input v-else v-model="cachePathInput" class="field-input cache-path-input" type="text" placeholder="~/.cache/huggingface/hub (default)" />
+            <div v-if="editCachePath" class="field-with-browse">
+              <input v-model="cachePathInput" class="field-input cache-path-input" type="text" placeholder="~/.cache/huggingface/hub (default)" />
+              <AppButton variant="ghost" size="sm" :loading="cacheBrowsing" @click="browseCacheDir">Browse…</AppButton>
+            </div>
           </div>
           <div v-if="!editCachePath" class="pref-actions">
             <AppButton variant="ghost" size="sm" @click="editCachePath = true">Change…</AppButton>

@@ -1,5 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.55 — 2026-05-29
+
+### Improved
+
+- **Models Directory: Browse button** — The Models Directory field in Settings → Storage now has a `Browse…` button in edit mode. Opens a native directory picker via the `/browse-directory` backend endpoint instead of requiring manual path entry. Matches the existing UX of the SSD KV Cache Directory field.
+
 ## v0.8.54 — 2026-05-29
 
 ### Fixed
