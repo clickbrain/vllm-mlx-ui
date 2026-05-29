@@ -16,6 +16,7 @@ import { useRouter } from 'vue-router'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
 import { useTourStore } from '@/stores/tour'
+import { useToastStore } from '@/stores/toast'
 import StatusPill from '@/components/shared/StatusPill.vue'
 import AppButton from '@/components/shared/AppButton.vue'
 import CollapsibleSection from '@/components/shared/CollapsibleSection.vue'
@@ -31,6 +32,7 @@ const router = useRouter()
 const serverStore = useServerStore()
 const modelsStore = useModelsStore()
 const tourStore = useTourStore()
+const toastStore = useToastStore()
 
 interface EngineInfo {
   id: string
@@ -192,6 +194,13 @@ async function handleModelSwitch(e: Event) {
   if (modelMeta?.engine && modelMeta.engine !== selectedEngine.value) {
     selectedEngine.value = modelMeta.engine
     // Engine changed — user must click Apply & Restart; don't also load the model now
+    return
+  }
+
+  // Auto-switch to lightning-mlx for MTPLX-packaged models
+  if (!modelMeta?.engine && newId.toLowerCase().includes('mtplx') && selectedEngine.value !== 'lightning-mlx') {
+    selectedEngine.value = 'lightning-mlx'
+    toastStore.info('Switched to lightning-mlx engine for this MTPLX model. Click Apply & Restart to serve it.')
     return
   }
 

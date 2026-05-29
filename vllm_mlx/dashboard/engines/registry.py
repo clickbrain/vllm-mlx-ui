@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from .apple_fm import AppleFMEngine
 from .ds4_m5 import Ds4M5Engine, is_m5_or_newer
 from .external_api import ExternalApiEngine
+from .lightning_mlx import LightningMlxEngine
 from .llama_cpp import LlamaCppEngine
 from .lmstudio import LmStudioEngine
 from .ollama import OllamaEngine
@@ -46,6 +47,7 @@ logger = logging.getLogger(__name__)
 _BUILTINS: list[BaseEngine] = [
     VllmMlxEngine(),     # bundled Python-based engine — most stable, always first
     RapidMlxEngine(),    # pip-based Apple Silicon engine
+    LightningMlxEngine(), # MTPLX speculative decoding — best for MTPLX-packaged models
     OllamaEngine(),      # popular desktop app, reliable
     LmStudioEngine(),    # desktop GUI app
     LlamaCppEngine(),    # llama.cpp CLI

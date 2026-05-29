@@ -1,5 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.57 — 2026-05-29
+
+### Added
+
+- **lightning-mlx engine** — First-class support for the [lightning-mlx](https://github.com/samuelfaj/lightning-mlx) inference engine, which delivers 2–5× higher throughput on MTPLX-packaged models (Qwen3.5 MoE speculative decoding via MTP sidecar). Install via `pip install git+https://github.com/samuelfaj/lightning-mlx.git`. Configure via Settings → Inference Engine → Lightning MLX.
+
+- **MTPLX model auto-switch** — When a model whose name contains "mtplx" is selected (e.g. `Qwopus3.6-35B-A3B-v1-8bit-MTPLX-Optimized-Speed`), the app automatically switches to the lightning-mlx engine. If lightning-mlx is installed, the engine is switched transparently and the config is saved. If it is not installed, the user receives a clear error with the install command instead of silently running on the slower engine. The Serve page also detects MTPLX models in the model picker and auto-selects lightning-mlx with a toast notification, so the user always has the correct engine before clicking Apply & Restart.
+
 ## v0.8.56 — 2026-05-29
 
 ### Fixed

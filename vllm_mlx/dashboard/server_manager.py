@@ -838,6 +838,56 @@ def _build_command(config: dict[str, Any]) -> list[str]:
     return engine.build_command(config)
 
 
+def _is_mtplx_model(model_id: str) -> bool:
+    """Return True if *model_id* names an MTPLX-packaged model.
+
+    MTPLX models carry an ``mtp.safetensors`` sidecar and ``mtplx_runtime.json``
+    metadata that only lightning-mlx can exploit.  Detection is based on the
+    model name containing "mtplx" (case-insensitive), which is the convention
+    used by the samuelfaj/lightning-mlx model family on HuggingFace.
+    """
+    return "mtplx" in model_id.lower()
+
+
+def _apply_mtplx_engine_switch(config: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """If *config* selects an MTPLX model and the engine is not lightning-mlx,
+    switch the engine to lightning-mlx automatically.
+
+    Returns:
+        (updated_config, info_message)
+        info_message is empty string when no switch was needed or possible.
+        info_message starts with "⚠️" when lightning-mlx is NOT installed.
+    """
+    model = config.get("model", "")
+    if not _is_mtplx_model(model):
+        return config, ""
+
+    current_engine = config.get("engine_id", "vllm-mlx")
+    if current_engine == "lightning-mlx":
+        return config, ""  # already on the right engine
+
+    try:
+        lm_eng = get_engine("lightning-mlx")
+    except KeyError:
+        return config, "⚠️ lightning-mlx engine not registered — cannot auto-switch for MTPLX model."
+
+    if not lm_eng.is_installed():
+        return config, (
+            "⚠️ This model is an MTPLX-packaged model and requires lightning-mlx for "
+            "full performance. Install it with:\n"
+            "  pip install git+https://github.com/samuelfaj/lightning-mlx.git\n"
+            "Then restart the server."
+        )
+
+    switched = dict(config)
+    switched["engine_id"] = "lightning-mlx"
+    logger.info(
+        "MTPLX model detected (%s) — auto-switching engine from %r to lightning-mlx",
+        model, current_engine,
+    )
+    return switched, f"ℹ️ Auto-switched to lightning-mlx engine for MTPLX model."
+
+
 def _build_env(config: dict[str, Any]) -> dict | None:
     """Return the environment dict for the engine subprocess, or None to inherit parent env.
 
@@ -923,6 +973,19 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
             return d.get("ok", False), d.get("message", str(r.status_code))
         except Exception as e:
             return False, f"Could not reach management API: {e}"
+
+    # ── MTPLX auto-switch ──────────────────────────────────────────────────────
+    # If the selected model is an MTPLX-packaged model and the active engine is
+    # NOT lightning-mlx, automatically switch to lightning-mlx (or inform the
+    # user that it needs to be installed).
+    engine_id = config.get("engine_id", "vllm-mlx")
+    if engine_id not in ("openai-compatible", "external-api", "lmstudio"):
+        config, mtplx_msg = _apply_mtplx_engine_switch(config)
+        if mtplx_msg.startswith("⚠️"):
+            return False, mtplx_msg
+        if mtplx_msg:
+            logger.info(mtplx_msg)
+    # ──────────────────────────────────────────────────────────────────────────
 
     pid = _get_pid()
     if pid and _is_process_alive(pid):
