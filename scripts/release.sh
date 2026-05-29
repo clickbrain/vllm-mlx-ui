@@ -86,6 +86,35 @@ echo "  Releasing vllm-mlx-ui ${VERSION}"
 echo "  QA: ${SIGNOFF_VERDICT} — ${SIGNOFF_SUMMARY}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Must be on main
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$CURRENT_BRANCH" != "main" ]]; then
+  echo "  ✗ Must be on 'main' branch (currently on '${CURRENT_BRANCH}')."
+  exit 1
+fi
+
+# Working tree must be clean (no uncommitted changes sneak into the release commit)
+if ! git diff --exit-code --quiet || ! git diff --cached --exit-code --quiet; then
+  echo "  ✗ Working tree has uncommitted changes. Commit or stash before releasing."
+  git status --short
+  exit 1
+fi
+
+# Sync with origin before any modifications so no unreviewed upstream commits
+# enter the release tag. Fail fast if not current rather than silently rebasing
+# mid-release.
+echo "→ Syncing with origin/main..."
+git fetch origin
+LOCAL_SHA=$(git rev-parse HEAD)
+REMOTE_SHA=$(git rev-parse origin/main)
+if [[ "$LOCAL_SHA" != "$REMOTE_SHA" ]]; then
+  echo "  ✗ Branch is not current with origin/main."
+  echo "    Local : ${LOCAL_SHA:0:12}"
+  echo "    Remote: ${REMOTE_SHA:0:12}"
+  echo "    Run:  git pull --rebase  then re-run QA and sign off before releasing."
+  exit 1
+fi
+
 # Check that the tag doesn't already exist
 if git tag -l "$TAG" | grep -q .; then
   echo "  ✗ Tag ${TAG} already exists locally."
@@ -129,7 +158,6 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 
 # ── 5. Tag and push code + tag together ────────────────────
 echo "→ Tagging and pushing code..."
-git pull --rebase
 git tag "${TAG}"
 git push origin main "${TAG}"
 
@@ -152,6 +180,13 @@ for i in $(seq 1 45); do
   fi
   if [[ "$i" == "45" ]]; then
     echo "  ✗ Tarball not available after 90s — aborting"
+    echo ""
+    echo "  ⚠ Tag ${TAG} was already pushed. To complete the formula update manually:"
+    echo "    1. Wait a minute, then check: curl -sI ${TARBALL_URL}"
+    echo "    2. SHA256: curl -sL ${TARBALL_URL} | shasum -a 256"
+    echo "    3. Update Formula/vllm-mlx-ui.rb (url, sha256, version)"
+    echo "    4. git add Formula/ && git commit -m 'chore: update formula to ${TAG}' && git push"
+    echo "    5. Clone tap and repeat: https://github.com/${TAP_REPO}"
     exit 1
   fi
   sleep 2
@@ -163,6 +198,11 @@ SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | cut -d' ' -f1)
 echo "  sha256: ${SHA256}"
 
 # ── 8. Update formula in main repo ─────────────────────────
+# NOTE: This commit is intentionally AFTER the tag. The SHA256 requires the
+# GitHub tarball, which requires the tag to already be pushed — unavoidable
+# circular dependency. The formula in this repo is cosmetic/reference only;
+# Homebrew reads from the tap repo (homebrew-vllm-mlx-ui). This post-tag
+# commit is the established pattern for every release in this project.
 echo "→ Updating Homebrew formula in main repo..."
 sed -i '' "s|url \"https://github.com/clickbrain/vllm-mlx-ui/archive/refs/tags/v[^\"]*\"|url \"${TARBALL_URL}\"|" Formula/vllm-mlx-ui.rb
 sed -i '' "s|sha256 \"[a-f0-9]*\"|sha256 \"${SHA256}\"|" Formula/vllm-mlx-ui.rb
