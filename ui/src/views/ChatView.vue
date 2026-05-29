@@ -189,6 +189,18 @@ watch(() => serverStore.engineId, (id) => {
   if (!switchingEngine.value) selectedEngine.value = id
 })
 
+async function switchModel(e: Event) {
+  const newId = (e.target as HTMLSelectElement).value
+  if (!newId || newId === serverStore.modelId) return
+  try {
+    await modelsStore.loadModel(newId)
+    // needs_install: App.vue global modal handles it (modelsStore.pendingInstall was set)
+    // engine auto-switch: serverStore.engineId watch updates selectedEngine automatically
+  } catch {
+    // loadModel sets modelsStore.actionError; toast/banner will show it
+  }
+}
+
 // Active chat title for the header (set when loading a saved chat)
 const activeTitle = ref<string | null>(null)
 
@@ -852,7 +864,7 @@ onUnmounted(() => {
                 class="model-select"
                 :value="modelId ?? ''"
                 :disabled="switchingEngine || !!modelsStore.serverRestartingFor || serverStore.loading"
-                @change="(e) => modelsStore.loadModel((e.target as HTMLSelectElement).value)"
+                @change="switchModel"
               >
                 <option value="" disabled>Switch model…</option>
                 <option v-for="m in modelsStore.models" :key="m.id" :value="m.id">

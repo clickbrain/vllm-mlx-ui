@@ -1,5 +1,33 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.62 — 2026-05-29
+
+### Fixed
+- **MTPLX models not loading from engine/model dropdowns** — The ServeView model dropdown detected
+  MTPLX models, switched the engine picker to `lightning-mlx`, and then returned early without
+  actually loading the model.  The user was left with a wrong engine selected and no model load.
+  Fixed: the early return is removed.  `loadModel()` is always called; the backend handles MTPLX
+  detection and either installs lightning-mlx (if missing) or auto-switches and loads.
+- **No install prompt when selecting MTPLX model from ChatView** — The ChatView model dropdown
+  called `modelsStore.loadModel()` and silently discarded the result.  A `needs_install` response
+  would set nothing visible, causing the dropdown to revert with no explanation.  Fixed via global
+  install modal (see below).
+- **Engine dropdown blank until API response** — The ServeView engine selector showed no options
+  while the `/engines` API call was in-flight, appearing broken.  Fixed: a fallback `<option>` now
+  shows the current engine ID immediately, before the full list loads.
+- **Engine dropdown not updating after model switch** — After loading an MTPLX model (which
+  auto-switches the engine to `lightning-mlx`), the engine picker still showed the old engine.
+  Fixed: the engine watcher now always syncs from `serverStore.engineId` whenever the server's
+  engine changes, as long as the user hasn't manually selected a different engine.
+
+### Added
+- **Global install modal** — `InstallEngineModal` is now mounted globally in `App.vue` and driven
+  by new `modelsStore.pendingInstall` state.  Any call to `loadModel()` — from the Models page,
+  ChatView, ServeView, or any future entry point — that receives a `needs_install` response will
+  automatically show the install modal with live pip install progress.  After installation
+  completes, the modal retries the original model load automatically.  This replaces the previous
+  pattern where each view had to handle `needs_install` locally (and most didn't).
+
 ## v0.8.61 — 2026-05-29
 
 ### Fixed

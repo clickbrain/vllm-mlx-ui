@@ -142,9 +142,14 @@ onMounted(() => {
   api.get<{ enabled: boolean }>('/auto_switch_enabled').then(r => { autoSwitchEnabled.value = r.enabled }).catch(() => { /* non-critical auto-switch status */ })
 })
 
-// Sync selectedEngine from store when engineId becomes available
-watch(() => serverStore.engineId, (val) => {
-  if (val && !selectedEngine.value) selectedEngine.value = val
+// Sync selectedEngine from store when engineId changes.
+// Only update if the user hasn't manually changed the dropdown to a different value
+// (i.e., preserve a pending user selection that hasn't been applied yet).
+watch(() => serverStore.engineId, (val, old) => {
+  if (!val) return
+  if (!selectedEngine.value || selectedEngine.value === (old ?? '') || selectedEngine.value === val) {
+    selectedEngine.value = val
+  }
 }, { immediate: true })
 
 const status = computed(() => {
@@ -206,7 +211,8 @@ async function handleModelSwitch(e: Event) {
   const newId = target.value
   if (!newId || newId === serverStore.modelId) return
 
-  // Auto-switch engine if the model belongs to a specific engine (e.g. ds4)
+  // Auto-switch engine if the model belongs to a fixed-model engine (e.g. ds4, remote).
+  // These engines own their model selection; don't attempt a hot-swap load.
   const modelMeta = modelsStore.models.find(m => m.id === newId)
   if (modelMeta?.engine && modelMeta.engine !== selectedEngine.value) {
     selectedEngine.value = modelMeta.engine
@@ -214,17 +220,18 @@ async function handleModelSwitch(e: Event) {
     return
   }
 
-  // Auto-switch to lightning-mlx for MTPLX-packaged models
-  if (!modelMeta?.engine && newId.toLowerCase().includes('mtplx') && selectedEngine.value !== 'lightning-mlx') {
-    selectedEngine.value = 'lightning-mlx'
-    toastStore.info('Switched to lightning-mlx engine for this MTPLX model. Click Apply & Restart to serve it.')
-    return
-  }
-
+  // All other cases (including MTPLX) — call loadModel().
+  // The backend detects MTPLX and either:
+  //   a) installs lightning-mlx (if needed) → models store sets pendingInstall → App.vue shows modal
+  //   b) auto-switches to lightning-mlx (already installed) and loads the model
   switchingModel.value = true
   switchError.value = null
   try {
-    await modelsStore.loadModel(newId)
+    const result = await modelsStore.loadModel(newId)
+    // If engine was auto-switched (e.g. to lightning-mlx), sync the engine dropdown immediately
+    if (result?.engine_id) {
+      selectedEngine.value = result.engine_id
+    }
   } catch (err) {
     switchError.value = String(err)
   } finally {
@@ -408,6 +415,10 @@ async function doClearCache(type: string) {
               v-model="selectedEngine"
               aria-label="Select inference engine"
             >
+              <!-- Fallback: show current engine immediately even while engines list loads -->
+              <option v-if="!engines.length && selectedEngine" :value="selectedEngine">
+                {{ selectedEngine }}
+              </option>
               <option v-for="e in engines" :key="e.id" :value="e.id">
                 {{ e.name }}
               </option>

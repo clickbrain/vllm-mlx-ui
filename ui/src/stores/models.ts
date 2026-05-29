@@ -191,6 +191,8 @@ export const useModelsStore = defineStore('models', () => {
   const loadingModelId = ref<string | null>(null)
   const actionError = ref<string | null>(null)
   const serverRestartingFor = ref<string | null>(null)
+  /** Set when backend returns needs_install; App.vue global modal reads this */
+  const pendingInstall = ref<{ engineId: string; engineName: string; modelId: string } | null>(null)
   const modelScores = ref<Record<string, BenchmarkScores>>({})
 
   async function fetchModels() {
@@ -282,6 +284,24 @@ export const useModelsStore = defineStore('models', () => {
     actionError.value = null
     try {
       const result = await api.post<{ ok?: boolean; restarted?: boolean; model?: string; engine_id?: string; needs_install?: string }>('/server/load', { model_id: modelId })
+
+      // Backend says a required engine isn't installed — surface the global install modal.
+      // Server state hasn't changed, so don't fetch config/status/models.
+      if (result?.needs_install) {
+        const knownNames: Record<string, string> = {
+          'lightning-mlx': 'Lightning MLX',
+          'rapid-mlx': 'Rapid MLX',
+          'vllm-mlx': 'vLLM MLX',
+          'ds4': 'DeepSeek V4 Flash (ds4)',
+        }
+        pendingInstall.value = {
+          engineId: result.needs_install,
+          engineName: knownNames[result.needs_install] ?? result.needs_install,
+          modelId,
+        }
+        return result
+      }
+
       await serverStore.fetchConfig()
       await serverStore.fetchStatus()
       await fetchModels()
@@ -310,6 +330,16 @@ export const useModelsStore = defineStore('models', () => {
     } finally {
       loadingModelId.value = null
     }
+  }
+
+  function clearPendingInstall() {
+    pendingInstall.value = null
+  }
+
+  async function retryLoadAfterInstall() {
+    const modelId = pendingInstall.value?.modelId
+    pendingInstall.value = null
+    if (modelId) await loadModel(modelId)
   }
 
   async function deleteModel(modelId: string) {
@@ -548,9 +578,9 @@ export const useModelsStore = defineStore('models', () => {
     benchmarkResults, benchmarkHistory, benchmarking, benchmarkRunning,
     bestBenchmarkPerModel,
     modelScores,
-    loadingModelId, actionError, serverRestartingFor,
+    loadingModelId, actionError, serverRestartingFor, pendingInstall,
     fetchModels, downloadModel, pollDownloadStatus, resumeActiveDownloadPolls, clearAllDownloadPolls,
-    loadModel, deleteModel,
+    loadModel, deleteModel, clearPendingInstall, retryLoadAfterInstall,
     searchHF, searchHFMore,
     fetchModelScores,
     runBenchmark, fetchBenchmarkResults, deleteBenchmarkResult, clearAllBenchmarks,

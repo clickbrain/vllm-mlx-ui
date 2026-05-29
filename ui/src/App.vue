@@ -13,6 +13,7 @@ import TourOverlay from '@/components/shared/TourOverlay.vue'
 import CommandPalette from '@/components/shared/CommandPalette.vue'
 import AuthUnlockPanel from '@/components/shared/AuthUnlockPanel.vue'
 import ToastNotification from '@/components/shared/ToastNotification.vue'
+import InstallEngineModal from '@/components/shared/InstallEngineModal.vue'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
 import { useTourStore } from '@/stores/tour'
@@ -46,6 +47,15 @@ onUnmounted(() => {
     <TourOverlay />
     <CommandPalette />
     <AuthUnlockPanel />
+    <!-- Global install modal — shown from any page when loadModel() returns needs_install -->
+    <InstallEngineModal
+      v-if="modelsStore.pendingInstall"
+      :engine-id="modelsStore.pendingInstall.engineId"
+      :engine-name="modelsStore.pendingInstall.engineName"
+      :model-id="modelsStore.pendingInstall.modelId"
+      @installed="modelsStore.retryLoadAfterInstall()"
+      @cancel="modelsStore.clearPendingInstall()"
+    />
     <AppSidebar />
     <div class="app-main">
       <AppTopbar />
