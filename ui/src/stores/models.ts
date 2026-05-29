@@ -281,7 +281,7 @@ export const useModelsStore = defineStore('models', () => {
     loadingModelId.value = modelId
     actionError.value = null
     try {
-      const result = await api.post<{ ok: boolean; restarted: boolean; model: string; engine_id?: string }>('/server/load', { model_id: modelId })
+      const result = await api.post<{ ok?: boolean; restarted?: boolean; model?: string; engine_id?: string; needs_install?: string }>('/server/load', { model_id: modelId })
       await serverStore.fetchConfig()
       await serverStore.fetchStatus()
       await fetchModels()

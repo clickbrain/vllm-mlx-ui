@@ -209,11 +209,15 @@ export const useServerStore = defineStore('server', () => {
     }
   }
 
-  async function startServer() {
+  async function startServer(): Promise<{ needs_install?: string; model?: string } | undefined> {
     loading.value = true
     crashLog.value = null
     try {
-      await api.post('/start')
+      const result = await api.post<{ ok?: boolean; needs_install?: string; model?: string; message?: string }>('/start')
+      // If the engine needs installation, return the signal immediately without polling.
+      if (result?.needs_install) {
+        return result
+      }
       // Poll until running — inference server takes 30–90 s to boot a model
       const deadline = Date.now() + 120_000
       while (Date.now() < deadline) {

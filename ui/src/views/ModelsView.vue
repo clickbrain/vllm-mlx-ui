@@ -25,6 +25,7 @@ import DownloadQueueCard from '@/components/models/DownloadQueueCard.vue'
 import HFSearchResult from '@/components/models/HFSearchResult.vue'
 import AppButton from '@/components/shared/AppButton.vue'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
+import InstallEngineModal from '@/components/shared/InstallEngineModal.vue'
 import { usePreferences } from '@/composables/usePreferences'
 import { findBestChoices, type ModelBadge } from '@/composables/useModelScoring'
 
@@ -40,6 +41,9 @@ type TabName = typeof tabs[number]
 const activeTab = ref<TabName>('Library')
 
 const confirmModal = ref<{ modelId: string; message: string } | null>(null)
+
+// Install-engine modal state
+const installModal = ref<{ engineId: string; engineName: string; modelId: string } | null>(null)
 
 // Library filter + sort + text search
 const libraryFilter = ref<'all' | 'active'>('all')
@@ -317,6 +321,18 @@ async function handleLoad(modelId: string) {
   loadToast.value = `Switching to ${modelName}…`
   try {
     const result = await modelsStore.loadModel(modelId)
+
+    // Backend detected lightning-mlx is needed but not installed — show install modal
+    if (result?.needs_install) {
+      loadToast.value = null
+      installModal.value = {
+        engineId: result.needs_install,
+        engineName: result.needs_install === 'lightning-mlx' ? 'Lightning MLX' : result.needs_install,
+        modelId,
+      }
+      return
+    }
+
     // Notify when engine was auto-switched (e.g. lightning-mlx for MTPLX models)
     if (result?.engine_id && result.engine_id !== 'vllm-mlx') {
       toastStore.info(`Auto-switched to ${result.engine_id} engine for this model.`)
@@ -341,6 +357,12 @@ async function handleLoad(modelId: string) {
     loadToast.value = null
     modelsStore.actionError = String(err)
   }
+}
+
+async function handleInstallComplete(modelId: string) {
+  installModal.value = null
+  // lightning-mlx is now installed — retry the model load
+  await handleLoad(modelId)
 }
 
 async function handleDelete(modelId: string) {
@@ -769,6 +791,15 @@ watch(activeTab, (tab) => {
       :destructive="true"
       @confirm="doDelete"
       @cancel="confirmModal = null"
+    />
+
+    <InstallEngineModal
+      v-if="installModal"
+      :engine-id="installModal.engineId"
+      :engine-name="installModal.engineName"
+      :model-id="installModal.modelId"
+      @installed="handleInstallComplete(installModal!.modelId)"
+      @cancel="installModal = null"
     />
   </div>
 </template>

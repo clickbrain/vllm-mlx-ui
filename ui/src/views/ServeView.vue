@@ -21,6 +21,7 @@ import StatusPill from '@/components/shared/StatusPill.vue'
 import AppButton from '@/components/shared/AppButton.vue'
 import CollapsibleSection from '@/components/shared/CollapsibleSection.vue'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
+import InstallEngineModal from '@/components/shared/InstallEngineModal.vue'
 import EndpointCard from '@/components/serve/EndpointCard.vue'
 import MetricCard from '@/components/serve/MetricCard.vue'
 import { api } from '@/api/client'
@@ -55,6 +56,7 @@ const enginesLoaded = ref(false)
 const selectedEngine = ref('')
 const engineChanged = computed(() => selectedEngine.value && selectedEngine.value !== serverStore.engineId)
 const applyPending = ref(false)
+const installModal = ref<{ engineId: string; engineName: string; modelId: string } | null>(null)
 
 const selectedEngineInfo = computed(() =>
   engines.value.find(e => e.id === selectedEngine.value) ?? null
@@ -107,9 +109,24 @@ async function saveEngineAndRestart() {
     if (serverStore.modelId && !fixedModelDisplay.value) updates.model = serverStore.modelId
     await serverStore.saveConfig(updates as any)
     await serverStore.stopServer()
-    await serverStore.startServer()
+    const result = await serverStore.startServer()
+    if (result?.needs_install) {
+      // lightning-mlx (or another engine) is not installed — show install modal
+      const engineName = engines.value.find(e => e.id === result.needs_install)?.name ?? result.needs_install ?? 'Engine'
+      installModal.value = {
+        engineId: result.needs_install,
+        engineName,
+        modelId: result.model ?? serverStore.modelId ?? '',
+      }
+    }
   } catch { /* error handled by store */ }
   finally { applyPending.value = false }
+}
+
+async function handleServeInstallComplete() {
+  installModal.value = null
+  // Retry starting the server now that the engine is installed
+  await serverStore.startServer()
 }
 
 // Clear cache confirms
@@ -702,6 +719,15 @@ async function doClearCache(type: string) {
       :destructive="true"
       @confirm="doClearCache('prefix')"
       @cancel="confirmClearPrefix = false"
+    />
+
+    <InstallEngineModal
+      v-if="installModal"
+      :engine-id="installModal.engineId"
+      :engine-name="installModal.engineName"
+      :model-id="installModal.modelId"
+      @installed="handleServeInstallComplete"
+      @cancel="installModal = null"
     />
   </div>
 </template>

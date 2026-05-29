@@ -353,6 +353,16 @@ def start(_: None = Depends(_check_auth)) -> dict:
         if _is_external_api_engine():
             sm.set_server_healthy()
             return {"ok": True, "message": "External API is ready — remote endpoint will be used for inference"}
+        # Pre-flight: if the engine is lightning-mlx and not installed, signal the
+        # frontend to install it (same pattern as /server/load → needs_install).
+        _start_engine_id = config.get("engine_id", "vllm-mlx")
+        if _start_engine_id == "lightning-mlx":
+            try:
+                from vllm_mlx.dashboard.engines.registry import get_engine as _ge2
+                if not _ge2("lightning-mlx").is_installed():
+                    return {"needs_install": "lightning-mlx", "model": config.get("model", "")}
+            except Exception:
+                pass
         ok, msg = sm.start_server(config)
         return {"ok": ok, "message": msg}
     finally:
@@ -961,11 +971,11 @@ def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
     cfg["model"] = model_id
 
     # Apply MTPLX engine switch BEFORE saving config or stopping the server.
-    # If lightning-mlx is not installed, we fail early — the current server
-    # stays running and the user gets an actionable error message.
+    # If lightning-mlx is not installed, tell the frontend to install it first
+    # (HTTP 200 with needs_install flag) — the current server keeps running.
     cfg, mtplx_msg = sm._apply_mtplx_engine_switch(cfg)
     if mtplx_msg.startswith("⚠️"):
-        raise HTTPException(status_code=422, detail=mtplx_msg)
+        return {"needs_install": "lightning-mlx", "model": model_id}
 
     sm.save_config(cfg)
 

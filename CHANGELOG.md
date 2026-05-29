@@ -1,6 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.58 — 2026-05-29
+## v0.8.59 — 2026-05-30
+
+### Fixed
+- **MTPLX auto-install modal wired in both paths**: when switching to an MTPLX model via the Models page (`/server/load`) OR via the Serve page Apply & Restart button, if lightning-mlx is not installed, a terminal-style install modal now appears automatically — no more silent failure or raw 500 errors.
+- **`/start` endpoint returns `needs_install` signal**: when `engine_id` is `lightning-mlx` and it is not installed, the start endpoint returns `{"needs_install": "lightning-mlx"}` (HTTP 200) instead of `{"ok": false}` (which the frontend ignored, causing a silent 2-minute timeout).
+- **`InstallEngineModal` template tag added to `ModelsView`**: the modal component was imported and wired in the script but its `<template>` tag was missing — now present with correct event bindings.
+- **`InstallEngineModal` also added to `ServeView`**: handles the Apply & Restart path for MTPLX models.
+
 
 ### Fixed
 
