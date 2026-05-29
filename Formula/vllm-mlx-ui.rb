@@ -64,11 +64,13 @@ class VllmMlxUi < Formula
 
     # Upgrade key dependencies to latest compatible releases.
     # Using version bounds prevents silent breakage from incompatible upstream releases.
-    # vllm-mlx must be listed explicitly — pip install . only satisfies the minimum
-    # version requirement and won't upgrade an already-installed compatible release.
+    # NOTE: vllm-mlx is intentionally NOT listed here. Installing it from PyPI would
+    # overwrite our bundled vllm_mlx/ upstream code with a potentially incompatible
+    # version, causing ImportError crashes (rapid_mlx 0.6.68 namespace collision bug).
+    # Our vllm_mlx/ package is fully self-contained and synced from upstream via git.
     system venv/"bin/pip", "install", "--upgrade",
-           "vllm-mlx>=0.1.0",
            "mlx-lm>=0.31.0",
+           "mlx-embeddings>=0.1.0",
            "huggingface-hub>=0.23.0"
 
     # Homebrew's relocation step rewrites @rpath install-name IDs to absolute

@@ -1,5 +1,19 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.66 — 2026-05-29
+
+### Fixed
+- **Critical: Server fails to start with `ImportError: cannot import name 'UnsafeRemoteURLError'`**:
+  The Homebrew formula's `pip install --upgrade vllm-mlx>=0.1.0` step installed `rapid_mlx` 0.6.68
+  (published 2026-05-28) into the same `vllm_mlx/` Python namespace.  When `rapid_mlx` installed
+  after `vllm-mlx`, its `mllm.py` overwrote `vllm-mlx`'s version — which lacks `UnsafeRemoteURLError`
+  — while `vllm-mlx`'s `server.py` remained and still imported it, causing an immediate crash on
+  every `brew install` or `brew upgrade`.  Fix: removed `vllm-mlx>=0.1.0` from the formula's
+  upgrade step.  Our `vllm_mlx/` package is fully self-contained (synced from upstream via git),
+  so the PyPI `vllm-mlx` package was never needed and only caused harm.
+- **Embeddings version floor**: Added `mlx-embeddings>=0.1.0` to the formula's upgrade step and
+  bumped `pyproject.toml` from `>=0.0.5` to `>=0.1.0` to ensure the latest stable release is used.
+
 ## v0.8.65 — 2026-05-29
 
 ### Fixed
