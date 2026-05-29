@@ -87,6 +87,10 @@ def _record_request(
     user_agent: str = "",
     client_ip: str = "",
     proxy_overhead_ms: float | None = None,
+    prompt_tokens: int = 0,
+    msg_count: int = 0,
+    max_tokens: int = 0,
+    model_swap: bool = False,
 ) -> None:
     record: dict[str, Any] = {
         "ts": time.time(),
@@ -96,11 +100,15 @@ def _record_request(
         "duration_ms": round(duration * 1000, 1),
         "proxy_overhead_ms": round(proxy_overhead_ms, 1) if proxy_overhead_ms is not None else None,
         "completion_tokens": completion_tokens,
+        "prompt_tokens": prompt_tokens,
         "tps": round(completion_tokens / (duration or 1), 1),
         "model": model,
         "stream": stream,
         "user_agent": user_agent,
         "client_ip": client_ip,
+        "msg_count": msg_count,
+        "max_tokens": max_tokens,
+        "model_swap": model_swap,
     }
     with _RECENT_REQUESTS_LOCK:
         _RECENT_REQUESTS.append(record)
@@ -2053,6 +2061,7 @@ async def proxy_chat(
                     start = time.time()
                     first_byte = None
                     completion_tokens = 0
+                    prompt_tokens = 0
                     model = requested_model or cfg2.get("model", "")
                     async with _get_httpx_client().stream(
                         "POST", f"{target2}/v1/chat/completions",
@@ -2071,6 +2080,7 @@ async def proxy_chat(
                                             payload = _json.loads(line[6:])
                                             usage = payload.get("usage") or {}
                                             completion_tokens = usage.get("completion_tokens", 0)
+                                            prompt_tokens = usage.get("prompt_tokens", 0)
                                             model = payload.get("model", model)
                                         except _json.JSONDecodeError:
                                             pass
@@ -2082,7 +2092,11 @@ async def proxy_chat(
                                     stream=True,
                                     user_agent=_raw.headers.get("user-agent", ""),
                                     client_ip=(_raw.client.host if _raw.client else "") or "",
-                                    proxy_overhead_ms=_overhead)
+                                    proxy_overhead_ms=_overhead,
+                                    prompt_tokens=prompt_tokens,
+                                    msg_count=len(request.get("messages") or []),
+                                    max_tokens=int(request.get("max_tokens") or 0),
+                                    model_swap=True)
                 except Exception as exc:
                     yield _sse_delta(f"❌ Request failed after model switch: {exc}")
                     yield "data: [DONE]\n\n"
@@ -2108,14 +2122,20 @@ async def proxy_chat(
                 )
                 data = resp.json()
                 dur = time.time() - start
-                ct = (data.get("usage") or {}).get("completion_tokens", 0)
+                _usage = data.get("usage") or {}
+                ct = _usage.get("completion_tokens", 0)
+                _pt = _usage.get("prompt_tokens", 0)
                 m = data.get("model", requested_model or cfg2.get("model", ""))
                 _overhead = (start - getattr(_raw.state, "req_start", start)) * 1000
                 _record_request(start, None, dur, ct, m,
                                 stream=False,
                                 user_agent=_raw.headers.get("user-agent", ""),
                                 client_ip=(_raw.client.host if _raw.client else "") or "",
-                                proxy_overhead_ms=_overhead)
+                                proxy_overhead_ms=_overhead,
+                                prompt_tokens=_pt,
+                                msg_count=len(request.get("messages") or []),
+                                max_tokens=int(request.get("max_tokens") or 0),
+                                model_swap=True)
                 return data
             except Exception as exc:
                 logger.warning("Non-streaming request to inference server failed: %s", exc, exc_info=True)
@@ -2149,6 +2169,7 @@ async def proxy_chat(
                 start = time.time()
                 first_byte = None
                 completion_tokens = 0
+                prompt_tokens = 0
                 model = requested_model or cfg.get("model", "")
                 _ua = _raw.headers.get("user-agent", "")
                 _ip = (_raw.client.host if _raw.client else "") or ""
@@ -2176,6 +2197,7 @@ async def proxy_chat(
                                         payload = _json.loads(line[6:])
                                         usage = payload.get("usage") or {}
                                         completion_tokens = usage.get("completion_tokens", 0)
+                                        prompt_tokens = usage.get("prompt_tokens", 0)
                                         model = payload.get("model", model)
                                     except _json.JSONDecodeError:
                                         pass
@@ -2185,7 +2207,10 @@ async def proxy_chat(
                 ttft = (first_byte - start) if first_byte else None
                 _record_request(start, ttft, duration, completion_tokens, model,
                                 stream=True, user_agent=_ua, client_ip=_ip,
-                                proxy_overhead_ms=_overhead)
+                                proxy_overhead_ms=_overhead,
+                                prompt_tokens=prompt_tokens,
+                                msg_count=len(request.get("messages") or []),
+                                max_tokens=int(request.get("max_tokens") or 0))
 
             return StreamingResponse(_stream(), media_type="text/event-stream")
         else:
@@ -2218,14 +2243,19 @@ async def proxy_chat(
                 raise HTTPException(status_code=499, detail="Client disconnected")
             data = fetch_task.result()
             dur = time.time() - start
-            ct = (data.get("usage") or {}).get("completion_tokens", 0)
+            _usage = data.get("usage") or {}
+            ct = _usage.get("completion_tokens", 0)
+            _pt = _usage.get("prompt_tokens", 0)
             m = data.get("model", requested_model or cfg.get("model", ""))
             _overhead = (start - getattr(_raw.state, "req_start", start)) * 1000
             _record_request(start, None, dur, ct, m,
                             stream=False,
                             user_agent=_raw.headers.get("user-agent", ""),
                             client_ip=(_raw.client.host if _raw.client else "") or "",
-                            proxy_overhead_ms=_overhead)
+                            proxy_overhead_ms=_overhead,
+                            prompt_tokens=_pt,
+                            msg_count=len(request.get("messages") or []),
+                            max_tokens=int(request.get("max_tokens") or 0))
             return data
     except HTTPException:
         raise
@@ -2282,6 +2312,7 @@ async def proxy_completions(
                 start = time.time()
                 first_byte = None
                 completion_tokens = 0
+                prompt_tokens = 0
                 model = request.get("model", cfg.get("model", ""))
                 _ua = _raw.headers.get("user-agent", "")
                 _ip = (_raw.client.host if _raw.client else "") or ""
@@ -2303,6 +2334,7 @@ async def proxy_completions(
                                         payload = _json.loads(line[6:])
                                         usage = payload.get("usage") or {}
                                         completion_tokens = usage.get("completion_tokens", 0)
+                                        prompt_tokens = usage.get("prompt_tokens", 0)
                                         model = payload.get("model", model)
                                     except _json.JSONDecodeError:
                                         pass
@@ -2311,7 +2343,9 @@ async def proxy_completions(
                 ttft = (first_byte - start) if first_byte else None
                 _record_request(start, ttft, duration, completion_tokens, model,
                                 stream=True, user_agent=_ua, client_ip=_ip,
-                                proxy_overhead_ms=_overhead)
+                                proxy_overhead_ms=_overhead,
+                                prompt_tokens=prompt_tokens,
+                                max_tokens=int(request.get("max_tokens") or 0))
 
             return StreamingResponse(_stream_completions(), media_type="text/event-stream")
         else:
@@ -2342,14 +2376,18 @@ async def proxy_completions(
                 raise HTTPException(status_code=499, detail="Client disconnected")
             data = fetch_task.result()
             dur = time.time() - start
-            ct = (data.get("usage") or {}).get("completion_tokens", 0)
+            _usage = data.get("usage") or {}
+            ct = _usage.get("completion_tokens", 0)
+            _pt = _usage.get("prompt_tokens", 0)
             m = data.get("model", request.get("model", cfg.get("model", "")))
             _overhead = (start - getattr(_raw.state, "req_start", start)) * 1000
             _record_request(start, None, dur, ct, m,
                             stream=False,
                             user_agent=_raw.headers.get("user-agent", ""),
                             client_ip=(_raw.client.host if _raw.client else "") or "",
-                            proxy_overhead_ms=_overhead)
+                            proxy_overhead_ms=_overhead,
+                            prompt_tokens=_pt,
+                            max_tokens=int(request.get("max_tokens") or 0))
             return data
     except HTTPException:
         raise

@@ -3,8 +3,8 @@
   DiagnosticsView — Request diagnostics and performance analysis.
 
   Shows a live-refreshing table of all proxied requests (chat, completions)
-  with stream mode, latency, TPS, and source. Helps identify performance
-  differences between clients (e.g. streaming vs non-streaming apps).
+  with stream mode, latency, TPS, prompt token count, and model swap detection.
+  Helps identify performance bottlenecks: model swaps, large context, low TPS.
 -->
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
@@ -18,6 +18,10 @@ interface RequestRecord {
   duration_ms: number
   proxy_overhead_ms: number | null
   completion_tokens: number
+  prompt_tokens: number
+  msg_count: number
+  max_tokens: number
+  model_swap: boolean
   tps: number
   model: string
   stream: boolean
@@ -38,14 +42,12 @@ function sourceLabel(ua: string): string {
   if (u.includes('python-httpx') || u.includes('python-requests')) return 'Python'
   if (u.includes('curl')) return 'curl'
   if (u.includes('openai')) return 'OpenAI SDK'
-  // Short display of anything else
   const trimmed = ua.split('/')[0].split(' ')[0]
   return trimmed.length > 20 ? trimmed.slice(0, 20) + '…' : trimmed || 'Unknown'
 }
 
 function modelShort(model: string): string {
   if (!model) return '—'
-  // Show last segment of HF-style "org/model-name"
   const parts = model.split('/')
   const name = parts[parts.length - 1]
   return name.length > 28 ? name.slice(0, 28) + '…' : name
@@ -57,10 +59,16 @@ function fmtDuration(ms: number): string {
   return `${Math.round(ms)}ms`
 }
 
+function tpsColor(tps: number): string {
+  if (tps <= 0) return ''
+  if (tps < 5) return 'tps-low'
+  if (tps < 15) return 'tps-mid'
+  return 'tps-ok'
+}
+
 async function fetchRecords() {
   try {
     const data = await api.get<{ count: number; requests: RequestRecord[] }>('/debug/requests?n=100')
-    // Newest first
     records.value = [...(data.requests || [])].reverse()
     error.value = ''
   } catch (e: any) {
@@ -70,27 +78,32 @@ async function fetchRecords() {
   }
 }
 
-// Per-source averages for the summary row
 const sourceStats = computed(() => {
-  const map: Record<string, { count: number; totalTps: number; streaming: number; nonStreaming: number }> = {}
+  const map: Record<string, { count: number; totalTps: number; streaming: number; nonStreaming: number; swaps: number; totalPt: number }> = {}
   for (const r of records.value) {
     const src = sourceLabel(r.user_agent)
-    if (!map[src]) map[src] = { count: 0, totalTps: 0, streaming: 0, nonStreaming: 0 }
+    if (!map[src]) map[src] = { count: 0, totalTps: 0, streaming: 0, nonStreaming: 0, swaps: 0, totalPt: 0 }
     map[src].count++
     map[src].totalTps += r.tps || 0
+    map[src].totalPt += r.prompt_tokens || 0
     if (r.stream) map[src].streaming++
     else map[src].nonStreaming++
+    if (r.model_swap) map[src].swaps++
   }
   return Object.entries(map).map(([source, s]) => ({
     source,
     count: s.count,
     avgTps: s.count ? +(s.totalTps / s.count).toFixed(1) : 0,
+    avgPt: s.count ? Math.round(s.totalPt / s.count) : 0,
     streamingPct: s.count ? Math.round(s.streaming / s.count * 100) : 0,
     nonStreaming: s.nonStreaming,
+    swaps: s.swaps,
   })).sort((a, b) => b.count - a.count)
 })
 
-const hasNonStreaming = computed(() => records.value.some(r => !r.stream))
+const hasModelSwaps = computed(() => records.value.some(r => r.model_swap))
+const hasLargeContext = computed(() => records.value.some(r => (r.prompt_tokens || 0) > 4000))
+const hasLowTps = computed(() => records.value.some(r => r.tps > 0 && r.tps < 5))
 
 onMounted(() => {
   fetchRecords()
@@ -109,15 +122,40 @@ onUnmounted(() => {
       <p class="diag-subtitle">Live log of all proxied inference requests. Refreshes every 5 s.</p>
     </div>
 
-    <!-- Non-streaming warning -->
-    <div v-if="hasNonStreaming" class="diag-warning">
+    <!-- Model swap warning -->
+    <div v-if="hasModelSwaps" class="diag-warning diag-warning-red">
       <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
         <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
       </svg>
       <div>
-        <strong>Non-streaming requests detected.</strong>
-        Clients using <code>stream: false</code> must wait for <em>all</em> tokens before getting any response —
-        this is the most common cause of perceived slowness. Enable streaming in Kilroy for immediate token delivery.
+        <strong>Model swaps detected (likely cause of slow requests).</strong>
+        Kilroy is requesting a model that differs from the currently loaded model.
+        The server must stop, reload the new model (~30–120 s), and warm up before responding.
+        Fix: configure Kilroy to use the same model name as what's loaded, or set the model to <code>default</code>.
+      </div>
+    </div>
+
+    <!-- Large context warning -->
+    <div v-if="hasLargeContext" class="diag-warning diag-warning-amber">
+      <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+        <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+      </svg>
+      <div>
+        <strong>Large prompt context detected (&gt;4 k prompt tokens).</strong>
+        Long conversation histories cause slow prefill and lower TPS due to quadratic attention scaling.
+        Consider trimming conversation history in Kilroy.
+      </div>
+    </div>
+
+    <!-- Low TPS warning -->
+    <div v-if="hasLowTps && !hasModelSwaps" class="diag-warning diag-warning-amber">
+      <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+        <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+      </svg>
+      <div>
+        <strong>Very low TPS detected (&lt;5 t/s).</strong>
+        Possible causes: very large prompt context, model too big for available RAM, or GPU pressure from another process.
+        Compare TPS across sources — if built-in chat is fast but Kilroy is slow, check the prompt size and model name.
       </div>
     </div>
 
@@ -130,22 +168,24 @@ onUnmounted(() => {
             <tr>
               <th>Source</th>
               <th>Requests</th>
-              <th>Avg TPS</th>
+              <th title="Average tokens per second">Avg TPS</th>
+              <th title="Average prompt token count (context size)">Avg Prompt Tokens</th>
               <th>Streaming</th>
-              <th>Non-streaming</th>
+              <th title="Requests where the model was hot-swapped (adds 30–120 s)">Swaps</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="s in sourceStats" :key="s.source">
               <td class="source-cell">{{ s.source }}</td>
               <td>{{ s.count }}</td>
-              <td>{{ s.avgTps }}</td>
+              <td :class="tpsColor(s.avgTps)">{{ s.avgTps }}</td>
+              <td :class="s.avgPt > 4000 ? 'tps-low' : ''">{{ s.avgPt || '—' }}</td>
               <td>
                 <span v-if="s.streamingPct > 0" class="badge badge-stream">{{ s.streamingPct }}%</span>
                 <span v-else class="tx-muted">—</span>
               </td>
               <td>
-                <span v-if="s.nonStreaming > 0" class="badge badge-nostream">{{ s.nonStreaming }}</span>
+                <span v-if="s.swaps > 0" class="badge badge-swap">{{ s.swaps }}</span>
                 <span v-else class="tx-muted">—</span>
               </td>
             </tr>
@@ -172,6 +212,8 @@ onUnmounted(() => {
               <th>Source</th>
               <th>Model</th>
               <th title="Whether the client used stream:true or stream:false">Mode</th>
+              <th title="Prompt token count — high values slow down prefill and generation">Prompt Tokens</th>
+              <th title="Number of messages in the conversation">Msgs</th>
               <th title="Time to first token (streaming only)">TTFT</th>
               <th title="Total generation duration">Duration</th>
               <th title="Tokens per second">TPS</th>
@@ -179,18 +221,23 @@ onUnmounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(r, i) in records" :key="r.ts + '-' + i" :class="{ 'row-nostream': !r.stream }">
+            <tr v-for="(r, i) in records" :key="r.ts + '-' + i" :class="{ 'row-swap': r.model_swap }">
               <td class="time-cell">{{ r.time }}</td>
               <td class="source-cell">{{ sourceLabel(r.user_agent) }}</td>
               <td class="model-cell" :title="r.model">{{ modelShort(r.model) }}</td>
               <td>
+                <span v-if="r.model_swap" class="badge badge-swap" title="Model was hot-swapped — adds 30–120 s">swap</span>
                 <span :class="r.stream ? 'badge badge-stream' : 'badge badge-nostream'">
                   {{ r.stream ? 'stream' : 'batch' }}
                 </span>
               </td>
+              <td :class="(r.prompt_tokens || 0) > 4000 ? 'tps-low' : ''">
+                {{ r.prompt_tokens || '—' }}
+              </td>
+              <td>{{ r.msg_count || '—' }}</td>
               <td>{{ r.ttft_ms != null ? r.ttft_ms + 'ms' : '—' }}</td>
               <td>{{ fmtDuration(r.duration_ms) }}</td>
-              <td>{{ r.tps }}</td>
+              <td :class="tpsColor(r.tps)">{{ r.tps }}</td>
               <td>{{ r.proxy_overhead_ms != null ? Math.round(r.proxy_overhead_ms) + 'ms' : '—' }}</td>
             </tr>
           </tbody>
@@ -202,20 +249,23 @@ onUnmounted(() => {
     <div class="diag-section diag-help">
       <h2 class="diag-section-title">How to Read This</h2>
       <dl class="help-dl">
-        <dt><span class="badge badge-stream">stream</span></dt>
-        <dd>Client receives tokens <em>as they are generated</em>. Fast perceived response.</dd>
+        <dt><span class="badge badge-swap">swap</span></dt>
+        <dd>The model was hot-swapped before this request — adds 30–120 s per request. Fix by configuring Kilroy to use the same model name as the loaded model.</dd>
 
-        <dt><span class="badge badge-nostream">batch</span></dt>
-        <dd>Client waits for ALL tokens before getting anything. Appears frozen until complete. Enable <code>"stream": true</code> in Kilroy API calls to fix this.</dd>
+        <dt>Prompt Tokens</dt>
+        <dd>How many tokens were in the input (conversation history + system prompt). Values &gt;4 k will significantly reduce TPS due to prefill cost and attention scaling. Keep conversation history short.</dd>
+
+        <dt>TPS</dt>
+        <dd>Tokens per second — actual generation throughput. Should be similar across clients if hardware isn't the bottleneck. &lt;5 t/s usually means a very large context or model swap.</dd>
 
         <dt>TTFT</dt>
         <dd>Time to first token — how long until the model starts producing output. High TTFT usually means a large prompt or cold model.</dd>
 
-        <dt>TPS</dt>
-        <dd>Tokens per second — actual generation throughput. Should be similar across clients if hardware isn't the bottleneck.</dd>
+        <dt><span class="badge badge-nostream">batch</span></dt>
+        <dd>Client waits for ALL tokens before getting anything. Slower perceived response but same actual TPS. Enable <code>"stream": true</code> for better UX.</dd>
 
         <dt>Proxy</dt>
-        <dd>Milliseconds spent in the dashboard proxy before forwarding to the inference engine. Should be under 10ms normally.</dd>
+        <dd>Milliseconds spent in the dashboard proxy before forwarding to the inference engine. Should be under 10 ms normally.</dd>
       </dl>
     </div>
   </div>
@@ -223,7 +273,7 @@ onUnmounted(() => {
 
 <style scoped>
 .diag-page {
-  max-width: 1100px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 1.5rem 1.5rem 3rem;
   display: flex;
@@ -248,15 +298,23 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 0.625rem;
-  background: color-mix(in srgb, #f59e0b 12%, transparent);
-  border: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
   border-radius: 6px;
   padding: 0.75rem 1rem;
   font-size: 0.8125rem;
   color: var(--tx-primary);
   line-height: 1.5;
 }
-.diag-warning svg { flex-shrink: 0; color: #f59e0b; margin-top: 1px; }
+.diag-warning-red {
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+  border: 1px solid color-mix(in srgb, #ef4444 35%, transparent);
+}
+.diag-warning-red svg { color: #ef4444; }
+.diag-warning-amber {
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  border: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
+}
+.diag-warning-amber svg { color: #f59e0b; }
+.diag-warning svg { flex-shrink: 0; margin-top: 1px; }
 .diag-warning strong { display: block; margin-bottom: 0.25rem; }
 .diag-warning code { background: var(--bg-elevated); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.875em; }
 
@@ -299,12 +357,16 @@ onUnmounted(() => {
 }
 .diag-table tr:last-child td { border-bottom: none; }
 .diag-table-detail tbody tr:hover td { background: var(--bg-elevated); }
-.row-nostream td { background: color-mix(in srgb, #f59e0b 4%, transparent); }
-.row-nostream:hover td { background: color-mix(in srgb, #f59e0b 8%, transparent) !important; }
+.row-swap td { background: color-mix(in srgb, #ef4444 6%, transparent); }
+.row-swap:hover td { background: color-mix(in srgb, #ef4444 10%, transparent) !important; }
 
 .time-cell { color: var(--tx-tertiary); font-variant-numeric: tabular-nums; }
 .source-cell { font-weight: 500; }
 .model-cell { color: var(--tx-secondary); max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+
+.tps-ok  { color: #4ade80; font-weight: 600; }
+.tps-mid { color: #fbbf24; font-weight: 600; }
+.tps-low { color: #f87171; font-weight: 600; }
 
 .badge {
   display: inline-block;
@@ -313,6 +375,7 @@ onUnmounted(() => {
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.03em;
+  margin-right: 0.2em;
 }
 .badge-stream {
   background: color-mix(in srgb, #22c55e 18%, transparent);
@@ -323,6 +386,11 @@ onUnmounted(() => {
   background: color-mix(in srgb, #f59e0b 18%, transparent);
   color: #fbbf24;
   border: 1px solid color-mix(in srgb, #f59e0b 30%, transparent);
+}
+.badge-swap {
+  background: color-mix(in srgb, #ef4444 18%, transparent);
+  color: #f87171;
+  border: 1px solid color-mix(in srgb, #ef4444 30%, transparent);
 }
 
 .tx-muted { color: var(--tx-muted); }
