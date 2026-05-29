@@ -1,5 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.48 — 2026-05-28
+
+### Fixed
+
+- **Quality benchmark: improved enable_thinking handling — best of both worlds** — v0.8.47 fixed empty responses for custom Qwen3 templates (MTPLX etc.) by removing `enable_thinking: False` entirely, but that meant all thinking models would now generate full reasoning chains during benchmarks — inflating `completion_tokens`, slowing runs, and making token/sec metrics incomparable across models. v0.8.48 introduces a smarter two-attempt strategy: (1) first try with `enable_thinking: False` so standard Qwen3/DeepSeek-R1 models skip thinking and produce fast, comparable results; (2) if the response comes back empty (chunks=0, reasoning_chunks=0 — the fingerprint of a template exception), log the fallback and retry the same request without `enable_thinking` so the model thinks naturally. `_strip_thinking()` removes the `<think>…</think>` block before grading and the `reasoning_content` fallback handles reasoning-parser cases. Standard models pay zero extra cost; MTPLX/custom templates get one silent retry.
+
 ## v0.8.47 — 2026-05-28
 
 ### Fixed

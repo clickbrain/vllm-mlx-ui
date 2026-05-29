@@ -668,53 +668,47 @@ def _get_model_name(server_url: str) -> str:
     return "unknown"
 
 
-def _stream_completion(
+def _do_stream(
     server_url: str,
     messages: list[dict],
     max_tokens: int,
-    model: str = "default",
-    temperature: float = 0.0,
-    timeout: int = 300,
-) -> tuple[str, float | None, float, int, float]:
+    model: str,
+    temperature: float,
+    timeout: int,
+    extra_body: dict,
+) -> tuple[list[str], list[str], int | None, float | None, float]:
     """
-    Stream a single chat completion and return timing metrics.
+    Inner SSE streaming call.  Returns raw accumulators so the caller can
+    decide whether to retry before building the final result.
 
     Returns:
-        (text, ttft_ms, total_ms, completion_tokens, tokens_per_sec)
+        (chunks, reasoning_chunks, server_completion_tokens, t_first, t_end)
+        t_first is absolute monotonic time of first content/reasoning token,
+        or None if no tokens were received.
+        t_end is absolute monotonic time at end of stream.
     """
-    t_start = _time.monotonic()
-    t_first: float | None = None
     chunks: list[str] = []
     reasoning_chunks: list[str] = []
+    t_first: float | None = None
+    server_completion_tokens: int | None = None
+
+    body = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    body.update(extra_body)
 
     with requests.post(
         f"{server_url}/v1/chat/completions",
-        json={
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-            # Do NOT set enable_thinking or chat_template_kwargs here.
-            #
-            # Sending enable_thinking=False causes a Jinja2 TemplateError (not
-            # TypeError) in chat templates that don't declare the variable, e.g.
-            # MTPLX / custom Qwen3 fine-tunes.  The upstream engine only catches
-            # TypeError, so the exception propagates through _ensure_sse_terminal
-            # which swallows it and returns only data:[DONE] → chunks=0.
-            #
-            # Instead we let the model think naturally.  If the server has a
-            # reasoning parser active, thinking tokens land in reasoning_content;
-            # our fallback below promotes reasoning_content→text when content is
-            # empty.  If no reasoning parser, <think>…</think> appears inline in
-            # content and _strip_thinking() removes it before grading.
-        },
+        json=body,
         stream=True,
         timeout=timeout,
     ) as resp:
         resp.raise_for_status()
-        server_completion_tokens: int | None = None
         for raw_line in resp.iter_lines():
             if not raw_line:
                 continue
@@ -726,10 +720,8 @@ def _stream_completion(
                 break
             try:
                 obj = json.loads(payload)
-                # Surface server-side errors that arrive as JSON in the SSE stream.
                 if obj.get("error"):
                     logger.warning("Inference server returned error in SSE stream: %s", obj["error"])
-                # Capture server-reported usage if present (final chunk)
                 usage = obj.get("usage") or {}
                 if usage.get("completion_tokens"):
                     server_completion_tokens = int(usage["completion_tokens"])
@@ -741,8 +733,6 @@ def _stream_completion(
                     if t_first is None:
                         t_first = _time.monotonic()
                     chunks.append(content)
-                # Always accumulate reasoning_content for fallback (thinking models
-                # that embed the answer in reasoning and produce empty content)
                 if reasoning:
                     if t_first is None:
                         t_first = _time.monotonic()
@@ -751,10 +741,58 @@ def _stream_completion(
                 logger.warning("Could not parse SSE chunk from inference server", exc_info=True)
 
     t_end = _time.monotonic()
+    return chunks, reasoning_chunks, server_completion_tokens, t_first, t_end
+
+
+def _stream_completion(
+    server_url: str,
+    messages: list[dict],
+    max_tokens: int,
+    model: str = "default",
+    temperature: float = 0.0,
+    timeout: int = 300,
+) -> tuple[str, float | None, float, int, float]:
+    """
+    Stream a single chat completion and return timing metrics.
+
+    Strategy:
+    1. First attempt: send enable_thinking=False so standard Qwen3/DeepSeek-R1
+       models skip the thinking chain → faster benchmarks, comparable tokens/sec.
+    2. If the response is empty (chunks=0, reasoning_chunks=0), the model's chat
+       template likely raised a non-TypeError exception for enable_thinking (e.g.
+       Jinja2 TemplateError on MTPLX / custom fine-tunes).  Retry WITHOUT
+       enable_thinking — the model will think naturally, _strip_thinking() removes
+       the <think> block before grading, and reasoning_content fallback handles
+       cases where the reasoning parser routes tokens to reasoning_content.
+
+    Returns:
+        (text, ttft_ms, total_ms, completion_tokens, tokens_per_sec)
+    """
+    t_start = _time.monotonic()
+
+    # Attempt 1: thinking disabled (fast path, standard models)
+    chunks, reasoning_chunks, server_completion_tokens, t_first, t_end = _do_stream(
+        server_url, messages, max_tokens, model, temperature, timeout,
+        extra_body={"enable_thinking": False},
+    )
+
+    if not chunks and not reasoning_chunks:
+        # Empty response — likely a template exception caused by enable_thinking=False
+        # on a model whose chat template doesn't declare the variable.  Retry without.
+        logger.info(
+            "Empty response with enable_thinking=False (url=%s, model=%s); "
+            "retrying without enable_thinking (model may use custom template)",
+            server_url, model,
+        )
+        t_start = _time.monotonic()  # reset timer; retry is a fresh request
+        chunks, reasoning_chunks, server_completion_tokens, t_first, t_end = _do_stream(
+            server_url, messages, max_tokens, model, temperature, timeout,
+            extra_body={},  # no enable_thinking — model thinks naturally
+        )
+
     text = "".join(chunks)
-    # Fallback for thinking models that never emit content tokens: use the
-    # reasoning text (which already has <think> tags stripped by the server).
-    # Grade functions will find the answer in the last part of the reasoning.
+    # Fallback: reasoning parser may route all tokens to reasoning_content when
+    # thinking is enabled.  Promote reasoning text if content is empty.
     if not text.strip() and reasoning_chunks:
         text = "".join(reasoning_chunks)
     if not text.strip():
@@ -765,8 +803,6 @@ def _stream_completion(
         )
     ttft_ms = (t_first - t_start) * 1000.0 if t_first is not None else None
     total_ms = (t_end - t_start) * 1000.0
-    # Prefer server-reported completion_tokens; fall back to char-count estimate
-    # at 4 chars/token (more accurate than SSE chunk count which counts deltas).
     completion_tokens = server_completion_tokens if server_completion_tokens else max(1, round(len(text) / 4))
     elapsed_s = (t_end - t_start) or 1e-6
     tps = completion_tokens / elapsed_s
