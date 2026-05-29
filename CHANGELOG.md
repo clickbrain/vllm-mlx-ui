@@ -1,5 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.49 — 2026-05-28
+
+### Fixed
+
+- **Version bump** — v0.8.48 was published twice: once as the initial simple fix (remove `enable_thinking` entirely) and once as the improved retry-logic version. Users who upgraded to the first v0.8.48 would not receive the retry improvement. This release carries identical code to the correct v0.8.48 (the retry version) under a new version number so the upgrade path is unambiguous.
+
 ## v0.8.48 — 2026-05-28
 
 ### Fixed
