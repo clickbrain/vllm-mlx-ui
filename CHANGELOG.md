@@ -1,6 +1,12 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.51 — 2026-05-28
+## v0.8.52 — 2026-05-28
+
+### Fixed
+
+- **Find Models: Max Age filter never filtered anything** — The filter computed `cutoffMs = Date.now() - maxAgeMonths * msPerMonth` (an absolute Unix timestamp, ~1.74 trillion ms) and compared it against `ageMs = Date.now() - modelDate` (a duration, ~tens of billions of ms for a year-old model). A duration is always smaller than an absolute timestamp, so the condition `ageMs <= cutoffMs` was always true and no models were ever removed. Fixed: renamed to `maxAgeMs = maxAgeMonths * msPerMonth` (a plain duration) and compare against it directly — models older than the selected threshold are now correctly excluded.
+
+
 
 ### Fixed
 

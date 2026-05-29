@@ -197,12 +197,12 @@ const displayedSearchResults = computed(() => {
 
   // Date recency filter (uses maxAgeMonths) — client-side since HF API doesn't support date-range filtering
   if (maxAgeMonths.value > 0) {
-    const cutoffMs = Date.now() - maxAgeMonths.value * 30.44 * 24 * 60 * 60 * 1000
+    const maxAgeMs = maxAgeMonths.value * 30.44 * 24 * 60 * 60 * 1000
     list = list.filter(r => {
       const d = effectiveDate(r)
       if (!d) return true
       const ageMs = Date.now() - new Date(d).getTime()
-      return ageMs <= cutoffMs
+      return ageMs <= maxAgeMs
     })
   }
 
