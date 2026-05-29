@@ -216,6 +216,13 @@ async function doShutdown() {
         <span>Benchmarks</span>
       </RouterLink>
 
+      <RouterLink to="/diagnostics" class="nav-item" :class="{ active: isActive('/diagnostics') }" :aria-current="isActive('/diagnostics') ? 'page' : undefined">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
+          <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 6a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2zm0 6a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2z" clip-rule="evenodd" />
+        </svg>
+        <span>Diagnostics</span>
+      </RouterLink>
+
       <RouterLink to="/chat" class="nav-item" :class="{ active: isActive('/chat') }" data-tour="chat">
         <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
           <path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd" />

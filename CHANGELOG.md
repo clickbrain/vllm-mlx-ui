@@ -1,5 +1,21 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.69 — 2026-05-29
+
+### Added
+- **Diagnostics page** (`/diagnostics`): New UI view accessible from the sidebar that shows a
+  live-refreshing table of all proxied inference requests. Makes it easy to compare Kilroy vs
+  built-in chat traffic without using `curl`. Key features:
+  - **Summary by source** table: groups requests by client (Kilroy, Browser, Python, curl) and
+    shows request count, average TPS, and what percentage used streaming vs batch mode.
+  - **Per-request detail** table: Time, Source (parsed from User-Agent), Model, Mode (stream/batch
+    badge), TTFT, Duration, TPS, Proxy overhead. Newest requests at top.
+  - **Non-streaming warning**: orange banner when `stream: false` requests are detected, explaining
+    that batch mode waits for all tokens before returning — the most common cause of perceived
+    slowness in external apps.
+  - **"How to Read This"** reference section explaining each metric.
+  - Auto-refreshes every 5 seconds.
+
 ## v0.8.68 — 2026-05-29
 
 ### Added

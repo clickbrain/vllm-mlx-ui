@@ -10,5 +10,6 @@ export default createRouter({
     { path: '/settings', component: () => import('@/views/SettingsView.vue') },
     { path: '/chat', component: () => import('@/views/ChatView.vue') },
     { path: '/docs', component: () => import('@/views/DocsView.vue') },
+    { path: '/diagnostics', component: () => import('@/views/DiagnosticsView.vue') },
   ]
 })
