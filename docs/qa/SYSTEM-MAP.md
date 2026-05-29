@@ -1,6 +1,6 @@
 # vllm-mlx-ui System Map
 <!-- QA Living Document — update when any module changes -->
-<!-- Last updated: 2026-05-29 by QA Guardian -->
+<!-- Last updated: 2026-05-29 v0.8.64 by QA Guardian — gaps filled: flag_probe.py, manifest.py, model_families.json, test coverage map -->
 
 This document is the authoritative reference for QA Guardian code reviews.
 Every module, function, data flow, and architectural constraint is listed here.
@@ -269,6 +269,13 @@ All engines extend `BaseEngine` (ABC). Registry in `engines/registry.py`.
 | `uninstall_command()` | Optional | Default: `pip uninstall -y` |
 | `upgrade_command()` | Optional | Default: None (not supported) |
 
+**`_which(cmd)` — venv-aware binary lookup (v0.8.64+)**:
+`BaseEngine._which(cmd)` is the correct way to locate any engine binary. It checks in order:
+1. `shutil.which(cmd)` — system PATH
+2. `os.path.join(os.path.dirname(sys.executable), cmd)` — same venv `bin/` as the running Python
+
+⚠ **QA Rule**: Every engine `build_command()` and `is_installed()` MUST use `self._which("binary-name")`, NOT bare `shutil.which()` or hardcoded binary names. When pip installs an engine binary into the Homebrew Cellar venv, that venv's `bin/` is NOT on `$PATH`. Bare `shutil.which()` returns `None`, causing `build_command()` to raise `RuntimeError` → HTTP 500.
+
 **Well-known capability strings**: `tool_calls`, `vision`, `audio`, `continuous_batching`, `prefix_cache`, `kv_quantization`, `paged_cache`, `reasoning`, `metrics`, `embedding`, `rerank`, `mtp`, `ssd_cache`
 
 #### Registered engines:
@@ -425,6 +432,60 @@ SQLite cache for benchmark results shared across machines. WAL mode.
 Pattern-matching heuristics to map model IDs to model families (Qwen, Llama, Mistral, etc.) for display and preset selection.
 
 ---
+
+### `vllm_mlx/dashboard/data/model_families.json`
+Static database of known model families (~688 lines). Maps model IDs to metadata:
+- `release_date`, `arch_type`, `param_count_b`
+- Consumed by `model_family_resolver.py` for display names and preset selection
+
+---
+
+### `vllm_mlx/dashboard/engines/flag_probe.py`
+Runtime flag capability probing for engine binaries. Avoids `--flag not recognized` errors when engines evolve independently.
+
+**How it works:**
+1. On first `build_command()` call, runs `<binary> --help` and parses all `--flag` names
+2. Caches result for the process lifetime (cleared on dashboard restart = after upgrade)
+3. Failed probes are NOT cached — retried on next call
+4. On failed probe, callers add the flag **optimistically** (backward-compatible behavior)
+
+**Key functions:**
+| Function | Description |
+|----------|-------------|
+| `probe_flags(cmd_tuple)` | Returns `frozenset[str]` of all flags, or `None` on failure |
+| `supports(probe_cmd, flag)` | Returns `True/False/None` (None = probe failed → add optimistically) |
+| `add_if_supported(cmd, probe_cmd, flag, extra, ...)` | Appends flag to cmd if supported or unknown |
+| `invalidate(probe_cmd)` | Clears cache after engine install/upgrade |
+
+⚠ **QA Rule**: `invalidate()` MUST be called after any engine install or upgrade so the next launch picks up the new binary's flag set. The `POST /engines/{id}/install` endpoint must call this.
+
+---
+
+### `vllm_mlx/dashboard/engines/manifest.py`
+Plugin engine adapter loaded from JSON manifest files in `~/.config/vllm-mlx-ui/engines/*.json`.  
+Allows power users to integrate any CLI inference server without writing Python code.
+
+**Security model:**
+- Manifests only loaded from files owned by the current user (uid check)
+- Shell interpreters (`sh`, `bash`, `python`, etc.) are blocked in `check_command`/`launch_template`
+- `-c`/`--command` flags are rejected (prevents inline script injection)
+- Arbitrary executables are permitted (this is an intentional trusted-user feature)
+
+**Manifest schema** (key fields):
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | ✅ | Unique engine ID |
+| `name` | ✅ | Display name |
+| `check_command` | ✅ | `list[str]` — run to detect if installed (must exit 0) |
+| `launch_template` | ✅ | `list[str]` — argv with `{model}`, `{host}`, `{port}`, `{api_key}` template vars |
+| `capabilities` | No | `list[str]` capability strings |
+| `version_regex` | No | Regex to extract version from `check_command` output |
+| `install_method` | No | `"pip"`, `"external"` (default), or `"bundled"` |
+| `package_name` | No | PyPI package name for pip-based install |
+
+**`discover_manifests()`**: Scans `~/.config/vllm-mlx-ui/engines/` and returns loaded engines. Called by `registry.py` on startup and on `POST /engines/reload`.
+
+⚠ **QA Rule**: `ManifestEngine.is_installed()` and `build_command()` use `shutil.which()` directly (not `self._which()`). This is acceptable for manifest engines because they are defined by the user who controls PATH. However, if a manifest engine binary is installed into the venv, detection will fail. Document this limitation in the manifest format docs.
 
 ## Frontend Modules (ui/src/)
 
@@ -684,3 +745,53 @@ User sends message in ChatView
 
 **NEVER TOUCH** (upstream `waybarrios/vllm-mlx`):
 - `vllm_mlx/server.py`, `engine/`, `models/`, `paged_cache.py`, `prefix_cache.py`, `ssd_cache.py`, `mcp/`, `constrained/`, `reasoning/`, `tool_parsers/`
+
+---
+
+## Test Coverage Map
+
+Tests live in `tests/`. Default `pytest tests/` runs only unit tests; `@pytest.mark.slow` tests require Apple Silicon + MLX and must be explicitly opted-in with `--run-slow`.
+
+### Dashboard / Engine Unit Tests (no MLX required)
+
+| Test File | Subject | # Tests | Notes |
+|-----------|---------|---------|-------|
+| `test_ds4_m5_engine.py` | Ds4M5Engine adapter — chip detection, fork selection, alias map, build_command | 18 | Pure unit, no subprocess |
+| `test_apple_fm_engine.py` | AppleFMEngine — is_installed, build_command, check_warnings rate-limit, check_requirements (no brew tap) | 31 | Patches `self._which` and subprocess |
+| `test_external_api_engine.py` | ExternalApiEngine — health check, model list, auth header injection | 22 | Patches httpx |
+| `test_engine_management_fixes.py` | registry `_BUILTINS` order, `_try_engine_fallback` excludes external-api, `_start_or_mark_external`, LmStudio daemon TTL cache, AppleFM warnings, registry `_cached_latest_version` TTL | 17 | v0.8.16 regression guards |
+| `test_dashboard_metrics.py` | Metrics endpoint shape and field presence | — | Unit |
+| `test_server_manager_preflight.py` | `server_manager.py` preflight checks — port in use, config validation | — | Unit |
+| `test_download.py` | Model download flow and progress reporting | — | Unit |
+| `test_platform.py` | Platform detection (chip, RAM, OS version, MLX version) | — | Unit |
+| `test_reasoning_parser.py` | `<think>` tag extraction across all reasoning parser variants | — | Unit |
+| `test_tool_parsers.py` | Tool call parsing — hermes, llama, qwen, gemma4 and others | — | Unit |
+| `test_mcp_security.py` | MCP auth validation and blocked tool lists | — | Unit |
+| `test_api_models.py` | Pydantic request/response model validation | — | Unit |
+| `test_anthropic_adapter.py` | Anthropic → OpenAI message format translation | — | Unit |
+
+### MLX-Dependent Tests (require Apple Silicon)
+
+| Test File | Requires | Mark |
+|-----------|---------|------|
+| `test_llm.py`, `test_mllm.py` | Model load | `slow` |
+| `test_paged_cache.py`, `test_paged_cache_real_inference.py` | MLX | `slow` |
+| `test_batching.py`, `test_continuous_batching.py` | MLX | `slow` |
+| `test_constrained_decoding.py` | MLX | `slow` |
+| `test_streaming_latency.py` | MLX | `slow` |
+| `test_server.py` | Running vllm-mlx server | `integration` |
+| `test_bench_serve.py` | Running server | `integration` |
+
+### Coverage Gaps (no tests as of v0.8.64)
+
+- `lightning_mlx.py` — no dedicated unit tests; covered indirectly by `test_engine_management_fixes.py`
+- `rapid_mlx.py` — no dedicated unit tests
+- `ollama.py` — no tests for upgrade flow (the TOCTOU-fixed code path)
+- `manifest.py` — no tests for `ManifestEngine.from_file()` or `discover_manifests()`
+- `flag_probe.py` — no dedicated tests
+- `chat_store.py` — no dedicated tests; only exercised in integration
+- `update_checker.py` — no tests for version comparison or `engine_upgrade_commands()`
+- `model_family_resolver.py` — no tests
+
+These gaps are known and do not block releases, but represent regression risk if those modules change.
+
