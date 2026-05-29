@@ -25,14 +25,19 @@ def _vllm_probe() -> tuple[str, ...]:
 
 
 class VllmMlxEngine(BaseEngine):
-    """Adapter for waybarrios/vllm-mlx (the bundled default engine)."""
+    """Adapter for waybarrios/vllm-mlx (kept for config migration only).
+
+    This engine is hidden from the UI — rapid-mlx is the recommended local
+    inference engine.  Any saved config with engine_id "vllm-mlx" is
+    automatically migrated to "rapid-mlx" on first load (see server_manager.py).
+    """
 
     id: ClassVar[str] = "vllm-mlx"
-    name: ClassVar[str] = "vLLM-MLX"
+    name: ClassVar[str] = "vLLM-MLX (deprecated)"
+    hidden: ClassVar[bool] = True
     description: ClassVar[str] = (
-        "The bundled vLLM-MLX engine — optimised MLX inference for Apple Silicon with "
-        "paged KV cache, continuous batching, tool calls, audio, and vision support. "
-        "This is the default recommended engine for Apple Silicon Macs."
+        "Legacy vLLM-MLX engine — superseded by Rapid-MLX. "
+        "Kept for backward compatibility; new installs use Rapid-MLX."
     )
     capabilities: ClassVar[frozenset[str]] = frozenset({
         "tool_calls",

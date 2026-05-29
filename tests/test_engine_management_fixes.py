@@ -23,22 +23,6 @@ import pytest
 
 
 class TestBuiltinsOrder:
-    def test_vllm_mlx_before_apple_fm(self):
-        from vllm_mlx.dashboard.engines.registry import _BUILTINS
-
-        ids = [e.id for e in _BUILTINS]
-        assert ids.index("vllm-mlx") < ids.index("apple-fm"), (
-            "vllm-mlx must come before apple-fm in _BUILTINS"
-        )
-
-    def test_vllm_mlx_before_external_api(self):
-        from vllm_mlx.dashboard.engines.registry import _BUILTINS
-
-        ids = [e.id for e in _BUILTINS]
-        assert ids.index("vllm-mlx") < ids.index("openai-compatible"), (
-            "vllm-mlx must come before openai-compatible in _BUILTINS"
-        )
-
     def test_rapid_mlx_before_apple_fm(self):
         from vllm_mlx.dashboard.engines.registry import _BUILTINS
 
@@ -47,10 +31,27 @@ class TestBuiltinsOrder:
             "rapid-mlx must come before apple-fm in _BUILTINS"
         )
 
-    def test_first_engine_is_vllm_mlx(self):
+    def test_rapid_mlx_before_external_api(self):
         from vllm_mlx.dashboard.engines.registry import _BUILTINS
 
-        assert _BUILTINS[0].id == "vllm-mlx", "vllm-mlx must be the first engine for fallback priority"
+        ids = [e.id for e in _BUILTINS]
+        assert ids.index("rapid-mlx") < ids.index("openai-compatible"), (
+            "rapid-mlx must come before openai-compatible in _BUILTINS"
+        )
+
+    def test_first_engine_is_rapid_mlx(self):
+        from vllm_mlx.dashboard.engines.registry import _BUILTINS
+
+        assert _BUILTINS[0].id == "rapid-mlx", "rapid-mlx must be the first engine (primary local engine)"
+
+    def test_vllm_mlx_is_hidden(self):
+        """vllm-mlx must be present in _BUILTINS but marked hidden for config migration."""
+        from vllm_mlx.dashboard.engines.registry import _BUILTINS
+
+        ids = [e.id for e in _BUILTINS]
+        assert "vllm-mlx" in ids, "vllm-mlx must remain in _BUILTINS for config migration"
+        vllm_engine = next(e for e in _BUILTINS if e.id == "vllm-mlx")
+        assert getattr(vllm_engine, "hidden", False) is True, "vllm-mlx must have hidden=True"
 
 
 # ── _try_engine_fallback excludes openai-compatible ──────────────────────────

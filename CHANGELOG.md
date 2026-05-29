@@ -1,5 +1,19 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.73 — 2026-05-29
+
+### Breaking Change — vllm-mlx engine removed, rapid-mlx is now the default
+**Existing installs are automatically migrated on first launch.**
+
+- **rapid-mlx is now the primary and default local inference engine.** It delivers faster TPS, better model alias support, and actively maintained reasoning/tool-call parsers for all current models (Qwen3, Gemma4, DeepSeek, Llama, etc.)
+- **vllm-mlx (PyPI package) removed** from the system. The stale `vllm-mlx 0.3.0` PyPI package was overwriting engine files with outdated code and polluting the Python namespace. It served no purpose once rapid-mlx is installed.
+- **Config migration (v2 → v3):** Any saved config with `engine_id: "vllm-mlx"` is automatically rewritten to `"rapid-mlx"` on first load. No manual action required.
+- **Brew formula updated:** `pip install vllm-mlx` replaced with `pip uninstall vllm-mlx` + `pip install rapid-mlx`. Existing installations cleaned on upgrade.
+- **`proxy_default_max_tokens` default changed from 4096 → 0** (disabled). The previous 4096 cap was counterproductive for rapid-mlx: it overrode rapid-mlx's own thinking-token budget (6144 tokens for reasoning models), capping thinking models before they could produce an answer. rapid-mlx manages token budgets correctly on its own. Existing installs where the value was 4096 are reset to 0 on migration.
+- **`max_tokens` default raised from 16384 → 32768.** Gives reasoning models (Qwen3, DeepSeek) sufficient headroom to think *and* produce a full answer. Existing installs with the old 16384 default are updated on migration.
+- **`vllm-mlx-ui` is the only script entry point** in the package. The old `vllm-mlx`, `vllm-mlx-chat`, `vllm-mlx-text-chat`, and `vllm-mlx-bench` script entries pointed to upstream engine code that rapid-mlx was already replacing; they are removed. The `rapid-mlx` CLI is now provided directly by the rapid-mlx package.
+- **Orphan process detection** now includes `rapid-mlx` and `rapid_mlx` process markers.
+
 ## v0.8.72 — 2026-05-29
 
 ### Fixed

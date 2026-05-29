@@ -62,6 +62,10 @@ class BaseEngine(ABC):
     #: URL shown in the updates table for the engine name link (GitHub main page).
     homepage_url: ClassVar[str] = ""
 
+    #: When True, the engine is excluded from the UI engine picker and /engines list.
+    #: Used to hide deprecated engines that are kept only for config migration.
+    hidden: ClassVar[bool] = False
+
     # ── Core abstract methods ──────────────────────────────────────────────────
 
     @abstractmethod

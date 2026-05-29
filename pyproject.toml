@@ -111,10 +111,6 @@ Repository = "https://github.com/vllm-mlx/vllm-mlx"
 mlx = "vllm_mlx.plugin:mlx_platform_plugin"
 
 [project.scripts]
-vllm-mlx = "vllm_mlx.cli:main"
-vllm-mlx-chat = "vllm_mlx.gradio_app:main"
-vllm-mlx-text-chat = "vllm_mlx.gradio_text_app:main"
-vllm-mlx-bench = "vllm_mlx.benchmark:main"
 vllm-mlx-ui = "vllm_mlx.dashboard.app:main"
 
 [tool.setuptools.packages.find]

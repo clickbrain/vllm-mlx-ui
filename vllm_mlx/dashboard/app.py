@@ -157,7 +157,7 @@ def _should_engine_fallback(cfg: dict, msg: str) -> bool:
     if "server exited immediately" in msg_lower:
         try:
             from vllm_mlx.dashboard.engines.registry import get_engine
-            engine = get_engine(cfg.get("engine_id", "vllm-mlx"))
+            engine = get_engine(cfg.get("engine_id", "rapid-mlx"))
             return getattr(engine, "install_method", "") == "external"
         except Exception:
             pass
@@ -175,7 +175,7 @@ def _try_engine_fallback(cfg, _msg, load_config, save_config, start_server, sm=N
     """
     try:
         from vllm_mlx.dashboard.engines.registry import ENGINES
-        configured_engine = cfg.get("engine_id", "vllm-mlx")
+        configured_engine = cfg.get("engine_id", "rapid-mlx")
         for eid, engine in ENGINES.items():
             if eid == configured_engine:
                 continue

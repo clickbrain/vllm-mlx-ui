@@ -471,7 +471,7 @@ def start(_: None = Depends(_check_auth)) -> dict:
             _has_fixed_model = False
             try:
                 from vllm_mlx.dashboard.engines.registry import get_engine as _ge
-                _has_fixed_model = bool(_ge(config.get("engine_id", "vllm-mlx")).get_fixed_model_display())
+                _has_fixed_model = bool(_ge(config.get("engine_id", "rapid-mlx")).get_fixed_model_display())
             except Exception:
                 pass
             if not _has_fixed_model:
@@ -481,7 +481,7 @@ def start(_: None = Depends(_check_auth)) -> dict:
             return {"ok": True, "message": "External API is ready — remote endpoint will be used for inference"}
         # Pre-flight: if the engine is lightning-mlx and not installed, signal the
         # frontend to install it (same pattern as /server/load → needs_install).
-        _start_engine_id = config.get("engine_id", "vllm-mlx")
+        _start_engine_id = config.get("engine_id", "rapid-mlx")
         if _start_engine_id == "lightning-mlx":
             try:
                 from vllm_mlx.dashboard.engines.registry import get_engine as _ge2
@@ -1129,7 +1129,7 @@ def load_model(req: LoadModelRequest, _: None = Depends(_check_auth)) -> dict:
 
     _threading.Thread(target=_deferred_warmup, daemon=True, name="deferred-warmup").start()
 
-    return {"ok": True, "model": model_id, "engine_id": cfg.get("engine_id", "vllm-mlx"), "restarted": True}
+    return {"ok": True, "model": model_id, "engine_id": cfg.get("engine_id", "rapid-mlx"), "restarted": True}
 
 
 # ── Memory ────────────────────────────────────────────────────────────────────
@@ -1309,7 +1309,7 @@ def poll(_: None = Depends(_check_auth)) -> dict:
         "memory": sm.get_memory_stats(),
         "config": cfg,
         "runtime": {
-            "engine_id": server_state.get("engine_id") or cfg.get("engine_id", "vllm-mlx"),
+            "engine_id": server_state.get("engine_id") or cfg.get("engine_id", "rapid-mlx"),
             "model": server_state.get("model", ""),
             "started_at": server_state.get("started_at"),
         },
@@ -1407,7 +1407,7 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
     )
     base_cfg = sm.load_config()
     server_settings_snapshot = {k: base_cfg.get(k) for k in _SETTINGS_KEYS if base_cfg.get(k) is not None}
-    server_settings_snapshot["engine_id"] = override_engine_id or base_cfg.get("engine_id", "vllm-mlx")
+    server_settings_snapshot["engine_id"] = override_engine_id or base_cfg.get("engine_id", "rapid-mlx")
 
     # Reset output buffer
     with _benchmark_output_lock:
@@ -1490,11 +1490,11 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
                                             sm.start_server(orig_cfg)
                                     continue
                                 else:
-                                    _output_cb(f"[⚠ Could not start lightning-mlx: {start_msg} — falling back to vllm-mlx]\n")
+                                    _output_cb(f"[⚠ Could not start lightning-mlx: {start_msg} — falling back to rapid-mlx]\n")
                             else:
-                                _output_cb(f"[⚠ lightning-mlx not installed — benchmarking with vllm-mlx (degraded performance for MTPLX models)]\n")
+                                _output_cb(f"[⚠ lightning-mlx not installed — benchmarking with rapid-mlx (degraded performance for MTPLX models)]\n")
                         except Exception as exc:
-                            _output_cb(f"[⚠ MTPLX auto-switch error: {exc} — falling back to vllm-mlx]\n")
+                            _output_cb(f"[⚠ MTPLX auto-switch error: {exc} — falling back to rapid-mlx]\n")
                     result = br.run_benchmark(model_id, prompts=runs, max_tokens=max_tokens,
                                      output_callback=_output_cb)
                     if not result.get("success"):
@@ -1573,7 +1573,7 @@ def run_engine_compare(req: dict[str, Any], _: None = Depends(_check_auth)) -> d
 
         {
           "model_id": "mlx-community/Qwen3-8B-4bit",
-          "engine_ids": ["vllm-mlx", "rapid-mlx"],
+          "engine_ids": ["rapid-mlx", "ds4"],
           "runs": 10,
           "max_tokens": 256
         }
@@ -2870,7 +2870,7 @@ def run_custom_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_
         )
         base_cfg = sm.load_config()
         server_settings_snapshot = {k: base_cfg.get(k) for k in _SETTINGS_KEYS if base_cfg.get(k) is not None}
-        server_settings_snapshot["engine_id"] = base_cfg.get("engine_id", "vllm-mlx")
+        server_settings_snapshot["engine_id"] = base_cfg.get("engine_id", "rapid-mlx")
 
         try:
             import requests as _req_inner

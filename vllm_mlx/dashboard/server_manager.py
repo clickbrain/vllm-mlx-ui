@@ -121,10 +121,10 @@ def _mgmt_url(base: str) -> str:
 
 _DEFAULT_CONFIG: dict[str, Any] = {
     # ── Schema versioning ───────────────────────────────────────────────────
-    "config_version": 2,
+    "config_version": 3,
     # ── Engine selection ────────────────────────────────────────────────────
-    # engine_id: which inference engine to use ("vllm-mlx", "rapid-mlx", …)
-    "engine_id": "vllm-mlx",
+    # engine_id: which inference engine to use ("rapid-mlx", "ds4-m5", …)
+    "engine_id": "rapid-mlx",
     # engine_settings: engine-specific config namespace.  Keyed by engine_id.
     # config["model"] is ALWAYS the canonical HF repo ID regardless of engine.
     # Engine-specific launch aliases go here (e.g. engine_settings["rapid-mlx"]["launch_model"]).
@@ -136,7 +136,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "port": 8000,
     "api_key": "",
     "continuous_batching": False,
-    "max_tokens": 16384,
+    "max_tokens": 32768,
     "max_request_tokens": 131072,
     # Default chat template kwargs passed to every request that doesn't supply its own.
     # Set to {"enable_thinking": false} to disable the reasoning/thinking phase globally
@@ -190,11 +190,11 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     # 0 = unlimited (no trimming).  Prevents O(n²) attention slowdown from long
     # histories.  Typical values: 20 (light agent), 10 (heavy/long-context model).
     "max_context_messages": 0,
-    # Proxy max_tokens cap: applied when a client does not set max_tokens (sends 0
-    # or null).  Prevents runaway generation from exhausting Metal GPU memory and
-    # hanging for minutes.  0 = do not enforce a cap (risky for large models).
-    # Recommended: 4096 for general use, 8192 for long-form writing.
-    "proxy_default_max_tokens": 4096,
+    # Proxy max_tokens cap: 0 = disabled (let the engine manage token budgets).
+    # rapid-mlx already applies a thinking-token budget for reasoning models, so
+    # overriding from the proxy is counterproductive.  Only set this if you have
+    # a specific reason to cap output at the proxy layer (e.g. metered API usage).
+    "proxy_default_max_tokens": 0,
     # Last used connection mode — "local" or "remote". Persisted so the UI
     # restores the correct target on browser refresh / app restart.
     "connection_mode": "local",
@@ -317,21 +317,44 @@ def _migrate_config(saved: dict[str, Any]) -> dict[str, Any]:
       - Add ``engine_id`` defaulting to "vllm-mlx"
       - Add ``engine_settings`` with per-engine defaults populated from the registry
       - Add ``config_version: 2``
+
+    v2 → v3:
+      - Migrate ``engine_id: "vllm-mlx"`` → ``"rapid-mlx"`` (vllm-mlx removed)
+      - Reset ``proxy_default_max_tokens`` to 0 if it was the old 4096 default
+        (rapid-mlx manages its own token budget; proxy cap was counterproductive)
+      - Raise ``max_tokens`` to 32768 if it was the old 16384 default
     """
     version = saved.get("config_version", 1)
-    if version >= 2:
+    if version >= 3:
         return saved
+
     migrated = dict(saved)
-    migrated["config_version"] = 2
-    migrated.setdefault("engine_id", "vllm-mlx")
-    migrated.setdefault("engine_settings", {})
-    try:
-        for eid, engine in ENGINES.items():
-            if eid not in migrated["engine_settings"]:
-                migrated["engine_settings"][eid] = engine.default_engine_settings()
-    except Exception as e:
-        logger.warning("Config migration: could not populate engine defaults: %s", e)
-    logger.info("Migrated server config from v%d to v2", version)
+
+    # v1 → v2
+    if version < 2:
+        migrated["config_version"] = 2
+        migrated.setdefault("engine_id", "vllm-mlx")
+        migrated.setdefault("engine_settings", {})
+        try:
+            for eid, engine in ENGINES.items():
+                if eid not in migrated["engine_settings"]:
+                    migrated["engine_settings"][eid] = engine.default_engine_settings()
+        except Exception as e:
+            logger.warning("Config migration: could not populate engine defaults: %s", e)
+        logger.info("Migrated server config from v%d to v2", version)
+
+    # v2 → v3
+    migrated["config_version"] = 3
+    if migrated.get("engine_id") == "vllm-mlx":
+        migrated["engine_id"] = "rapid-mlx"
+        logger.info("Config migration v2→v3: engine_id 'vllm-mlx' → 'rapid-mlx'")
+    if int(migrated.get("proxy_default_max_tokens", 0) or 0) == 4096:
+        migrated["proxy_default_max_tokens"] = 0
+        logger.info("Config migration v2→v3: reset proxy_default_max_tokens 4096 → 0")
+    if int(migrated.get("max_tokens", 0) or 0) == 16384:
+        migrated["max_tokens"] = 32768
+        logger.info("Config migration v2→v3: max_tokens 16384 → 32768")
+
     return migrated
 
 
@@ -586,7 +609,7 @@ def _write_server_state(pid: int, config: dict[str, Any]) -> None:
     """Write runtime state to SERVER_STATE_FILE (atomic rename)."""
     state = {
         "pid": pid,
-        "engine_id": config.get("engine_id", "vllm-mlx"),
+        "engine_id": config.get("engine_id", "rapid-mlx"),
         "host": config.get("host", "127.0.0.1"),
         "port": config.get("port", 8000),
         "model": config.get("model", ""),
@@ -603,7 +626,7 @@ def _read_server_state() -> dict[str, Any] | None:
     """Read the runtime state file.  Returns None if not present or corrupted.
 
     Backward compat: if only the legacy PID_FILE exists (plain integer), returns a
-    minimal state dict treating the engine as "vllm-mlx".
+    minimal state dict treating the engine as "rapid-mlx".
 
     NOTE: Does NOT validate that the recorded PID is alive — callers
     (get_server_status, stop_server) are responsible for that check so they can
@@ -621,7 +644,7 @@ def _read_server_state() -> dict[str, Any] | None:
     if PID_FILE.exists():
         try:
             pid = int(PID_FILE.read_text().strip())
-            return {"pid": pid, "engine_id": "vllm-mlx"}
+            return {"pid": pid, "engine_id": "rapid-mlx"}
         except Exception as e:
             logger.warning("Could not read legacy PID file: %s", e)
     return None
@@ -679,8 +702,8 @@ def _try_adopt_server(port: int, host: str, config: dict[str, Any] | None = None
     if config is not None:
         existing_state = _read_server_state()
         if existing_state:
-            running_engine = existing_state.get("engine_id", "vllm-mlx")
-            desired_engine = config.get("engine_id", "vllm-mlx")
+            running_engine = existing_state.get("engine_id", "rapid-mlx")
+            desired_engine = config.get("engine_id", "rapid-mlx")
             if running_engine != desired_engine:
                 logger.warning(
                     "Cannot adopt server: running engine=%r, desired engine=%r",
@@ -763,7 +786,7 @@ def check_health(config: dict[str, Any] | None = None) -> tuple[bool, dict]:
         url = get_server_url(config)
 
         # Determine the primary health endpoint from the engine adapter.
-        engine_id = config.get("engine_id", "vllm-mlx")
+        engine_id = config.get("engine_id", "rapid-mlx")
         try:
             health_path = getattr(get_engine(engine_id), "health_path", "/health")
         except Exception:
@@ -916,14 +939,14 @@ def _build_command(config: dict[str, Any]) -> list[str]:
     """Build the inference server launch command, delegating to the selected engine.
 
     The engine is determined by ``config["engine_id"]``.  Falls back to
-    "vllm-mlx" if the configured engine is unknown.
+    rapid-mlx if the configured engine is unknown.
     """
-    engine_id = config.get("engine_id", "vllm-mlx")
+    engine_id = config.get("engine_id", "rapid-mlx")
     try:
         engine = get_engine(engine_id)
     except KeyError:
-        logger.warning("Unknown engine_id %r — falling back to vllm-mlx", engine_id)
-        engine = get_engine("vllm-mlx")
+        logger.warning("Unknown engine_id %r — falling back to rapid-mlx", engine_id)
+        engine = get_engine("rapid-mlx")
     return engine.build_command(config)
 
 
@@ -951,7 +974,7 @@ def _apply_mtplx_engine_switch(config: dict[str, Any]) -> tuple[dict[str, Any], 
     if not _is_mtplx_model(model):
         return config, ""
 
-    current_engine = config.get("engine_id", "vllm-mlx")
+    current_engine = config.get("engine_id", "rapid-mlx")
     try:
         lm_eng = get_engine("lightning-mlx")
     except KeyError:
@@ -992,7 +1015,7 @@ def _build_env(config: dict[str, Any]) -> dict | None:
     it on top of ``os.environ`` so the subprocess inherits all current vars
     plus the engine-specific overrides.  Returns ``None`` if no overrides.
     """
-    engine_id = config.get("engine_id", "vllm-mlx")
+    engine_id = config.get("engine_id", "rapid-mlx")
     try:
         engine = get_engine(engine_id)
     except KeyError:
@@ -1009,7 +1032,7 @@ def _build_cwd(config: dict[str, Any]) -> str | None:
     Delegates to the selected engine's ``get_working_directory()``.
     Returns ``None`` meaning "inherit the parent's CWD".
     """
-    engine_id = config.get("engine_id", "vllm-mlx")
+    engine_id = config.get("engine_id", "rapid-mlx")
     try:
         engine = get_engine(engine_id)
     except KeyError:
@@ -1075,7 +1098,7 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
     # If the selected model is an MTPLX-packaged model and the active engine is
     # NOT lightning-mlx, automatically switch to lightning-mlx (or inform the
     # user that it needs to be installed).
-    engine_id = config.get("engine_id", "vllm-mlx")
+    engine_id = config.get("engine_id", "rapid-mlx")
     if engine_id not in ("openai-compatible", "external-api", "lmstudio"):
         config, mtplx_msg = _apply_mtplx_engine_switch(config)
         if mtplx_msg.startswith("⚠️"):
@@ -1122,7 +1145,7 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
         # Fall through to start a new server.
 
     if not config.get("model", "").strip():
-        engine_id = config.get("engine_id", "vllm-mlx")
+        engine_id = config.get("engine_id", "rapid-mlx")
         try:
             eng = get_engine(engine_id)
             # Fixed-model engines (e.g. apple-fm) don't need a model ID — they
@@ -1177,7 +1200,7 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
     # Pre-flight: verify the engine binary is actually available before
     # touching LOG_FILE or launching anything.  Returns a clean error
     # message instead of letting FileNotFoundError escape to the ASGI layer.
-    engine_id_for_check = config.get("engine_id", "vllm-mlx")
+    engine_id_for_check = config.get("engine_id", "rapid-mlx")
 
     # "openai-compatible" is the only engine with no local process to start.
     # The proxy layer routes requests directly to the configured remote URL.
@@ -1235,7 +1258,7 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
             logs = "\n".join(get_logs(last_n_lines=20))
             return False, f"Server exited immediately. Check logs:\n{logs}"
 
-    engine_id = config.get("engine_id", "vllm-mlx")
+    engine_id = config.get("engine_id", "rapid-mlx")
     return True, f"Server starting (PID {proc.pid}, engine={engine_id}). Loading model — this may take a minute…"
 
 
@@ -1681,6 +1704,7 @@ def force_release_memory() -> dict:
         logger.warning("Operation failed", exc_info=True)
 
     _VLLM_MARKERS = (
+        "rapid-mlx", "rapid_mlx",
         "vllm_mlx", "vllm-mlx", "vllm_mlx.benchmark", "vllm-mlx-bench",
     )
 

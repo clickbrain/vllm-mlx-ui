@@ -235,7 +235,7 @@ const hfToken = ref(localStorage.getItem('vmui_hf_token') ?? '')
 const offlineMode = ref(false)
 const autoModelSwitch = ref(false)
 const maxContextMessages = ref(0)
-const proxyDefaultMaxTokens = ref(4096)
+const proxyDefaultMaxTokens = ref(0)
 const mgmtApiKeyMasked = ref('')
 const mgmtApiKeyInput = ref('')
 const mgmtApiKeySaved = ref(false)
@@ -333,7 +333,7 @@ onMounted(async () => {
     offlineMode.value = cfg.offline ?? false
     autoModelSwitch.value = cfg.auto_model_switch ?? false
     maxContextMessages.value = cfg.max_context_messages ?? 0
-    proxyDefaultMaxTokens.value = cfg.proxy_default_max_tokens ?? 4096
+    proxyDefaultMaxTokens.value = cfg.proxy_default_max_tokens ?? 0
     // Advanced inference settings
     trustRemoteCode.value = cfg.trust_remote_code ?? false
     gpuMemoryUtil.value = cfg.gpu_memory_utilization ?? 0.90
@@ -1302,9 +1302,9 @@ onUnmounted(() => {
           <div class="pref-info">
             <span class="pref-label">Proxy Default Max Tokens</span>
             <span class="pref-desc">
-              Cap applied when a client (e.g. Kilroy) does not specify <code class="step-code">max_tokens</code>.
-              Without this cap, the model generates until it runs out of Metal GPU memory — causing requests to hang for minutes then fail with 0 tokens.
-              <strong>0 = no cap (risky).</strong> Recommended: <strong>4096</strong>. Set higher (8192–32768) only for long-form generation tasks.
+              Cap applied when a client does not specify <code class="step-code">max_tokens</code>.
+              <strong>0 = disabled (recommended for rapid-mlx)</strong> — the engine manages its own token budget, including extra tokens for reasoning models.
+              Only set a value here if you have clients that send uncapped requests and are experiencing memory exhaustion.
             </span>
           </div>
           <input
@@ -1315,7 +1315,7 @@ onUnmounted(() => {
             step="512"
             :value="proxyDefaultMaxTokens"
             @change="saveProxyDefaultMaxTokens(+($event.target as HTMLInputElement).value)"
-            aria-label="Proxy default max tokens (0 = no cap)"
+            aria-label="Proxy default max tokens (0 = disabled)"
           />
         </div>
       </div>

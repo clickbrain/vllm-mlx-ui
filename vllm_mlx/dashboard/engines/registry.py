@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Engine registry — maps engine IDs to their adapter instances.
 
-Built-in adapters are always registered first (vllm-mlx, rapid-mlx).
+Built-in adapters are always registered first (rapid-mlx is the primary local engine).
 On startup (and on ``reload()``) the registry also discovers:
 
 1. **Python entry points** — any installed pip package that declares::
@@ -35,7 +35,7 @@ from .llama_cpp import LlamaCppEngine
 from .lmstudio import LmStudioEngine
 from .ollama import OllamaEngine
 from .rapid_mlx import RapidMlxEngine
-from .vllm_mlx import VllmMlxEngine
+from .vllm_mlx import VllmMlxEngine  # kept for config migration only (hidden=True)
 
 if TYPE_CHECKING:
     from .base import BaseEngine
@@ -43,10 +43,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ── Built-in engines (always present) ─────────────────────────────────────────
-# Order matters for auto-fallback: stable local engines first, specialised/remote last.
+# Order matters: rapid-mlx is the primary local engine.  Hidden engines
+# (VllmMlxEngine) are included in ENGINES for config migration but are
+# excluded from the /engines API and UI engine picker via list_engines().
 _BUILTINS: list[BaseEngine] = [
-    VllmMlxEngine(),     # bundled Python-based engine — most stable, always first
-    RapidMlxEngine(),    # pip-based Apple Silicon engine
+    RapidMlxEngine(),    # primary local engine — fast MLX inference for Apple Silicon
     LightningMlxEngine(), # MTPLX speculative decoding — best for MTPLX-packaged models
     OllamaEngine(),      # popular desktop app, reliable
     LmStudioEngine(),    # desktop GUI app
@@ -54,6 +55,7 @@ _BUILTINS: list[BaseEngine] = [
     Ds4M5Engine(),       # M5-optimised DeepSeek V4 Flash (best on M5+)
     ExternalApiEngine(), # remote API proxy — requires user config, never auto-fallback
     AppleFMEngine(),     # macOS 26+ only — put last to avoid premature fallback
+    VllmMlxEngine(),     # DEPRECATED — hidden, kept for config migration only
 ]
 
 # ── Global registry state ─────────────────────────────────────────────────────
@@ -191,12 +193,18 @@ def _cached_latest_version(engine: "BaseEngine") -> str | None:
 
 
 def list_engines() -> list[dict]:
-    """Return summary dicts for all registered engines (for the /engines endpoint)."""
+    """Return summary dicts for all registered engines (for the /engines endpoint).
+
+    Hidden engines (e.g. deprecated vllm-mlx kept for config migration) are
+    excluded from this list.
+    """
     with _registry_lock:
         engines_snapshot = list(ENGINES.values())
 
     result = []
     for engine in engines_snapshot:
+        if getattr(engine, "hidden", False):
+            continue
         installed = False
         version = None
         try:
