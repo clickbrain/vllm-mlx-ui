@@ -1,6 +1,16 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.50 — 2026-05-28
+## v0.8.51 — 2026-05-28
+
+### Fixed
+
+- **Stale PID causes "Server is already running" when inference server has crashed** — `_is_process_alive(pid)` was checking only whether an OS process with the stored PID existed (via `os.kill(pid, 0)`). After a crash, the OS can reuse that PID for a completely different process, which passes the alive check — so the dashboard declares the server running and refuses to restart it, leaving port 8000 empty. Every subsequent benchmark or chat request then gets `ConnectionRefused`. Fixed: after the PID alive check, we now verify the server is actually accepting connections on its configured port (`_port_in_use`). If the port is empty, we compare the process creation time against `started_at` from the state file (±60 s tolerance) to distinguish "still loading model" from "stale PID". Stale state is cleared and the server restarts cleanly.
+
+- **Quality benchmark: pre-flight connectivity check aborts suite early with clear error** — Before running 20 questions, the benchmark now calls `GET /v1/models` (single fast request, no generation overhead). If the server is unreachable, the suite aborts immediately with a human-readable message instead of printing 20 "got ?, expected X" lines followed by an obscure connection error.
+
+- **Quality benchmark: MTPLX architecture warning** — Models with "MTPLX" in the name (e.g. `samuelfaj/Qwen3.6-35B-A3B-8bit-MTPLX-Optimized-Speed`) use the `qwen3-next-mtp` architecture which requires the `lightning-mlx` runtime. Standard mlx-lm does not support this architecture and produces 0 tokens. The benchmark now detects this by name and prints a clear warning before starting the suite so the user knows why all answers will be empty, instead of silently showing 0% accuracy.
+
+
 
 ### Fixed
 

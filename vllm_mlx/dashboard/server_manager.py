@@ -927,7 +927,38 @@ def start_server(config: dict[str, Any]) -> tuple[bool, str]:
 
     pid = _get_pid()
     if pid and _is_process_alive(pid):
-        return False, "Server is already running."
+        # Verify the server is actually serving on its port before declaring it running.
+        # If the PID is alive but the port is empty, the stored PID may belong to a
+        # different process (OS PID reuse after crash) or the server crashed at startup.
+        _state_port = int(config.get("port", 8000))
+        _state_host = config.get("host", "127.0.0.1")
+        if _port_in_use(_state_port, _state_host):
+            return False, "Server is already running."
+
+        # Port not in use — determine whether this is our server still loading
+        # the model (benign, we should wait) or a foreign/stale process.
+        _stale = True
+        _stored_start = float((_read_server_state() or {}).get("started_at", 0))
+        try:
+            _proc_start = psutil.Process(pid).create_time()
+            if abs(_proc_start - _stored_start) <= 60:
+                # Same process; stale only if it has been loading for > 5 minutes
+                # without binding the port (i.e., crashed during model load).
+                _stale = time.time() - _stored_start > 300
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass  # _stale stays True
+
+        if not _stale:
+            # Our server is still loading the model — report as running.
+            return False, "Server is already running."
+
+        logger.warning(
+            "Stale server state: PID %d is alive but not serving on port %d "
+            "(PID reuse or crash during startup). Clearing state and restarting.",
+            pid, _state_port,
+        )
+        _clear_server_state()
+        # Fall through to start a new server.
 
     if not config.get("model", "").strip():
         engine_id = config.get("engine_id", "vllm-mlx")

@@ -668,6 +668,39 @@ def _get_model_name(server_url: str) -> str:
     return "unknown"
 
 
+def _check_server_reachable(server_url: str, model: str) -> tuple[bool, str]:
+    """Fast pre-suite check — connectivity only, no generation request.
+
+    Returns (True, warning_or_empty) or (False, error_reason).
+    A non-empty warning string means the model may be incompatible but
+    we still let the suite run so the user sees real output.
+    """
+    # Connectivity check only — single GET, no generation (avoids adding
+    # latency for models that are already working correctly).
+    try:
+        requests.get(f"{server_url}/v1/models", timeout=5).raise_for_status()
+    except requests.exceptions.ConnectionError:
+        return False, (
+            f"Cannot connect to inference server at {server_url}. "
+            "The server may not be running — check the Serve tab."
+        )
+    except Exception as e:
+        return False, f"Inference server unreachable: {e}"
+
+    # Known-incompatible architecture detection by model name.
+    # MTPLX models require the lightning-mlx runtime; standard mlx-lm
+    # loads them as plain Qwen3 but crashes at generation time (0 tokens).
+    m_lower = (model or "").lower()
+    if "mtplx" in m_lower or "mtp-lx" in m_lower:
+        return True, (
+            f"⚠️  Model '{model}' uses the MTPLX/MTP architecture which requires "
+            "the lightning-mlx runtime. Standard mlx-lm may produce empty responses. "
+            "Results are likely to show 0% accuracy."
+        )
+
+    return True, ""
+
+
 def _do_stream(
     server_url: str,
     messages: list[dict],
@@ -869,6 +902,20 @@ def run_quality_benchmark(
         ttft_list: list[float] = []
         tps_list: list[float] = []
         total_tokens = 0
+
+        # Pre-flight: verify server is reachable and detect incompatible architectures.
+        # Uses only a GET /v1/models — no generation request, so working models pay ~0 overhead.
+        _ok, _reason = _check_server_reachable(server_url, model_name)
+        if not _ok:
+            _cb(f"[{suite_upper}] ✗ Aborted — {_reason}\n")
+            suite_results[suite] = {
+                "accuracy": 0.0, "correct": 0, "total": total,
+                "details": [], "error": _reason,
+                "ttft_ms_avg": None, "tps_avg": None,
+            }
+            continue
+        if _reason:  # non-fatal warning (e.g. MTPLX architecture)
+            _cb(f"[{suite_upper}] {_reason}\n")
 
         for i, q in enumerate(questions, start=1):
             if stop_event and stop_event.is_set():
