@@ -1,5 +1,16 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.72 — 2026-05-29
+
+### Fixed
+- **OOM crash cycle eliminated** — the recurring "4.3-minute requests, 0 TPS" pattern was caused by Kilroy (and other external clients) sending requests with no `max_tokens` limit. The engine would generate until Metal GPU memory was exhausted (~4.3 min), abort with 0 tokens, recover, then repeat. The proxy now applies a configurable `proxy_default_max_tokens` cap (default: 4096) when a client sends no limit. This does NOT affect requests that explicitly set `max_tokens`. Configurable in Settings.
+- **Clear request log** — `DELETE /debug/requests` endpoint added. Clears both the in-memory deque and the persistent `~/.vllm_mlx_ui/request_log.jsonl` file. Accessible via the "Clear Log" button in the System Monitor page.
+
+### Added
+- **Live engine status panel** in System Monitor (formerly Diagnostics). Shows real-time Metal memory (active/peak GB), generation TPS, running/waiting request counts, KV cache hit rate and memory utilization, and per-request progress bars with token counts. Polls the engine's `/v1/status` endpoint every 3 seconds.
+- **OOM detection** in request log — requests that took >5 seconds and returned 0 completion tokens are flagged as likely OOM events with a red badge. The System Monitor shows a warning banner when OOM events are present, with a link to the Settings fix.
+- **Proxy Default Max Tokens** setting in Settings → Network & Access. Controls the cap applied to uncapped client requests. Default: 4096. Set to 0 to disable (not recommended). Range: 0–131072.
+
 ## v0.8.71 — 2026-05-29
 
 ### Fixed

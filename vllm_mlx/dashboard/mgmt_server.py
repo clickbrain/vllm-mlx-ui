@@ -92,6 +92,9 @@ def _record_request(
     max_tokens: int = 0,
     model_swap: bool = False,
 ) -> None:
+    # Heuristic: if the request ran >5 s but returned 0 tokens, it likely hit
+    # a Metal OOM or engine crash rather than simply being a fast empty reply.
+    oom_likely = completion_tokens == 0 and duration > 5.0
     record: dict[str, Any] = {
         "ts": time.time(),
         "start": round(start, 3),
@@ -109,6 +112,7 @@ def _record_request(
         "msg_count": msg_count,
         "max_tokens": max_tokens,
         "model_swap": model_swap,
+        "oom_likely": oom_likely,
     }
     with _RECENT_REQUESTS_LOCK:
         _RECENT_REQUESTS.append(record)
@@ -1224,6 +1228,46 @@ async def debug_requests_stream(
     return StreamingResponse(_event_stream(), media_type="text/event-stream")
 
 
+@app.delete("/debug/requests")
+def debug_requests_clear(_: None = Depends(_check_auth)) -> dict:
+    """Clear the persistent request log and the in-memory deque.
+
+    Use this to flush test/development entries before monitoring a production
+    session.  The JSONL file is truncated to zero bytes (not deleted).
+    """
+    with _RECENT_REQUESTS_LOCK:
+        _RECENT_REQUESTS.clear()
+        if _REQUEST_LOG_PATH and _REQUEST_LOG_PATH.exists():
+            try:
+                _REQUEST_LOG_PATH.write_text("")
+            except Exception as exc:
+                logger.warning("Failed to clear request log: %s", exc)
+    return {"ok": True, "message": "Request log cleared"}
+
+
+@app.get("/debug/engine")
+async def debug_engine(_: None = Depends(_check_auth)) -> Any:
+    """Proxy to the inference engine's /v1/status endpoint.
+
+    Returns real-time engine state: Metal memory usage (GB), active requests,
+    tokens-per-second, KV cache hit rate, and per-request progress.  Returns
+    an empty dict if the engine is not running or unreachable.
+    """
+    cfg = sm.load_config()
+    if _is_external_api_engine():
+        return {"error": "external API engine — no local status available"}
+    server_url = sm.get_server_url(cfg)
+    try:
+        async with _get_http_client() as client:
+            resp = await client.get(f"{server_url}/v1/status", timeout=3.0)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.debug("debug/engine: engine unreachable: %s", exc)
+        return {"error": str(exc)}
+
+
+
 @app.get("/poll")
 def poll(_: None = Depends(_check_auth)) -> dict:
     """Batch endpoint: returns status, metrics, memory, config, and engine state in one call.
@@ -2049,6 +2093,15 @@ async def proxy_chat(
                 _conv = _conv[1:]
             request = {**request, "messages": _sys + _conv}
 
+    # 3. Default max_tokens cap: prevent runaway generation from exhausting Metal
+    #    GPU memory.  Applies only when the client did not specify a limit.
+    #    Controlled by proxy_default_max_tokens config (0 = don't enforce).
+    if not _is_external_api_engine():
+        _default_mt = int(cfg.get("proxy_default_max_tokens", 0) or 0)
+        if _default_mt > 0 and not (int(request.get("max_tokens") or 0) > 0):
+            request = {**request, "max_tokens": _default_mt}
+            logger.debug("Applied proxy_default_max_tokens=%d (client sent no limit)", _default_mt)
+
     if needs_switch:
         if _is_external_api_engine():
             # External API: no local process to swap — just update config model
@@ -2317,6 +2370,12 @@ async def proxy_completions(
         loaded_model = cfg.get("model", "").strip()
         if loaded_model and request.get("model") != loaded_model:
             request = {**request, "model": loaded_model}
+
+    # Default max_tokens cap: prevent runaway generation (same as proxy_chat).
+    if not _is_external_api_engine():
+        _default_mt = int(cfg.get("proxy_default_max_tokens", 0) or 0)
+        if _default_mt > 0 and not (int(request.get("max_tokens") or 0) > 0):
+            request = {**request, "max_tokens": _default_mt}
 
     if _is_external_api_engine():
         base = _get_external_target(cfg)

@@ -190,6 +190,11 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     # 0 = unlimited (no trimming).  Prevents O(n²) attention slowdown from long
     # histories.  Typical values: 20 (light agent), 10 (heavy/long-context model).
     "max_context_messages": 0,
+    # Proxy max_tokens cap: applied when a client does not set max_tokens (sends 0
+    # or null).  Prevents runaway generation from exhausting Metal GPU memory and
+    # hanging for minutes.  0 = do not enforce a cap (risky for large models).
+    # Recommended: 4096 for general use, 8192 for long-form writing.
+    "proxy_default_max_tokens": 4096,
     # Last used connection mode — "local" or "remote". Persisted so the UI
     # restores the correct target on browser refresh / app restart.
     "connection_mode": "local",

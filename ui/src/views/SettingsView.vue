@@ -235,6 +235,7 @@ const hfToken = ref(localStorage.getItem('vmui_hf_token') ?? '')
 const offlineMode = ref(false)
 const autoModelSwitch = ref(false)
 const maxContextMessages = ref(0)
+const proxyDefaultMaxTokens = ref(4096)
 const mgmtApiKeyMasked = ref('')
 const mgmtApiKeyInput = ref('')
 const mgmtApiKeySaved = ref(false)
@@ -306,6 +307,7 @@ onMounted(async () => {
       offline?: boolean
       auto_model_switch?: boolean
       max_context_messages?: number
+      proxy_default_max_tokens?: number
       trust_remote_code?: boolean
       gpu_memory_utilization?: number
       kv_cache_quantization?: boolean
@@ -331,6 +333,7 @@ onMounted(async () => {
     offlineMode.value = cfg.offline ?? false
     autoModelSwitch.value = cfg.auto_model_switch ?? false
     maxContextMessages.value = cfg.max_context_messages ?? 0
+    proxyDefaultMaxTokens.value = cfg.proxy_default_max_tokens ?? 4096
     // Advanced inference settings
     trustRemoteCode.value = cfg.trust_remote_code ?? false
     gpuMemoryUtil.value = cfg.gpu_memory_utilization ?? 0.90
@@ -498,6 +501,14 @@ async function saveMaxContextMessages(val: number) {
   maxContextMessages.value = n
   try { await api.post('/config', { max_context_messages: n }) } catch (e: any) {
     settingsError.value = `Failed to save max context messages: ${e?.message ?? 'unknown error'}`
+  }
+}
+
+async function saveProxyDefaultMaxTokens(val: number) {
+  const n = Math.max(0, Math.min(131072, Math.round(val) || 0))
+  proxyDefaultMaxTokens.value = n
+  try { await api.post('/config', { proxy_default_max_tokens: n }) } catch (e: any) {
+    settingsError.value = `Failed to save proxy default max tokens: ${e?.message ?? 'unknown error'}`
   }
 }
 
@@ -1285,6 +1296,26 @@ onUnmounted(() => {
             :value="maxContextMessages"
             @change="saveMaxContextMessages(+($event.target as HTMLInputElement).value)"
             aria-label="Max context messages (0 = unlimited)"
+          />
+        </div>
+        <div class="pref-row pref-row-input">
+          <div class="pref-info">
+            <span class="pref-label">Proxy Default Max Tokens</span>
+            <span class="pref-desc">
+              Cap applied when a client (e.g. Kilroy) does not specify <code class="step-code">max_tokens</code>.
+              Without this cap, the model generates until it runs out of Metal GPU memory — causing requests to hang for minutes then fail with 0 tokens.
+              <strong>0 = no cap (risky).</strong> Recommended: <strong>4096</strong>. Set higher (8192–32768) only for long-form generation tasks.
+            </span>
+          </div>
+          <input
+            type="number"
+            class="pref-number-input"
+            min="0"
+            max="131072"
+            step="512"
+            :value="proxyDefaultMaxTokens"
+            @change="saveProxyDefaultMaxTokens(+($event.target as HTMLInputElement).value)"
+            aria-label="Proxy default max tokens (0 = no cap)"
           />
         </div>
       </div>
