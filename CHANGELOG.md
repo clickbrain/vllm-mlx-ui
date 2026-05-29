@@ -1,5 +1,20 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.67 — 2026-05-29
+
+### Added
+- **Diagnostic request tracing** (`GET /debug/requests`): New authenticated endpoint returns the last
+  N inference requests (default 50) with full timing breakdown — `ttft_ms`, `duration_ms`,
+  `proxy_overhead_ms`, `stream`, `user_agent`, `client_ip`, `completion_tokens`, `model`, and human-
+  readable `time`. Use this to compare requests from external clients (e.g. Kilroy) vs the built-in
+  chat side-by-side to identify bottlenecks.
+- **Proxy overhead measurement**: Each request now records `proxy_overhead_ms` — the time from HTTP
+  request received → engine request start — covering auth check, config read, and process check.
+  For model-switch requests this also includes model load time.
+- **Request metadata**: `stream`, `user_agent`, and `client_ip` are now recorded for every proxied
+  request. `stream: false` means the client waits for all tokens before seeing any output, which is
+  the most common reason external apps appear slow compared to the built-in streaming chat.
+
 ## v0.8.66 — 2026-05-29
 
 ### Fixed

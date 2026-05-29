@@ -15,6 +15,7 @@ local dashboard uses.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json as _json
 import logging
 import re
@@ -54,6 +55,11 @@ def _record_request(
     duration: float,
     completion_tokens: int,
     model: str,
+    *,
+    stream: bool = False,
+    user_agent: str = "",
+    client_ip: str = "",
+    proxy_overhead_ms: float | None = None,
 ) -> None:
     with _RECENT_REQUESTS_LOCK:
         _RECENT_REQUESTS.append({
@@ -62,6 +68,12 @@ def _record_request(
             "duration_ms": round(duration * 1000, 1),
             "completion_tokens": completion_tokens,
             "model": model,
+            "stream": stream,
+            "user_agent": user_agent,
+            "client_ip": client_ip,
+            # proxy_overhead_ms: time from HTTP request received → engine request start.
+            # For model-switch requests this also includes model swap time (30–120 s).
+            "proxy_overhead_ms": round(proxy_overhead_ms, 1) if proxy_overhead_ms is not None else None,
             "ts": time.time(),
         })
         if len(_RECENT_REQUESTS) > _MAX_RECENT:
@@ -142,6 +154,7 @@ app.add_middleware(
 # Pure ASGI middleware — avoids BaseHTTPMiddleware's anyio task-group overhead
 # that serializes SSE chunk delivery (one context-switch per chunk per request).
 from starlette.datastructures import MutableHeaders
+from starlette.requests import Request as _StarletteRequest
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 
@@ -168,6 +181,23 @@ class _PermissiveHeadersMiddleware:
 
 
 app.add_middleware(_PermissiveHeadersMiddleware)
+
+
+# ── Request arrival timestamp middleware ──────────────────────────────────────
+# Stamps request.state.req_start so proxy endpoints can measure proxy overhead
+# (time from HTTP request received → first byte forwarded to the inference engine).
+class _RequestTimingMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            req = _StarletteRequest(scope)
+            req.state.req_start = time.time()
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_RequestTimingMiddleware)
 
 
 # ── Background update scheduler ───────────────────────────────────────────────
@@ -1025,6 +1055,43 @@ def memory_stats(_: None = Depends(_check_auth)) -> dict:
 def live_metrics(_: None = Depends(_check_auth)) -> dict:
     """Rolling TTFT and TPS from recent proxy requests (last 5 min window)."""
     return _get_live_metrics()
+
+
+@app.get("/debug/requests")
+def debug_requests(
+    n: int = 50,
+    _: None = Depends(_check_auth),
+) -> dict:
+    """Diagnostic endpoint: last N inference requests with full timing breakdown.
+
+    Each record includes:
+    - ``ttft_ms``           – time to first token from the engine (engine latency)
+    - ``duration_ms``       – total request duration including all token generation
+    - ``proxy_overhead_ms`` – time from HTTP request received → engine request start
+                              (covers auth check + config read + process check).
+                              For model-switch requests, also includes model load time
+                              (30–120 s) — filter by ``model`` to distinguish.
+    - ``stream``            – whether the client used SSE streaming
+    - ``user_agent``        – client User-Agent header (identifies Kilroy vs chat)
+    - ``client_ip``         – client IP address
+    - ``completion_tokens`` – tokens generated
+    - ``model``             – model ID
+
+    Use this to compare requests from Kilroy vs the built-in chat side-by-side.
+    A large ``proxy_overhead_ms`` (excluding model-switch) → bottleneck in the proxy layer.
+    A large ``ttft_ms`` relative to benchmarks → engine bottleneck.
+    ``stream: false`` → client waits for ALL tokens before seeing any output.
+    """
+    with _RECENT_REQUESTS_LOCK:
+        recent = list(_RECENT_REQUESTS)
+    records = recent[-n:] if n > 0 else recent
+    return {
+        "count": len(records),
+        "requests": [
+            {**r, "time": datetime.datetime.fromtimestamp(r["ts"]).strftime("%H:%M:%S")}
+            for r in records
+        ],
+    }
 
 
 @app.get("/poll")
@@ -1888,7 +1955,12 @@ async def proxy_chat(
                             yield chunk
                     duration = time.time() - start
                     ttft = (first_byte - start) if first_byte else None
-                    _record_request(start, ttft, duration, completion_tokens, model)
+                    _overhead = (start - getattr(_raw.state, "req_start", start)) * 1000
+                    _record_request(start, ttft, duration, completion_tokens, model,
+                                    stream=True,
+                                    user_agent=_raw.headers.get("user-agent", ""),
+                                    client_ip=(_raw.client.host if _raw.client else "") or "",
+                                    proxy_overhead_ms=_overhead)
                 except Exception as exc:
                     yield _sse_delta(f"❌ Request failed after model switch: {exc}")
                     yield "data: [DONE]\n\n"
@@ -1907,11 +1979,22 @@ async def proxy_chat(
             cfg2 = sm.load_config()
             target2 = sm.get_server_url(cfg2)
             try:
+                start = time.time()
                 resp = await _get_httpx_client().post(
                     f"{target2}/v1/chat/completions",
                     timeout=300, json=request, headers=req_headers,
                 )
-                return resp.json()
+                data = resp.json()
+                dur = time.time() - start
+                ct = (data.get("usage") or {}).get("completion_tokens", 0)
+                m = data.get("model", requested_model or cfg2.get("model", ""))
+                _overhead = (start - getattr(_raw.state, "req_start", start)) * 1000
+                _record_request(start, None, dur, ct, m,
+                                stream=False,
+                                user_agent=_raw.headers.get("user-agent", ""),
+                                client_ip=(_raw.client.host if _raw.client else "") or "",
+                                proxy_overhead_ms=_overhead)
+                return data
             except Exception as exc:
                 logger.warning("Non-streaming request to inference server failed: %s", exc, exc_info=True)
                 raise HTTPException(status_code=502, detail="Inference server request failed") from exc
@@ -1945,6 +2028,9 @@ async def proxy_chat(
                 first_byte = None
                 completion_tokens = 0
                 model = requested_model or cfg.get("model", "")
+                _ua = _raw.headers.get("user-agent", "")
+                _ip = (_raw.client.host if _raw.client else "") or ""
+                _overhead = (start - getattr(_raw.state, "req_start", start)) * 1000
 
                 client = _get_httpx_client()
                 async with client.stream(
@@ -1975,7 +2061,9 @@ async def proxy_chat(
 
                 duration = time.time() - start
                 ttft = (first_byte - start) if first_byte else None
-                _record_request(start, ttft, duration, completion_tokens, model)
+                _record_request(start, ttft, duration, completion_tokens, model,
+                                stream=True, user_agent=_ua, client_ip=_ip,
+                                proxy_overhead_ms=_overhead)
 
             return StreamingResponse(_stream(), media_type="text/event-stream")
         else:
@@ -2010,7 +2098,12 @@ async def proxy_chat(
             dur = time.time() - start
             ct = (data.get("usage") or {}).get("completion_tokens", 0)
             m = data.get("model", requested_model or cfg.get("model", ""))
-            _record_request(start, None, dur, ct, m)
+            _overhead = (start - getattr(_raw.state, "req_start", start)) * 1000
+            _record_request(start, None, dur, ct, m,
+                            stream=False,
+                            user_agent=_raw.headers.get("user-agent", ""),
+                            client_ip=(_raw.client.host if _raw.client else "") or "",
+                            proxy_overhead_ms=_overhead)
             return data
     except HTTPException:
         raise
@@ -2068,6 +2161,9 @@ async def proxy_completions(
                 first_byte = None
                 completion_tokens = 0
                 model = request.get("model", cfg.get("model", ""))
+                _ua = _raw.headers.get("user-agent", "")
+                _ip = (_raw.client.host if _raw.client else "") or ""
+                _overhead = (start - getattr(_raw.state, "req_start", start)) * 1000
                 async with _get_httpx_client().stream(
                     "POST", f"{target}/v1/completions",
                     timeout=300, json=request, headers=req_headers,
@@ -2091,7 +2187,9 @@ async def proxy_completions(
                         yield chunk
                 duration = time.time() - start
                 ttft = (first_byte - start) if first_byte else None
-                _record_request(start, ttft, duration, completion_tokens, model)
+                _record_request(start, ttft, duration, completion_tokens, model,
+                                stream=True, user_agent=_ua, client_ip=_ip,
+                                proxy_overhead_ms=_overhead)
 
             return StreamingResponse(_stream_completions(), media_type="text/event-stream")
         else:
@@ -2124,7 +2222,12 @@ async def proxy_completions(
             dur = time.time() - start
             ct = (data.get("usage") or {}).get("completion_tokens", 0)
             m = data.get("model", request.get("model", cfg.get("model", "")))
-            _record_request(start, None, dur, ct, m)
+            _overhead = (start - getattr(_raw.state, "req_start", start)) * 1000
+            _record_request(start, None, dur, ct, m,
+                            stream=False,
+                            user_agent=_raw.headers.get("user-agent", ""),
+                            client_ip=(_raw.client.host if _raw.client else "") or "",
+                            proxy_overhead_ms=_overhead)
             return data
     except HTTPException:
         raise
