@@ -12,6 +12,28 @@ We ALWAYS install them from their upstream repositories. We NEVER modify their s
 
 ---
 
+## 🛡️ QA GUARDIAN — MANDATORY BEFORE EVERY RELEASE
+
+**BEFORE running `scripts/release.sh`, you MUST invoke the QA Guardian agent.**
+
+The QA Guardian (`@qa-guardian`) is defined in `.github/agents/qa-guardian.agent.md`.
+It reviews all changes for bugs, regressions, security issues, and user-visible breakage.
+
+**How to invoke (CLI context — do this yourself):**
+1. Complete your implementation
+2. Run `git diff HEAD~1..HEAD --stat` to summarize what changed
+3. Explicitly invoke qa-guardian by reading `.github/agents/qa-guardian.agent.md` and executing its full methodology against the changes you made
+4. Resolve any RED (blocking) or YELLOW (high-risk) findings before releasing
+
+**QA Guardian sign-off levels:**
+- 🟢 **GREEN** — safe to release
+- 🟡 **YELLOW** — release with documented risks, get user acknowledgement
+- 🔴 **RED** — DO NOT release until issues resolved
+
+**If you skip QA Guardian, the release is incomplete.** No exceptions.
+
+---
+
 ## ⛔ RELEASE RULE — NEVER SKIP ANY STEP
 
 **Every release MUST use `scripts/release.sh <version>` — never do steps manually.**

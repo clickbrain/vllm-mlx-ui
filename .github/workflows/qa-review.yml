@@ -1,0 +1,66 @@
+name: QA Guardian Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+jobs:
+  request-qa-review:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Post QA Guardian invocation comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const sha = context.payload.pull_request.head.sha.slice(0, 7);
+
+            // Only post on first open or when new commits are pushed.
+            // Check if we already commented on this SHA to avoid duplicates.
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const alreadyPosted = comments.data.some(c =>
+              c.user.login === 'github-actions[bot]' &&
+              c.body.includes('QA Guardian') &&
+              c.body.includes(sha)
+            );
+
+            if (alreadyPosted) {
+              console.log(`QA comment already posted for ${sha}, skipping.`);
+              return;
+            }
+
+            const body = `## 🛡️ QA Guardian Review Required
+
+**Commit:** \`${sha}\`
+
+A QA review is required before merging. Invoke the QA Guardian in Copilot Chat:
+
+> @copilot using the \`qa-guardian\` agent — please review the changes in this PR for bugs, regressions, security issues, and user-visible breakage. Report your findings with severity.
+
+**Sign-off required before merge:**
+- 🟢 GREEN — safe to merge
+- 🟡 YELLOW — merge with documented risks (get author acknowledgement)
+- 🔴 RED — do not merge until issues are resolved
+
+_To trigger: paste the @copilot message above into a comment, or open Copilot Chat and ask it to run the qa-guardian agent on this PR._`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body,
+            });
+            console.log(`Posted QA Guardian comment for PR #${prNumber} at ${sha}`);

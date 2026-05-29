@@ -4,6 +4,36 @@
 
 ---
 
+## 🛡️ QA GUARDIAN — MANDATORY BEFORE EVERY RELEASE
+
+The `qa-guardian` is a GitHub Copilot coding agent defined in `.github/agents/qa-guardian.agent.md`.
+**It MUST review all changes before any release.** This is not optional.
+
+### When to invoke qa-guardian
+- After implementing any feature, fix, or refactor
+- Before running `scripts/release.sh`
+- When a PR is opened (GitHub Actions auto-posts a reminder on every PR)
+- When user says "is this ready to release?", "check for issues", or "what could go wrong?"
+
+### How to invoke (in Copilot CLI / coding agent context)
+1. Complete your implementation
+2. Read `.github/agents/qa-guardian.agent.md` and execute its methodology against your changes
+3. Report findings using the qa-guardian report format (SEVERITY → IMPACT → TESTS → FINDINGS → SIGN-OFF)
+4. Resolve RED findings before releasing; document YELLOW findings in CHANGELOG
+
+### Sign-off levels
+| Level | Meaning | Action |
+|-------|---------|--------|
+| 🟢 GREEN | No blocking issues | Safe to release |
+| 🟡 YELLOW | High-risk changes with known trade-offs | Release with documented risks, get user acknowledgement |
+| 🔴 RED | Blocking bugs, regressions, or security issues | DO NOT release — fix first |
+
+### PR workflow (automated)
+`.github/workflows/qa-review.yml` auto-posts a QA invocation comment on every PR.
+To trigger the agent from a PR: paste `@copilot using the qa-guardian agent — review these changes` as a PR comment.
+
+---
+
 ## ⚠️ MANDATORY PRE-CHANGE QUESTION — BEFORE EVERY CODE CHANGE
 
 **Before implementing any change — bug fix, feature, refactor, or configuration tweak — you MUST explicitly ask yourself (or any sub-agent you delegate to):**
