@@ -322,6 +322,7 @@ async function handleLoad(modelId: string) {
     // App.vue global modal will show. Just clear our toast.
     if (result?.needs_install) {
       loadToast.value = null
+      loadError.value = null
       return
     }
 

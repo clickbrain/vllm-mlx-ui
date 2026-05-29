@@ -338,8 +338,22 @@ export const useModelsStore = defineStore('models', () => {
 
   async function retryLoadAfterInstall() {
     const modelId = pendingInstall.value?.modelId
+    const attempt = (pendingInstall.value as any)?._attempt ?? 0
     pendingInstall.value = null
-    if (modelId) await loadModel(modelId)
+    if (!modelId) return
+    if (attempt >= 2) {
+      actionError.value = `Engine installed but model still failed to load after ${attempt + 1} attempts. Try restarting the app.`
+      return
+    }
+    const result = await loadModel(modelId).catch((e: unknown) => {
+      actionError.value = String(e)
+      return null
+    })
+    // If backend still returns needs_install, stamp attempt count to break the loop
+    if (pendingInstall.value) {
+      ;(pendingInstall.value as any)._attempt = attempt + 1
+    }
+    return result
   }
 
   async function deleteModel(modelId: string) {

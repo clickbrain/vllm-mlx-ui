@@ -131,6 +131,7 @@ const p       = ref<ChatParams>(loadParams(modelId.value))
 const engines          = ref<EngineInfo[]>([])
 const selectedEngine   = ref(serverStore.engineId)
 const switchingEngine  = ref(false)
+const switchingModel   = ref(false)
 const enginesLoadError = ref('')
 const activeEngineInfo  = computed(() => engines.value.find(e => e.id === serverStore.engineId))
 const fixedModelDisplay = computed<string | null>(() => activeEngineInfo.value?.fixed_model_display ?? null)
@@ -192,12 +193,15 @@ watch(() => serverStore.engineId, (id) => {
 async function switchModel(e: Event) {
   const newId = (e.target as HTMLSelectElement).value
   if (!newId || newId === serverStore.modelId) return
+  switchingModel.value = true
   try {
     await modelsStore.loadModel(newId)
     // needs_install: App.vue global modal handles it (modelsStore.pendingInstall was set)
     // engine auto-switch: serverStore.engineId watch updates selectedEngine automatically
   } catch {
     // loadModel sets modelsStore.actionError; toast/banner will show it
+  } finally {
+    switchingModel.value = false
   }
 }
 

@@ -41,6 +41,7 @@ const success = ref(false)
 const failed = ref(false)
 const logRef = ref<HTMLElement | null>(null)
 const abortController = new AbortController()
+let retryTimer: ReturnType<typeof setTimeout> | null = null
 
 function addLine(text: string, type?: LogLine['type']) {
   const autoType: LogLine['type'] = type
@@ -110,11 +111,15 @@ async function startInstall() {
   if (success.value) {
     addLine('')
     addLine(`✅ ${props.engineName} installed — loading ${modelName}…`, 'success')
-    setTimeout(() => emit('installed'), 1200)
+    retryTimer = setTimeout(() => emit('installed'), 1200)
   }
 }
 
 function handleCancel() {
+  if (retryTimer !== null) {
+    clearTimeout(retryTimer)
+    retryTimer = null
+  }
   abortController.abort()
   emit('cancel')
 }
@@ -132,6 +137,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (retryTimer !== null) {
+    clearTimeout(retryTimer)
+    retryTimer = null
+  }
   document.removeEventListener('keydown', handleEscape)
   abortController.abort()
 })
