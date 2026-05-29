@@ -696,14 +696,19 @@ def _stream_completion(
             "max_tokens": max_tokens,
             "stream": True,
             "stream_options": {"include_usage": True},
-            # Disable thinking mode on Qwen3/DeepSeek-R1 style models so the
-            # answer goes directly into content tokens rather than reasoning_content.
-            # Two-pronged approach:
-            # 1. Top-level: sets request.enable_thinking=False on the server, which
-            #    ALSO disables the reasoning parser so tokens flow to `content` directly.
-            # 2. chat_template_kwargs: belt-and-suspenders at the template level.
-            "enable_thinking": False,
-            "chat_template_kwargs": {"enable_thinking": False},
+            # Do NOT set enable_thinking or chat_template_kwargs here.
+            #
+            # Sending enable_thinking=False causes a Jinja2 TemplateError (not
+            # TypeError) in chat templates that don't declare the variable, e.g.
+            # MTPLX / custom Qwen3 fine-tunes.  The upstream engine only catches
+            # TypeError, so the exception propagates through _ensure_sse_terminal
+            # which swallows it and returns only data:[DONE] → chunks=0.
+            #
+            # Instead we let the model think naturally.  If the server has a
+            # reasoning parser active, thinking tokens land in reasoning_content;
+            # our fallback below promotes reasoning_content→text when content is
+            # empty.  If no reasoning parser, <think>…</think> appears inline in
+            # content and _strip_thinking() removes it before grading.
         },
         stream=True,
         timeout=timeout,

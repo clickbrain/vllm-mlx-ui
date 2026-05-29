@@ -1,5 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.47 — 2026-05-28
+
+### Fixed
+
+- **Quality benchmark: MTPLX / custom Qwen3 fine-tunes return empty responses (chunks=0)** — Root cause: the benchmark was sending `"enable_thinking": false` and `"chat_template_kwargs": {"enable_thinking": false}` in the request body. The upstream engine's `_stream_generate_text` passes `enable_thinking=False` directly to `tokenizer.apply_chat_template()` — but only catches `TypeError` when the template rejects an unknown kwarg. Custom Qwen3 fine-tunes (including MTPLX-optimized models) may use templates that raise a Jinja2 `TemplateError` instead of `TypeError` when `enable_thinking` is not defined in their template. That non-TypeError exception propagates through `_ensure_sse_terminal` which swallows it, emits only `data:[DONE]`, and returns HTTP 200. Our code then sees `chunks=0` and `reasoning_chunks=0`. Fixed: the benchmark no longer sends `enable_thinking` or `chat_template_kwargs` at all. The model thinks naturally; if the server has a reasoning parser active, thinking tokens land in `reasoning_content` and our fallback promotes them to `text`; without a reasoning parser, `<think>…</think>` appears inline in `content` and `_strip_thinking()` removes it before grading.
+
 ## v0.8.46 — 2026-05-28
 
 ### Fixed
