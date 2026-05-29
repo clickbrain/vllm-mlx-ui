@@ -234,6 +234,7 @@ const inferenceApiKey = ref('')
 const hfToken = ref(localStorage.getItem('vmui_hf_token') ?? '')
 const offlineMode = ref(false)
 const autoModelSwitch = ref(false)
+const maxContextMessages = ref(0)
 const mgmtApiKeyMasked = ref('')
 const mgmtApiKeyInput = ref('')
 const mgmtApiKeySaved = ref(false)
@@ -304,6 +305,7 @@ onMounted(async () => {
       api_key?: string
       offline?: boolean
       auto_model_switch?: boolean
+      max_context_messages?: number
       trust_remote_code?: boolean
       gpu_memory_utilization?: number
       kv_cache_quantization?: boolean
@@ -328,6 +330,7 @@ onMounted(async () => {
     inferenceApiKey.value = cfg.api_key ?? ''
     offlineMode.value = cfg.offline ?? false
     autoModelSwitch.value = cfg.auto_model_switch ?? false
+    maxContextMessages.value = cfg.max_context_messages ?? 0
     // Advanced inference settings
     trustRemoteCode.value = cfg.trust_remote_code ?? false
     gpuMemoryUtil.value = cfg.gpu_memory_utilization ?? 0.90
@@ -487,6 +490,14 @@ async function saveAutoModelSwitch(val: boolean) {
   autoModelSwitch.value = val
   try { await api.post('/auto_switch_enabled', { enabled: val }) } catch (e: any) {
     settingsError.value = `Failed to save auto model switch: ${e?.message ?? 'unknown error'}`
+  }
+}
+
+async function saveMaxContextMessages(val: number) {
+  const n = Math.max(0, Math.round(val) || 0)
+  maxContextMessages.value = n
+  try { await api.post('/config', { max_context_messages: n }) } catch (e: any) {
+    settingsError.value = `Failed to save max context messages: ${e?.message ?? 'unknown error'}`
   }
 }
 
@@ -1257,6 +1268,25 @@ onUnmounted(() => {
             <span class="toggle-track"><span class="toggle-thumb" /></span>
           </label>
         </div>
+        <div class="pref-row pref-row-input">
+          <div class="pref-info">
+            <span class="pref-label">Max Context Messages</span>
+            <span class="pref-desc">
+              Limit conversation history forwarded to the inference engine. The proxy keeps all system messages + the last <em>N</em> user/assistant turns. Prevents quadratic attention slowdown from long histories.
+              <strong>0 = unlimited.</strong> Recommended: <strong>20</strong> for general use, <strong>10</strong> for large models.
+            </span>
+          </div>
+          <input
+            type="number"
+            class="pref-number-input"
+            min="0"
+            max="200"
+            step="5"
+            :value="maxContextMessages"
+            @change="saveMaxContextMessages(+($event.target as HTMLInputElement).value)"
+            aria-label="Max context messages (0 = unlimited)"
+          />
+        </div>
       </div>
       <div class="pref-collapsible-wrap">
         <CollapsibleSection title="Firewall &amp; Remote Access">
@@ -1452,6 +1482,19 @@ onUnmounted(() => {
 .engine-req-warning-list li { font-size: 13px; color: var(--tx-primary); line-height: 1.5; }
 .pref-list { display: flex; flex-direction: column; }
 .pref-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--bd-subtle); }
+.pref-row-input { align-items: flex-start; }
+.pref-number-input {
+  width: 80px;
+  flex-shrink: 0;
+  padding: 0.3rem 0.5rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  color: var(--tx-primary);
+  font-size: 0.875rem;
+  text-align: right;
+}
+.pref-number-input:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pref-row:last-child { border-bottom: none; }
 .pref-info { display: flex; flex-direction: column; gap: 2px; }
 .pref-label { font-size: var(--text-sm); font-weight: 500; color: var(--tx-primary); }

@@ -185,6 +185,11 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "startup_model_behavior": "auto",
     # Auto model switch (proxy hot-swap) — local feature, not synced to remote
     "auto_model_switch": True,
+    # Context window governor: trim conversation history before forwarding to the
+    # inference engine.  Keeps all system messages + the last N non-system turns.
+    # 0 = unlimited (no trimming).  Prevents O(n²) attention slowdown from long
+    # histories.  Typical values: 20 (light agent), 10 (heavy/long-context model).
+    "max_context_messages": 0,
     # Last used connection mode — "local" or "remote". Persisted so the UI
     # restores the correct target on browser refresh / app restart.
     "connection_mode": "local",

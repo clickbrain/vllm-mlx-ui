@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.71 — 2026-05-29
+
+### Fixed
+- **Model name normalization** — proxy now replaces whatever model name the client sends with the actually-loaded model before forwarding. Prevents accidental hot-swaps (multi-minute restarts) when external apps like Kilroy have a different model name configured. Applied to both `/v1/chat/completions` and `/v1/completions`. Not applied when auto-model-switch is intentionally triggering a swap.
+- **Context window governor** — new `max_context_messages` config option (default 0 = unlimited). When set, the proxy trims conversation history to keep all system messages + the last N turns before forwarding. Prevents O(n²) attention cost from long histories causing very low TPS. Tool-call orphan safety included: if the trim boundary lands mid-tool-call, orphaned `role: tool` messages are dropped to prevent 400 errors from inference engines. Not applied to external API engines.
+- External API engine guard added to context governor — remote API users are not affected.
+
+### Added
+- **Max Context Messages** setting in Settings → Network & Access. Number input (0 = unlimited). Recommended: 20 for general use, 10 for large models.
+
 ## v0.8.69 — 2026-05-29
 
 ### Added

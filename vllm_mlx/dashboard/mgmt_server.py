@@ -2013,6 +2013,42 @@ async def proxy_chat(
         if int(request.get("max_tokens", 0) or 0) < max_out:
             request = {**request, "max_tokens": max_out}
 
+    # ── Proxy-level performance fixes ───────────────────────────────────────
+    # 1. Model name normalization: replace whatever model name the client sent
+    #    with the actually-loaded model ID before forwarding.  This prevents
+    #    "model not found" errors from the inference engine and, more importantly,
+    #    means the proxy NEVER triggers an accidental hot-swap just because the
+    #    client (e.g. Kilroy) has a different model name configured.
+    #    Only applied when a swap is NOT already happening.
+    if not needs_switch and not _is_external_api_engine():
+        loaded_model = cfg.get("model", "").strip()
+        if loaded_model and request.get("model") != loaded_model:
+            request = {**request, "model": loaded_model}
+
+    # 2. Context window governor: trim conversation history to prevent
+    #    O(n²) attention cost from long histories grinding TPS to near zero.
+    #    Keeps ALL system messages + the most recent N non-system turns.
+    #    Controlled by max_context_messages config (0 = unlimited).
+    #    Not applied to external API engines (remote API manages its own limits).
+    _max_ctx = int(cfg.get("max_context_messages", 0) or 0)
+    if _max_ctx > 0 and not _is_external_api_engine() and isinstance(request.get("messages"), list):
+        _msgs = request["messages"]
+        _sys = [m for m in _msgs if m.get("role") == "system"]
+        _conv = [m for m in _msgs if m.get("role") != "system"]
+        if len(_conv) > _max_ctx:
+            logger.debug(
+                "Context trimmed: %d → %d messages (max_context_messages=%d)",
+                len(_conv), _max_ctx, _max_ctx,
+            )
+            _conv = _conv[-_max_ctx:]
+            # Safety: if the trim boundary lands mid-tool-call, the first message
+            # in _conv could be role=tool with no preceding assistant+tool_calls.
+            # Inference engines reject this with a 400.  Drop orphaned tool
+            # responses until we reach a clean boundary.
+            while _conv and _conv[0].get("role") == "tool":
+                _conv = _conv[1:]
+            request = {**request, "messages": _sys + _conv}
+
     if needs_switch:
         if _is_external_api_engine():
             # External API: no local process to swap — just update config model
@@ -2274,6 +2310,13 @@ async def proxy_completions(
     cfg = sm.load_config()
     auto_switch = cfg.get("auto_model_switch", False)
     needs_switch = bool(requested_model and auto_switch and _needs_hot_swap(requested_model, cfg))
+
+    # Model name normalization: replace client model name with the loaded model
+    # so the inference engine never gets an unknown name.
+    if not needs_switch and not _is_external_api_engine():
+        loaded_model = cfg.get("model", "").strip()
+        if loaded_model and request.get("model") != loaded_model:
+            request = {**request, "model": loaded_model}
 
     if _is_external_api_engine():
         base = _get_external_target(cfg)
