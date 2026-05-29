@@ -32,10 +32,58 @@ trap cleanup EXIT
 
 cd "$REPO_ROOT"
 
+# ── QA Gate ────────────────────────────────────────────────
+# release.sh REQUIRES a passing QA sign-off on the current commit.
+# Run the QA Guardian agent and then: scripts/qa-sign-off.sh GREEN "summary"
+
+SIGNOFF_FILE="${REPO_ROOT}/.qa-signoff"
+
+if [[ ! -f "$SIGNOFF_FILE" ]]; then
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  🔴 BLOCKED — No QA sign-off found."
+  echo ""
+  echo "  Before releasing, run the QA Guardian agent and then:"
+  echo "    scripts/qa-sign-off.sh GREEN \"summary of findings\""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  exit 1
+fi
+
+# Read sign-off values
+SIGNOFF_VERDICT=$(grep '^VERDICT=' "$SIGNOFF_FILE" | cut -d= -f2)
+SIGNOFF_COMMIT=$(grep '^COMMIT=' "$SIGNOFF_FILE" | cut -d= -f2)
+SIGNOFF_SUMMARY=$(grep '^SUMMARY=' "$SIGNOFF_FILE" | cut -d= -f2-)
+HEAD_SHA=$(git rev-parse HEAD)
+
+if [[ "$SIGNOFF_COMMIT" != "$HEAD_SHA" ]]; then
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  🔴 BLOCKED — QA sign-off is stale."
+  echo ""
+  echo "  Sign-off commit : ${SIGNOFF_COMMIT:0:12}"
+  echo "  Current HEAD    : ${HEAD_SHA:0:12}"
+  echo ""
+  echo "  New commits have been made since the last QA review."
+  echo "  Re-run QA Guardian and sign off on the current commit:"
+  echo "    scripts/qa-sign-off.sh GREEN \"summary\""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  exit 1
+fi
+
+if [[ "$SIGNOFF_VERDICT" == "RED" ]]; then
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  🔴 BLOCKED — QA verdict is RED."
+  echo ""
+  echo "  Summary: ${SIGNOFF_SUMMARY}"
+  echo ""
+  echo "  Fix all blocking issues, then re-run QA Guardian and sign off."
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  exit 1
+fi
+
 # ── Pre-flight checks ──────────────────────────────────────
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Releasing vllm-mlx-ui ${VERSION}"
+echo "  QA: ${SIGNOFF_VERDICT} — ${SIGNOFF_SUMMARY}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Check that the tag doesn't already exist
@@ -140,6 +188,8 @@ git -C "$TAP_CLONE_DIR" add -A
 git -C "$TAP_CLONE_DIR" commit -m "chore: update formula to ${TAG}"
 git -C "$TAP_CLONE_DIR" push origin main
 echo "  ✓ Tap repo updated"
+
+rm -f "${SIGNOFF_FILE}"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

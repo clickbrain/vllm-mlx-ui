@@ -17,16 +17,24 @@ The `qa-guardian` is a GitHub Copilot coding agent defined in `.github/agents/qa
 
 ### How to invoke (in Copilot CLI / coding agent context)
 1. Complete your implementation
-2. Read `.github/agents/qa-guardian.agent.md` and execute its methodology against your changes
+2. Use the `qa-guardian` Task agent to review all changed files
 3. Report findings using the qa-guardian report format (SEVERITY → IMPACT → TESTS → FINDINGS → SIGN-OFF)
 4. Resolve RED findings before releasing; document YELLOW findings in CHANGELOG
+5. **MANDATORY FINAL STEP — run the sign-off script:**
+   ```bash
+   scripts/qa-sign-off.sh GREEN "summary of what was checked and found"
+   # or: scripts/qa-sign-off.sh YELLOW "summary including known risks"
+   # or: scripts/qa-sign-off.sh RED "summary of blocking issues"
+   ```
+   `release.sh` will **hard-block** unless this file exists and matches the current HEAD commit.
+   A stale sign-off (HEAD has moved) also blocks — re-run QA after any new commits.
 
 ### Sign-off levels
 | Level | Meaning | Action |
 |-------|---------|--------|
 | 🟢 GREEN | No blocking issues | Safe to release |
 | 🟡 YELLOW | High-risk changes with known trade-offs | Release with documented risks, get user acknowledgement |
-| 🔴 RED | Blocking bugs, regressions, or security issues | DO NOT release — fix first |
+| 🔴 RED | Blocking bugs, regressions, or security issues | `release.sh` is hard-blocked — fix first |
 
 ### PR workflow (automated)
 `.github/workflows/qa-review.yml` auto-posts a QA invocation comment on every PR.
