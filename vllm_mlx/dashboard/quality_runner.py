@@ -698,8 +698,11 @@ def _stream_completion(
             "stream_options": {"include_usage": True},
             # Disable thinking mode on Qwen3/DeepSeek-R1 style models so the
             # answer goes directly into content tokens rather than reasoning_content.
-            # Without this, thinking models may fill max_tokens with reasoning
-            # and emit no final answer, causing empty responses and 0% accuracy.
+            # Two-pronged approach:
+            # 1. Top-level: sets request.enable_thinking=False on the server, which
+            #    ALSO disables the reasoning parser so tokens flow to `content` directly.
+            # 2. chat_template_kwargs: belt-and-suspenders at the template level.
+            "enable_thinking": False,
             "chat_template_kwargs": {"enable_thinking": False},
         },
         stream=True,
@@ -718,6 +721,9 @@ def _stream_completion(
                 break
             try:
                 obj = json.loads(payload)
+                # Surface server-side errors that arrive as JSON in the SSE stream.
+                if obj.get("error"):
+                    logger.warning("Inference server returned error in SSE stream: %s", obj["error"])
                 # Capture server-reported usage if present (final chunk)
                 usage = obj.get("usage") or {}
                 if usage.get("completion_tokens"):
@@ -746,6 +752,12 @@ def _stream_completion(
     # Grade functions will find the answer in the last part of the reasoning.
     if not text.strip() and reasoning_chunks:
         text = "".join(reasoning_chunks)
+    if not text.strip():
+        logger.warning(
+            "Empty response from inference server (url=%s, model=%s). "
+            "chunks=%d reasoning_chunks=%d completion_tokens=%s",
+            server_url, model, len(chunks), len(reasoning_chunks), server_completion_tokens,
+        )
     ttft_ms = (t_first - t_start) * 1000.0 if t_first is not None else None
     total_ms = (t_end - t_start) * 1000.0
     # Prefer server-reported completion_tokens; fall back to char-count estimate

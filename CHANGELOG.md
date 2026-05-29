@@ -1,5 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.46 — 2026-05-28
+
+### Fixed
+
+- **Quality benchmark: Qwen3 thinking models still return "got ?" with reasoning parser enabled** — When the vllm-mlx server has a reasoning parser configured (e.g., `--reasoning-parser qwen3`), the server checks `request.enable_thinking is not False` to decide whether to skip it. Previously, the benchmark only sent `"chat_template_kwargs": {"enable_thinking": false}` — which disables thinking at the tokenizer template level but leaves `request.enable_thinking = None`, so the reasoning parser still ran. With the reasoning parser active and thinking disabled at the template level, all generated tokens (the answer) were routed to `reasoning_content` in phase `pre_think` (no `<think>` tag appeared, so the state machine treated every token as implicit reasoning). The `content` stream stayed empty, and the `reasoning_content` fallback still worked in some cases — but only if the reasoning text survived `_strip_thinking()` without being wiped. Fixed: benchmark requests now send `"enable_thinking": false` at the **top level** of the JSON body (in addition to `chat_template_kwargs`). This sets `request.enable_thinking = False` on the server, which (a) disables the reasoning parser entirely and (b) passes `enable_thinking=False` to the chat template — ensuring answer tokens flow directly to `content`.
+
+- **Silent empty-response failures** — If the inference server returned an error chunk in the SSE stream (e.g., `data: {"error": {...}}`), the benchmark swallowed it silently and returned an empty response. Fixed: the SSE parser now logs a warning when an error field is present in a chunk. Additionally, a warning is emitted when both `content` and `reasoning_content` streams are empty at the end of a request, including the target URL and model name for easier diagnosis.
+
 ## v0.8.45 — 2026-05-28
 
 ### Fixed
