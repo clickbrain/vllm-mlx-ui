@@ -277,6 +277,45 @@ def health() -> dict:
     return {"ok": True}
 
 
+# ── Hardware info (no auth — needed on fresh install before key is set) ───────
+
+@app.get("/hardware")
+def hardware_info() -> dict:
+    """Return the Apple Silicon chip name and total RAM.
+
+    No auth required — this endpoint is called on the setup guide before any
+    API key is configured, so it must be publicly accessible.
+    """
+    import subprocess as _sp
+
+    chip = "Unknown"
+    ram_gb = 0
+
+    try:
+        result = _sp.run(
+            ["sysctl", "-n", "machdep.cpu.brand_string"],
+            capture_output=True, text=True, timeout=3,
+        )
+        raw = result.stdout.strip()
+        if raw:
+            chip = raw
+    except Exception as exc:
+        logger.debug("hardware: chip detection failed: %s", exc)
+
+    try:
+        result = _sp.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True, text=True, timeout=3,
+        )
+        raw = result.stdout.strip()
+        if raw:
+            ram_gb = round(int(raw) / (1024 ** 3))
+    except Exception as exc:
+        logger.debug("hardware: RAM detection failed: %s", exc)
+
+    return {"chip": chip, "ram_gb": ram_gb}
+
+
 # ── Server lifecycle ──────────────────────────────────────────────────────────
 
 @app.get("/status")

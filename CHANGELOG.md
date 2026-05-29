@@ -1,5 +1,24 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.53 — 2026-05-29
+
+### Added
+
+- **Guided onboarding for fresh installs (SetupGuide)** — New users no longer see an empty Serve page with unexplained `AUTH_REQUIRED` errors. When no inference engine is installed, a 5-step guided walkthrough appears automatically:
+  - **Step 1 — Welcome:** Shows detected hardware (chip + RAM) so users understand what models will fit.
+  - **Step 2 — Install engine:** vllm-mlx installs automatically with real-time streaming log output. All other engines (rapid-mlx, Ollama, ds4, LM Studio, Remote) are shown with install buttons so users can add them too.
+  - **Step 3 — Download a model:** Hardware-aware model recommendations (models are pre-filtered to fit detected RAM). Download progress is shown inline.
+  - **Step 4 — Configure server:** Port, context window, host binding, and thinking-mode toggle explained in plain language.
+  - **Step 5 — Launch:** Summary card and Start Server button. Completion sets `localStorage.vmui_setup_complete = '1'` so the guide doesn't re-appear.
+
+- **Hardware detection endpoint (`GET /hardware`)** — New unauthenticated endpoint returns `{"chip": "Apple M5 Max", "ram_gb": 128}` on macOS; returns `{"chip": "Unknown", "ram_gb": 0}` on other platforms. Used by SetupGuide for hardware-aware model recommendations.
+
+- **AuthUnlockPanel** — For existing installs that have an `mgmt_api_key` set in `~/.vllm_mlx_ui/config.json`: if the browser has no key saved, a dismissable overlay prompts for it with the config file path as a hint. Skippable for servers with no key.
+
+### Fixed
+
+- **Fresh install: `AUTH_REQUIRED` on every page** — On first launch, the dashboard was calling `_init_default_api_key()` which generated a random `secrets.token_urlsafe(32)` key and wrote it to `~/.vllm_mlx_ui/config.json`. The browser had no key in `localStorage`, so every API call returned 401. Settings showed `⚠ Failed to load settings: AUTH_REQUIRED` with no recovery path. Fix: removed the auto-key generation call. The `mgmt_api_key` field defaults to `""` (no auth required) — users who want auth can set a key manually in Settings → Remote Server.
+
 ## v0.8.52 — 2026-05-28
 
 ### Fixed

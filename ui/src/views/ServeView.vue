@@ -23,6 +23,8 @@ import EndpointCard from '@/components/serve/EndpointCard.vue'
 import MetricCard from '@/components/serve/MetricCard.vue'
 import { api } from '@/api/client'
 
+import SetupGuide from '@/components/shared/SetupGuide.vue'
+
 const router = useRouter()
 
 const serverStore = useServerStore()
@@ -81,7 +83,9 @@ async function togglePerModelTrust() {
 async function fetchEngines() {
   try {
     const r = await api.get<{ engines: EngineInfo[] }>('/engines')
-    engines.value = r.engines.filter(e => e.installed)
+    // Load ALL engines (not just installed) so the setup guide can show what's available
+    const all = r.engines
+    engines.value = all.filter(e => e.installed)
     if (!selectedEngine.value && serverStore.engineId) {
       selectedEngine.value = serverStore.engineId
     }
@@ -245,6 +249,15 @@ const allInterfaces = computed<NetworkInterface[]>(() => [
 function connectionUrl(ip: string) {
   return `http://${ip}:${serverPort.value}/v1`
 }
+
+// Show the setup guide if vllm-mlx (or any engine) is not installed
+const showSetupGuide = computed(() =>
+  serverStore.config !== null &&
+  !serverStore.isRunning &&
+  !serverStore.loading &&
+  engines.value.length === 0 &&
+  localStorage.getItem('vmui_setup_complete') !== '1'
+)
 
 // ── Running status hero ───────────────────────────────────────────────────────
 const showHero = computed(() => serverStore.isRunning)
@@ -465,8 +478,11 @@ async function doClearCache(type: string) {
       >▶ Start Server</AppButton>
     </div>
 
+    <!-- Setup guide: shown on fresh install when no engine is installed -->
+    <SetupGuide v-if="showSetupGuide" @complete="fetchEngines" />
+
     <!-- Empty state: no model configured yet -->
-    <div v-if="showEmptyState" class="serve-empty">
+    <div v-if="showEmptyState && !showSetupGuide" class="serve-empty">
       <div class="serve-empty-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
           <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35"/>

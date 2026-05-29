@@ -331,7 +331,6 @@ def _load_local_config() -> dict[str, Any]:
     Benchmarks use load_config() instead, which may fetch from remote.
     """
     _ensure_state_dir()
-    _init_default_api_key()
     if CONFIG_FILE.exists():
         try:
             with open(CONFIG_FILE) as f:

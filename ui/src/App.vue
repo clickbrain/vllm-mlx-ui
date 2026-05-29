@@ -11,6 +11,8 @@ import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppTopbar from '@/components/layout/AppTopbar.vue'
 import TourOverlay from '@/components/shared/TourOverlay.vue'
 import CommandPalette from '@/components/shared/CommandPalette.vue'
+import AuthUnlockPanel from '@/components/shared/AuthUnlockPanel.vue'
+import ToastNotification from '@/components/shared/ToastNotification.vue'
 import { useServerStore } from '@/stores/server'
 import { useModelsStore } from '@/stores/models'
 import { useTourStore } from '@/stores/tour'
@@ -43,6 +45,7 @@ onUnmounted(() => {
   <div class="app-shell">
     <TourOverlay />
     <CommandPalette />
+    <AuthUnlockPanel />
     <AppSidebar />
     <div class="app-main">
       <AppTopbar />

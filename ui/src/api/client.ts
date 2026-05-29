@@ -7,7 +7,7 @@
  *
  * Authentication:
  *   - Reads X-Api-Key from localStorage (key: vmui_mgmt_api_key).
- *   - Throws 'AUTH_REQUIRED' on 401 so callers can redirect to the auth screen.
+ *   - Sets `authRequired` ref on 401 so App.vue can show the unlock panel.
  *
  * Error handling:
  *   - Non-2xx responses throw `Error("API error <status>: <path>")`.
@@ -16,6 +16,8 @@
  * No retry / backoff logic — callers are responsible for retrying if needed.
  * No timeout — use AbortSignal via RequestInit.signal if a deadline is required.
  */
+
+import { ref } from 'vue'
 
 // In dev: Vite proxy rewrites /api → http://localhost:8502 and strips the prefix.
 // In production: Vue is served directly from mgmt_server at port 8502, so no prefix needed.
@@ -28,6 +30,9 @@ export function getBase(): string { return _base }
 export function setApiBase(base: string): void { _base = base }
 
 const LS_KEY = 'vmui_mgmt_api_key'
+
+/** Reactive flag — set to true when any API call gets a 401. Cleared by AuthUnlockPanel. */
+export const authRequired = ref(false)
 
 /** Read the persisted management API key from localStorage. */
 export function getMgmtApiKey(): string {
@@ -55,7 +60,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
     headers: { ...authHeaders(), ...(options?.headers as Record<string, string> ?? {}) },
   })
-  if (res.status === 401) throw new Error('AUTH_REQUIRED')
+  if (res.status === 401) {
+    authRequired.value = true
+    throw new Error('AUTH_REQUIRED')
+  }
   if (!res.ok) throw new Error(`API error ${res.status}: ${path}`)
   const text = await res.text()
   return (text ? JSON.parse(text) : undefined) as T
@@ -77,3 +85,5 @@ export const api = {
   /** DELETE a resource by path. */
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 }
+
+
