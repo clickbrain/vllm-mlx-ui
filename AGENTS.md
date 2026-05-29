@@ -4,6 +4,24 @@
 
 ---
 
+## ⚠️ MANDATORY PRE-CHANGE QUESTION — BEFORE EVERY CODE CHANGE
+
+**Before implementing any change — bug fix, feature, refactor, or configuration tweak — you MUST explicitly ask yourself (or any sub-agent you delegate to):**
+
+> **"What are the disadvantages to the changes I want to make?"**
+
+Answer the question in your own reasoning before writing a single line of code. Consider:
+- Does the fix introduce a new failure mode (e.g. slower path, inflated metrics, silent retry hiding errors)?
+- Does it break comparable results across models or runs?
+- Does it change behavior for users who are NOT affected by the current bug?
+- Is there a better approach with fewer trade-offs?
+
+If the disadvantages are significant, implement the better approach. If trade-offs are acceptable, document them in the CHANGELOG.
+
+This rule exists because fixes that ignore trade-offs often create the next bug. See v0.8.43–v0.8.48 history as a worked example.
+
+---
+
 ## ⚠️ MANDATORY RELEASE CHECKLIST — EVERY RELEASE, NO EXCEPTIONS
 
 **Before running `scripts/release.sh`**, ALL of the following must be complete:
