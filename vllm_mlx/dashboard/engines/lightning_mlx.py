@@ -92,6 +92,11 @@ class LightningMlxEngine(BaseEngine):
         cmd += ["serve", model]
         cmd += ["--host", str(config.get("host", "127.0.0.1"))]
         cmd += ["--port", str(config.get("port", 8010))]
+        # Pass the canonical HF repo ID so /v1/status reports the real model name
+        # instead of the default "local" placeholder set by the underlying CLI.
+        canonical = config.get("model") or model
+        if canonical:
+            cmd += ["--served-model-name", canonical]
 
         es = config.get("engine_settings", {}).get(self.id, {})
 

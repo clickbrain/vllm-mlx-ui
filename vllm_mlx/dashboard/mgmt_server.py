@@ -1040,6 +1040,7 @@ def poll(_: None = Depends(_check_auth)) -> dict:
     network call here; the background scheduler will warm the cache shortly.
     """
     server_state = sm._read_server_state() or {}
+    cfg = sm.load_config()
 
     # Include cached update state without any network calls.
     updates_payload = None
@@ -1065,9 +1066,9 @@ def poll(_: None = Depends(_check_auth)) -> dict:
         "status": sm.get_server_status(),
         "metrics": sm.get_metrics() or {},
         "memory": sm.get_memory_stats(),
-        "config": sm.load_config(),
+        "config": cfg,
         "runtime": {
-            "engine_id": server_state.get("engine_id", "vllm-mlx"),
+            "engine_id": server_state.get("engine_id") or cfg.get("engine_id", "vllm-mlx"),
             "model": server_state.get("model", ""),
             "started_at": server_state.get("started_at"),
         },

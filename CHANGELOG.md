@@ -1,5 +1,23 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.65 — 2026-05-29
+
+### Fixed
+- **MTPLX model name shows "local"**: `lightning-mlx serve` defaults `served_model_name` to
+  `"local"` when `--served-model-name` is not passed, causing the UI to display "local" as the
+  model name instead of the real HF repo ID.  `LightningMlxEngine.build_command()` now always
+  passes `--served-model-name <canonical_hf_repo_id>` so `/v1/status` returns the correct model
+  name.  The flag is omitted when no model is configured (empty/missing key) to avoid passing an
+  empty string.  When a `launch_model` alias override is active, the alias is still passed to the
+  serve command while the canonical HF repo ID is used for the display name.
+- **Engine shows "vllm-mlx" instead of "lightning-mlx" during/after restart**: The `/poll`
+  endpoint defaulted `runtime.engine_id` to the hardcoded string `"vllm-mlx"` when
+  `server_state.json` was absent (cleared by `stop_server()`).  The frontend always overrides
+  `config.engine_id` with `runtime.engine_id`, so during the restart gap the correct
+  `"lightning-mlx"` config value was silently overwritten.  Fix: `/poll` now falls back to
+  `cfg.get("engine_id", "vllm-mlx")` (saved config) instead of the hardcoded string.  Also
+  eliminated a redundant `sm.load_config()` call in the same endpoint.
+
 ## v0.8.64 — 2026-05-29
 
 ### Fixed
