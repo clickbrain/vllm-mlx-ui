@@ -13,15 +13,21 @@ Performance characteristics vs. autoregressive models:
 - Generation latency: typically 5-15s for DiffuCoder-7B on M-series chips
 - Tool calls and thinking/reasoning are NOT supported
 
-Requires fast-dllm-mlx:
+Requires fast-dllm-mlx AND Python >= 3.13:
     pip install "git+https://github.com/MacPaw/Fast-dLLM-mlx"
+
+NOTE: The Homebrew venv runs Python 3.11.  fast-dllm-mlx requires Python 3.13+.
+This engine discovers a compatible Python at runtime and runs diffusion_server.py
+via that interpreter rather than sys.executable.
 
 Recommended model: mlx-community/DiffuCoder-7B-cpGRPO-8bit
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -31,14 +37,88 @@ from .base import BaseEngine
 # Chosen to avoid conflicts with rapid-mlx (8000), mgmt server (8502), etc.
 _DEFAULT_PORT = 8511
 
+# ── Python 3.13+ discovery ────────────────────────────────────────────────────
 
-def _has_dream_support() -> bool:
-    """Return True if fast-dllm-mlx is installed and importable."""
-    try:
-        from fast_dllm_mlx import stream_diffusion_generate  # noqa: F401
-        return True
-    except Exception:
-        return False
+# Module-level cache: (executable_path | None, timestamp)
+_py313_cache: tuple[str | None, float] = (None, 0.0)
+_py313_cache_ttl: float = 60.0  # re-probe at most once per minute
+
+# Module-level cache for is_installed result: (bool, timestamp)
+_installed_cache: tuple[bool, float] = (False, 0.0)
+_installed_cache_ttl: float = 30.0
+
+
+def _find_python313() -> str | None:
+    """Find a Python >= 3.13 executable on this machine.
+
+    Checks (in order):
+    1. Explicit version names on PATH: python3.14, python3.13
+    2. Known conda/anaconda base locations
+    3. python3 on PATH (works when conda is active in the shell that launched vmui)
+
+    Returns the first candidate whose ``--version`` reports >= 3.13, or None.
+    Caches the result for _py313_cache_ttl seconds to avoid repeated probing.
+    """
+    global _py313_cache
+    path, ts = _py313_cache
+    if time.monotonic() - ts < _py313_cache_ttl:
+        return path
+
+    candidates: list[str] = []
+
+    # Explicit version names on PATH — prefer 3.13 over 3.14 (3.14 is bleeding-edge
+    # and some packages may not yet support it)
+    for name in ("python3.13", "python3.14"):
+        found = shutil.which(name)
+        if found:
+            candidates.append(found)
+
+    # Known conda/anaconda base Python locations
+    conda_bases = [
+        "/opt/homebrew/Caskroom/miniconda/base/bin/python3",
+        "/opt/homebrew/Caskroom/anaconda/base/bin/python3",
+        "/opt/anaconda3/bin/python3",
+        "/usr/local/anaconda3/bin/python3",
+        str(Path.home() / "anaconda3" / "bin" / "python3"),
+        str(Path.home() / "miniconda3" / "bin" / "python3"),
+    ]
+    for p in conda_bases:
+        if Path(p).exists() and p not in candidates:
+            candidates.append(p)
+
+    # python3 on PATH as last resort (covers shell with conda activated)
+    py3 = shutil.which("python3")
+    if py3 and py3 not in candidates:
+        candidates.append(py3)
+
+    result: str | None = None
+    for candidate in candidates:
+        try:
+            r = subprocess.run(
+                [candidate, "--version"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0:
+                # Output: "Python 3.13.2"
+                parts = r.stdout.strip().split()
+                if len(parts) == 2:
+                    ver_parts = parts[1].split(".")
+                    major, minor = int(ver_parts[0]), int(ver_parts[1])
+                    if (major, minor) >= (3, 13):
+                        result = candidate
+                        break
+        except Exception:
+            continue
+
+    _py313_cache = (result, time.monotonic())
+    return result
+
+
+def _invalidate_caches() -> None:
+    """Invalidate discovery and install caches (call after install/uninstall)."""
+    global _py313_cache, _installed_cache
+    _py313_cache = (None, 0.0)
+    _installed_cache = (False, 0.0)
 
 
 class DiffusionMlxEngine(BaseEngine):
@@ -64,8 +144,23 @@ class DiffusionMlxEngine(BaseEngine):
 
     # ── BaseEngine implementation ─────────────────────────────────────────────
 
+    def _runtime_python(self) -> str:
+        """Return the Python executable to use for this engine.
+
+        Prefers: (1) a Python >=3.13 that already has fast-dllm-mlx installed,
+        (2) any Python >=3.13 found on the machine.
+        Falls back to sys.executable with a warning logged if nothing found.
+        """
+        py313 = _find_python313()
+        return py313 if py313 else sys.executable
+
     def build_command(self, config: dict[str, Any]) -> list[str]:
-        """Launch diffusion_server.py as a subprocess."""
+        """Launch diffusion_server.py as a subprocess.
+
+        Runs diffusion_server.py directly by absolute path using a Python >=3.13
+        interpreter (discovered at runtime).  This avoids requiring fast-dllm-mlx
+        to be installed in the vmui Homebrew venv.
+        """
         model_id = config.get("model", "mlx-community/DiffuCoder-7B-cpGRPO-8bit")
         host = config.get("host", "127.0.0.1")
         port = config.get("port", _DEFAULT_PORT)
@@ -76,10 +171,13 @@ class DiffusionMlxEngine(BaseEngine):
         block_length = int(es.get("block_length", 32))
         threshold = float(es.get("threshold", 0.9))
 
-        server_module = "vllm_mlx.dashboard.diffusion_server"
+        # Run diffusion_server.py by absolute path — it has no vllm_mlx imports,
+        # so it works with any Python that has fastapi + fast-dllm-mlx installed.
+        server_script = str(Path(__file__).parent.parent / "diffusion_server.py")
+        python = self._runtime_python()
 
         cmd = [
-            sys.executable, "-m", server_module,
+            python, server_script,
             "--model", model_id,
             "--host", host,
             "--port", str(port),
@@ -98,14 +196,35 @@ class DiffusionMlxEngine(BaseEngine):
         return cmd
 
     def is_installed(self) -> bool:
-        """Return True if fast-dllm-mlx is available."""
-        return _has_dream_support()
+        """Return True if fast-dllm-mlx is importable under the runtime Python."""
+        global _installed_cache
+        installed, ts = _installed_cache
+        if time.monotonic() - ts < _installed_cache_ttl:
+            return installed
+
+        python = _find_python313()
+        if python is None:
+            _installed_cache = (False, time.monotonic())
+            return False
+
+        try:
+            r = subprocess.run(
+                [python, "-c", "import fast_dllm_mlx"],
+                capture_output=True, timeout=10,
+            )
+            result = r.returncode == 0
+        except Exception:
+            result = False
+
+        _installed_cache = (result, time.monotonic())
+        return result
 
     def get_version(self) -> str | None:
         """Return the installed fast-dllm-mlx version string, or None."""
+        python = _find_python313() or sys.executable
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "show", "fast-dllm-mlx"],
+                [python, "-m", "pip", "show", "fast-dllm-mlx"],
                 capture_output=True, text=True, timeout=10,
             )
             if result.returncode == 0:
@@ -117,12 +236,16 @@ class DiffusionMlxEngine(BaseEngine):
         return None
 
     def check_requirements(self) -> list[str]:
-        import sys as _sys
-        v = _sys.version_info
-        if (v.major, v.minor) < (3, 13):
+        """Return a list of unmet requirements.
+
+        Returns an error only if NO Python >=3.13 can be found on this machine.
+        The vmui venv runs 3.11 but that is fine — we use a separate interpreter.
+        """
+        if _find_python313() is None:
             return [
-                f"fast-dllm-mlx requires Python ≥ 3.13 (running {v.major}.{v.minor}.{v.micro}). "
-                "Please upgrade Python and reinstall."
+                "fast-dllm-mlx requires Python ≥ 3.13, which was not found on this machine. "
+                "Install Python 3.13+ via conda (recommended), Homebrew (brew install python@3.13), "
+                "or python.org, then reinstall the engine."
             ]
         return []
 
@@ -143,14 +266,30 @@ class DiffusionMlxEngine(BaseEngine):
             return None
 
     def install_command(self) -> list[str]:
-        """Install fast-dllm-mlx from GitHub."""
+        """Install fast-dllm-mlx and required server deps into the Python 3.13 env.
+
+        Also installs fastapi/uvicorn/pydantic because diffusion_server.py is run
+        as a standalone script under the 3.13 interpreter (not inside the vmui venv).
+        """
+        python = _find_python313()
+        if python is None:
+            # No 3.13 found — return a command that will fail with a clear message
+            return [
+                sys.executable, "-c",
+                "import sys; sys.exit('ERROR: Python 3.13+ not found. Install via conda or brew install python@3.13')",
+            ]
+        _invalidate_caches()
         return [
-            sys.executable, "-m", "pip", "install", "--upgrade",
+            python, "-m", "pip", "install", "--upgrade",
+            "fastapi", "uvicorn[standard]", "pydantic",
+            "mlx-lm", "huggingface_hub",
             "git+https://github.com/MacPaw/Fast-dLLM-mlx",
         ]
 
     def uninstall_command(self) -> list[str]:
-        return [sys.executable, "-m", "pip", "uninstall", "-y", "fast-dllm-mlx"]
+        python = _find_python313() or sys.executable
+        _invalidate_caches()
+        return [python, "-m", "pip", "uninstall", "-y", "fast-dllm-mlx"]
 
     def validate_model_id(self, model_id: str) -> bool:
         # Accept any HF repo ID; DiffuCoder models are under apple/ or mlx-community/

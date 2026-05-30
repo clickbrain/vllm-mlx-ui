@@ -1,5 +1,22 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.82 — 2026-05-30
+
+### Fixed
+- **Diffusion engine Python 3.13 compatibility** — The Homebrew venv runs Python 3.11, but
+  `fast-dllm-mlx` requires Python 3.13+. The engine now discovers a compatible Python
+  interpreter at runtime instead of using `sys.executable`.
+  - Discovery order: `python3.13` on PATH (conda/miniconda preferred), known conda base paths,
+    `python3.14`, then `python3` — accepts the first interpreter that reports `>= 3.13`.
+  - `diffusion_server.py` is now launched by absolute path using the discovered interpreter
+    (it has no `vllm_mlx` imports, so it works with any Python that has its deps).
+  - `install_command()` installs `fastapi`, `uvicorn`, `pydantic`, `mlx-lm`, `huggingface_hub`,
+    and `fast-dllm-mlx` into the discovered Python's environment.
+  - `is_installed()` checks importability via subprocess in the discovered Python (not the
+    vmui venv), with a 30-second result cache to avoid UI polling slowness.
+  - `check_requirements()` now returns an error only if no Python 3.13+ can be found at all,
+    rather than always failing because the vmui venv is 3.11.
+
 ## v0.8.81 — 2026-05-30
 
 ### Added
