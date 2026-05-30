@@ -1,5 +1,14 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.74 — 2026-05-29
+
+### Fixed
+- **vllm-mlx still appearing in Updates panel** — the update checker had a hardcoded `_check_vllm()` function that queried PyPI for `vllm-mlx` regardless of whether it was installed. Removed it. Hidden engines (like the deprecated vllm-mlx adapter) are now skipped by the engine loop as well.
+
+### Changed
+- **Default model changed** from `mlx-community/Llama-3.2-3B-Instruct-4bit` to `qwen3.5-9b` — better quality, full reasoning support, faster on M2+.
+- **Auto-download removed from `post_install`** — brew upgrade no longer blocks downloading a 1.8 GB starter model. Models are managed via the dashboard or `rapid-mlx pull <alias>`.
+
 ## v0.8.73 — 2026-05-29
 
 ### Breaking Change — vllm-mlx engine removed, rapid-mlx is now the default

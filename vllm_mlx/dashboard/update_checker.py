@@ -596,19 +596,6 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
             release_url="https://github.com/clickbrain/vllm-mlx-ui/releases",
         )
 
-    def _check_vllm():
-        vllm_installed = _installed_version("vllm-mlx")
-        vllm_latest = _pypi_latest("vllm-mlx")
-        update_available = _version_gt(vllm_latest, vllm_installed)
-        return PackageInfo(
-            name="vllm-mlx (inference engine)",
-            installed=vllm_installed,
-            latest=vllm_latest if vllm_latest != "unknown" else vllm_installed,
-            update_available=update_available,
-            url="https://github.com/waybarrios/vllm-mlx",
-            release_url="https://github.com/waybarrios/vllm-mlx/releases",
-        )
-
     def _check_hfhub():
         inst = _installed_version("huggingface-hub")
         latest = _pypi_latest("huggingface-hub")
@@ -622,7 +609,7 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
         )
 
     # Run all checks in parallel — total wait is max(individual timeouts) ≈ 3s
-    checkers = [_check_ui, _check_vllm, _check_hfhub]
+    checkers = [_check_ui, _check_hfhub]
 
     # Add engine update checks dynamically from the registry.
     # pip engines: check PyPI; external engines: call latest_version() if available.
@@ -631,8 +618,7 @@ def check_updates(force: bool = False) -> list[PackageInfo]:
     try:
         from vllm_mlx.dashboard.engines.registry import ENGINES
         for _engine in list(ENGINES.values()):
-            # vllm-mlx is already checked by _check_vllm above — skip duplicate
-            if _engine.id == "vllm-mlx":
+            if getattr(_engine, "hidden", False):
                 continue
             if _engine.install_method == "bundled":
                 continue
