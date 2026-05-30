@@ -385,7 +385,7 @@ class RapidMlxEngine(BaseEngine):
             "kv_quantization": True,
             "enable_prefix_cache": True,
             "prefill_step_size": 8192,
-            "gpu_memory_utilization": 0.0,
+            "gpu_memory_utilization": 0.85,
             "enable_tool_logits_bias": True,
             "max_tokens": 0,
             "cloud_model": "",

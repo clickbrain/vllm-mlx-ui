@@ -121,7 +121,7 @@ def _mgmt_url(base: str) -> str:
 
 _DEFAULT_CONFIG: dict[str, Any] = {
     # ── Schema versioning ───────────────────────────────────────────────────
-    "config_version": 3,
+    "config_version": 4,
     # ── Engine selection ────────────────────────────────────────────────────
     # engine_id: which inference engine to use ("rapid-mlx", "ds4-m5", …)
     "engine_id": "rapid-mlx",
@@ -191,10 +191,11 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     # histories.  Typical values: 20 (light agent), 10 (heavy/long-context model).
     "max_context_messages": 0,
     # Proxy max_tokens cap: 0 = disabled (let the engine manage token budgets).
-    # rapid-mlx already applies a thinking-token budget for reasoning models, so
-    # overriding from the proxy is counterproductive.  Only set this if you have
-    # a specific reason to cap output at the proxy layer (e.g. metered API usage).
-    "proxy_default_max_tokens": 0,
+    # 32768 prevents unbounded generation from accumulating too many Metal buffer
+    # allocations (which causes [metal::malloc] Resource limit errors) when clients
+    # send requests with no max_tokens. 32K gives plenty of room for thinking +
+    # response without being a practical limit for real workloads.
+    "proxy_default_max_tokens": 32768,
     # Last used connection mode — "local" or "remote". Persisted so the UI
     # restores the correct target on browser refresh / app restart.
     "connection_mode": "local",
@@ -354,6 +355,19 @@ def _migrate_config(saved: dict[str, Any]) -> dict[str, Any]:
     if int(migrated.get("max_tokens", 0) or 0) == 16384:
         migrated["max_tokens"] = 32768
         logger.info("Config migration v2→v3: max_tokens 16384 → 32768")
+
+    # v3 → v4
+    migrated["config_version"] = 4
+    # Fix uncapped generation: if proxy_default_max_tokens is 0 (disabled), set to 32768.
+    # The old default of 0 caused Metal buffer resource limit errors after ~17K tokens.
+    if int(migrated.get("proxy_default_max_tokens", 0) or 0) == 0:
+        migrated["proxy_default_max_tokens"] = 32768
+        logger.info("Config migration v3→v4: proxy_default_max_tokens 0 → 32768 (prevents Metal OOM)")
+    # Set gpu_memory_utilization to 0.85 if it was left at 0.0 (not set).
+    es = migrated.setdefault("engine_settings", {}).setdefault("rapid-mlx", {})
+    if float(es.get("gpu_memory_utilization", 0.0) or 0.0) == 0.0:
+        es["gpu_memory_utilization"] = 0.85
+        logger.info("Config migration v3→v4: rapid-mlx gpu_memory_utilization 0 → 0.85")
 
     return migrated
 

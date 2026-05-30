@@ -1,5 +1,19 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.78 — 2026-05-30
+
+### Fixed
+- **Shutdown leaves rapid-mlx running as an orphan** — the Shutdown button in the dashboard only killed the UI process (vllm-mlx-ui) but left the inference engine (rapid-mlx) running with no way to stop it from the UI. Fixed: `/shutdown` now calls `stop_server()` to gracefully terminate the inference engine before killing the dashboard process.
+
+## v0.8.77 — 2026-05-30
+
+### Fixed
+- **OOM crash from uncapped generation** — when Kilroy (or any client) sends requests with no `max_tokens`, rapid-mlx ran unboundedly. After ~17,664 tokens the MLX Metal allocator hit its resource limit (`[metal::malloc] Resource limit (499000) exceeded`), crashing the inference. This was NOT a RAM issue (61 GB free); it was Metal's internal buffer-object count limit being exhausted.
+  - `proxy_default_max_tokens` default changed from `0` (disabled) to `32768`. The proxy now caps uncapped requests at 32K tokens, giving ample room for thinking + long responses while preventing infinite generation.
+  - `gpu_memory_utilization` default changed from `0.0` (unset) to `0.85`. This passes `--gpu-memory-utilization 0.85` to rapid-mlx, raising the Metal allocation ceiling to 85% of device memory (~109 GB on 128 GB machines).
+  - Config migration v3→v4 auto-applies both fixes to existing installs on next dashboard restart.
+  - Fresh installs via Homebrew get both settings written into the initial `server_config.json`.
+
 ## v0.8.76 — 2026-05-30
 
 ### Fixed

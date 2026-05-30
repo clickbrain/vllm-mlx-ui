@@ -118,13 +118,18 @@ class VllmMlxUi < Formula
     config_file = config_dir/"server_config.json"
     unless config_file.exist?
       config_file.write(JSON.generate({
-        "config_version"           => 3,
+        "config_version"           => 4,
         "engine_id"                => "rapid-mlx",
         "model"                    => "qwen3.5-9b",
         "port"                     => 8000,
         "host"                     => "127.0.0.1",
         "max_tokens"               => 32768,
-        "proxy_default_max_tokens" => 0,
+        "proxy_default_max_tokens" => 32768,
+        "engine_settings"          => {
+          "rapid-mlx" => {
+            "gpu_memory_utilization" => 0.85,
+          },
+        },
       }))
     end
   end

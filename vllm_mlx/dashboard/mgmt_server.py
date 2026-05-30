@@ -3195,18 +3195,25 @@ async def uninstall_engine(engine_id: str, _: None = Depends(_check_auth)):
 
 @app.post("/shutdown")
 def shutdown(_: None = Depends(_check_auth)) -> dict:
-    """Terminate the vllm-mlx-ui process entirely."""
+    """Stop the inference engine then terminate the vllm-mlx-ui process."""
     import threading as _thr
 
     def _do_shutdown():
         import time as _t
         _t.sleep(0.3)
+        # Stop the inference engine first so it doesn't become an orphan.
+        try:
+            if not _is_external_api_engine():
+                sm.stop_server()
+        except Exception as e:
+            logger.warning("shutdown: could not stop inference engine: %s", e, exc_info=True)
+        # Now terminate the dashboard process itself.
         try:
             from vllm_mlx.dashboard.server_manager import UI_PID_FILE
             pid = int(UI_PID_FILE.read_text().strip())
             _os_mod.kill(pid, _signal_mod.SIGTERM)
         except Exception as e:
-            logger.warning("Operation failed: %s", e, exc_info=True)
+            logger.warning("shutdown: could not kill UI pid: %s", e, exc_info=True)
             _os_mod.kill(_os_mod.getpid(), _signal_mod.SIGTERM)
     _thr.Thread(target=_do_shutdown, daemon=True).start()
     return {"ok": True}
