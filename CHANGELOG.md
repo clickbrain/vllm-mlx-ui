@@ -1,5 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.86 — 2026-05-30
+
+### Fixed
+- **Find Models search showing "1 of 143 matching filters"** — the "Max age" preference defaulted to 18 months, silently filtering out every MLX OLMo model (and many other valid models) published before December 2024. Default is now "Any age" (no limit). Existing users with the old 18-month default are migrated once; if they later deliberately set 18 months it is respected going forward.
+- **`apple-fm/fixed` appearing in the Library tab** — the synthetic model entry injected for the Benchmark model selector was leaking into the Library tab. It is now filtered out of the Library; the Benchmark selector is unaffected.
+
+---
+
 ## v0.8.85 — 2026-05-30
 
 ### Fixed

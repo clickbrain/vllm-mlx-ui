@@ -47,7 +47,9 @@ const librarySearch = ref('')
 const sortMode = ref<'name' | 'size'>('name')
 
 const filteredModels = computed(() => {
-  let list = modelsStore.models
+  // Exclude synthetic fixed-model entries (e.g. apple-fm/fixed) — those are
+  // injected only for the Benchmark selector and don't belong in the library.
+  let list = modelsStore.models.filter((m: { source?: string }) => m.source !== 'fixed')
   if (libraryFilter.value === 'active') list = list.filter(m => m.active)
   if (librarySearch.value.trim()) {
     const q = librarySearch.value.toLowerCase()
@@ -580,7 +582,7 @@ watch(activeTab, (tab) => {
         <label class="uc-age-label" title="Hide models older than this">
           <span class="uc-age-text">Max age:</span>
           <select v-model="maxAgeMonths" class="uc-age-select">
-            <option :value="0">Any age</option>
+            <option :value="0">Any age (default)</option>
             <option :value="0.5">2 weeks</option>
             <option :value="1">1 month</option>
             <option :value="2">2 months</option>
@@ -589,7 +591,7 @@ watch(activeTab, (tab) => {
             <option :value="5">5 months</option>
             <option :value="6">6 months</option>
             <option :value="12">12 months</option>
-            <option :value="18">18 months (default)</option>
+            <option :value="18">18 months</option>
           </select>
         </label>
       </div>

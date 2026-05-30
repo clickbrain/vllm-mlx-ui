@@ -11,9 +11,10 @@ export type UseCase = 'chat' | 'code' | 'reasoning' | 'vision'
 export type QualityPreference = 'fast' | 'balanced' | 'quality'
 
 // ── Storage keys ────────────────────────────────────────────────────────────
-const KEY_USE_CASE  = 'vmui_use_case'
-const KEY_QUALITY   = 'vmui_quality_pref'
-const KEY_MAX_AGE   = 'vmui_max_age_months'
+const KEY_USE_CASE     = 'vmui_use_case'
+const KEY_QUALITY      = 'vmui_quality_pref'
+const KEY_MAX_AGE      = 'vmui_max_age_months'
+const KEY_AGE_MIGRATED = 'vmui_age_migrated_v1'
 
 // ── Singleton refs ────────────────────────────────────────────────────────────
 
@@ -32,8 +33,17 @@ function readQuality(): QualityPreference {
 }
 
 function readMaxAge(): number {
-  const v = parseInt(localStorage.getItem(KEY_MAX_AGE) ?? '', 10)
-  return Number.isFinite(v) && v >= 0 ? v : 18
+  const raw = localStorage.getItem(KEY_MAX_AGE)
+  const v = parseInt(raw ?? '', 10)
+  if (!Number.isFinite(v) || v < 0) return 0
+  // One-time migration: 18 was the old default and silently hid many valid models.
+  // Migrate existing users once; after this flag is set, deliberate "18 month"
+  // selections are respected on future reloads.
+  if (v === 18 && !localStorage.getItem(KEY_AGE_MIGRATED)) {
+    localStorage.setItem(KEY_AGE_MIGRATED, '1')
+    return 0
+  }
+  return v
 }
 
 export const selectedUseCase  = ref<UseCase | null>(readUseCase())
