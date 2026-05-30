@@ -28,6 +28,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from .apple_fm import AppleFMEngine
+from .diffusion_mlx import DiffusionMlxEngine
 from .ds4_m5 import Ds4M5Engine, is_m5_or_newer
 from .external_api import ExternalApiEngine
 from .lightning_mlx import LightningMlxEngine
@@ -53,6 +54,7 @@ _BUILTINS: list[BaseEngine] = [
     LmStudioEngine(),    # desktop GUI app
     LlamaCppEngine(),    # llama.cpp CLI
     Ds4M5Engine(),       # M5-optimised DeepSeek V4 Flash (best on M5+)
+    DiffusionMlxEngine(), # Dream-architecture diffusion models (e.g. DiffuCoder)
     ExternalApiEngine(), # remote API proxy — requires user config, never auto-fallback
     AppleFMEngine(),     # macOS 26+ only — put last to avoid premature fallback
     VllmMlxEngine(),     # DEPRECATED — hidden, kept for config migration only

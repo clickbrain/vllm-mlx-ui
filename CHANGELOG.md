@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.79 — 2026-05-30
+
+### Added
+- **Diffusion MLX engine** — new built-in engine adapter for Dream-architecture masked-diffusion language models (e.g. Apple's DiffuCoder family). Adds a `Diffusion MLX` entry in the Settings engine list with a one-click Install button. Once installed, select it as the active engine and point it at `mlx-community/DiffuCoder-7B-cpGRPO-8bit` (or any Dream-compatible MLX model) to chat with it in the Chat UI.
+  - Ships a standalone `diffusion_server.py` that exposes an OpenAI-compatible `/v1/chat/completions` endpoint so the existing Chat UI requires no changes.
+  - Diffusion generation is all-at-once (bidirectional denoising over N steps) — no per-token streaming. The chat UI shows a spinner until generation completes (~5–15 s for 256 steps on a 7B model).
+  - Configurable: denoising steps (32–1024, default 256), temperature, unmasking algorithm (entropy/origin/maskgit_plus/topk_margin).
+  - Requires mlx-lm with Dream support. Install via the Settings panel; uses `Goekdeniz-Guelmez/mlx-lm@adding-DiffuCoder` (mlx-lm PR #270). When that PR merges, `pip install --upgrade mlx-lm` suffices.
+  - DiffuCoder-7B-cpGRPO-8bit is already visible in the Find tab (it has the `mlx` tag on HuggingFace).
+
 ## v0.8.78 — 2026-05-30
 
 ### Fixed
