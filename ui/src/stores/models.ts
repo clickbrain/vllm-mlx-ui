@@ -367,6 +367,7 @@ export const useModelsStore = defineStore('models', () => {
     if (!append) {
       searchQuery.value = query
       searchOffset.value = 0
+      mlxOnly.value = mlxOnlyFlag
     }
     searching.value = true
     actionError.value = null

@@ -1,5 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.85 — 2026-05-30
+
+### Fixed
+- **Find Models search couldn't find non-MLX models** (e.g. `apple/DiffuCoder-7B-cpGRPO`) — the search always passed `filter=mlx` to the HuggingFace API, which excludes models without the `mlx` tag. Added an "MLX models only" checkbox to the Find tab (defaults ON — existing behavior unchanged). When unchecked, searches all of HuggingFace.
+- Fixed three logic bugs exposed when the toggle is OFF: client-side `is_mlx` filter now conditional on toggle; `preFilterCount` now counts all results (not just MLX) when toggle is OFF; `searchHFMore`/Load More now correctly inherits the toggle state so appended pages match the original query.
+
+---
+
 ## v0.8.84 — 2026-05-30
 
 ### Fixed

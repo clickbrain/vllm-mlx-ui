@@ -71,6 +71,7 @@ const showFilters = ref(false)
 // (client-side filter changes apply instantly via computed; this only gates the
 // "Apply Filters" button which fetches a larger pool)
 const filtersPending = ref(false)
+const mlxOnlySearch = ref(true)
 
 function markFiltersDirty() {
   filtersPending.value = true
@@ -78,7 +79,7 @@ function markFiltersDirty() {
 
 async function applyFilters() {
   const serverSort = SERVER_SORT_COLS.has(sortCol.value) ? sortCol.value : 'downloads'
-  await modelsStore.searchHF(searchInput.value.trim(), true, 0, serverSort, false, 100, sortDir.value)
+  await modelsStore.searchHF(searchInput.value.trim(), mlxOnlySearch.value, 0, serverSort, false, 100, sortDir.value)
   modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
   filtersPending.value = false
 }
@@ -117,7 +118,7 @@ function searchCompany(query: string) {
   searchInput.value = query
   sortCol.value = 'downloads'
   sortDir.value = 'desc'
-  modelsStore.searchHF(query, true, 0, 'downloads', false, 50, 'desc').then(() => {
+  modelsStore.searchHF(query, mlxOnlySearch.value, 0, 'downloads', false, 50, 'desc').then(() => {
     modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
   })
 }
@@ -130,7 +131,7 @@ const SERVER_SORT_COLS = new Set<SortCol>(['downloads', 'likes', 'last_modified'
 function toggleSortDir() {
   sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc'
   if (SERVER_SORT_COLS.has(sortCol.value as SortCol)) {
-    modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value as string, false, 50, sortDir.value).then(() => {
+    modelsStore.searchHF(searchInput.value.trim(), mlxOnlySearch.value, 0, sortCol.value as string, false, 50, sortDir.value).then(() => {
       modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
     })
   }
@@ -139,7 +140,7 @@ function toggleSortDir() {
 function onSortChange() {
   sortDir.value = 'desc'
   if (SERVER_SORT_COLS.has(sortCol.value as SortCol)) {
-    modelsStore.searchHF(searchInput.value.trim(), true, 0, sortCol.value as string, false, 50, sortDir.value).then(() => {
+    modelsStore.searchHF(searchInput.value.trim(), mlxOnlySearch.value, 0, sortCol.value as string, false, 50, sortDir.value).then(() => {
       modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
     })
   }
@@ -168,8 +169,8 @@ function effectiveDate(r: { family_data?: { release_date?: string } | null; crea
 const displayedSearchResults = computed(() => {
   let list = modelsStore.searchResults
 
-  // Filter out non-MLX models (always enforce MLX)
-  list = list.filter(r => r.is_mlx)
+  // Filter out non-MLX models when MLX-only toggle is active
+  if (mlxOnlySearch.value) list = list.filter(r => r.is_mlx)
 
   if (hideDownloaded.value) {
     const cachedIds = new Set(modelsStore.models.map(m => m.id))
@@ -219,7 +220,11 @@ const displayedSearchResults = computed(() => {
   return list
 })
 
-const preFilterCount = computed(() => modelsStore.searchResults.filter(r => r.is_mlx).length)
+const preFilterCount = computed(() =>
+  mlxOnlySearch.value
+    ? modelsStore.searchResults.filter(r => r.is_mlx).length
+    : modelsStore.searchResults.length
+)
 
 /**
  * Multi-signal Best Choice badges: one winner per use case.
@@ -260,7 +265,7 @@ async function doSearch() {
   sortCol.value = 'downloads'
   sortDir.value = 'desc'
   filtersPending.value = false
-  await modelsStore.searchHF(searchInput.value.trim(), true, 0, 'downloads', false, 100, 'desc')
+  await modelsStore.searchHF(searchInput.value.trim(), mlxOnlySearch.value, 0, 'downloads', false, 100, 'desc')
   modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
 }
 
@@ -306,7 +311,7 @@ watch(selectedUseCase, (uc) => {
   filtersPending.value = false
   // Keep searchInput in sync so sort/filter/loadMore use the same base query
   searchInput.value = query
-  modelsStore.searchHF(query, true, 0, 'downloads', false, 100, 'desc').then(() => {
+  modelsStore.searchHF(query, mlxOnlySearch.value, 0, 'downloads', false, 100, 'desc').then(() => {
     modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
   })
 })
@@ -529,9 +534,15 @@ watch(activeTab, (tab) => {
             Search
           </AppButton>
         </div>
-        <p class="search-hint">
-          Searches MLX-compatible models across all of HuggingFace
-        </p>
+        <div class="search-options-row">
+          <label class="mlx-only-toggle">
+            <input type="checkbox" v-model="mlxOnlySearch" @change="doSearch" />
+            <span>MLX models only</span>
+          </label>
+          <p class="search-hint">
+            {{ mlxOnlySearch ? 'Searching MLX-compatible models across all of HuggingFace' : 'Searching all models on HuggingFace (including non-MLX)' }}
+          </p>
+        </div>
       </div>
 
       <!-- Company quick-search chips -->
@@ -983,6 +994,29 @@ watch(activeTab, (tab) => {
   color: var(--tx-tertiary);
   margin: 0;
   padding: 0 var(--space-1);
+}
+.search-options-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+  padding: 0 var(--space-1);
+}
+.mlx-only-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 12px;
+  color: var(--tx-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.mlx-only-toggle input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
 }
 
 /* Company chips */
