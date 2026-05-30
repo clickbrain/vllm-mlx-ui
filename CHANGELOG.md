@@ -1,5 +1,10 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.76 — 2026-05-30
+
+### Fixed
+- **Kilroy requests returning 404** — when Kilroy's API base URL is set to `http://host:port/v1/chat/completions` (with path) instead of `http://host:port`, the OpenAI SDK doubles the path to `/v1/chat/completions/chat/completions`, resulting in a silent 404. Added a catch route for the doubled path that forwards to the real endpoint. Fix your Kilroy base URL to `http://localhost:8502` (no path suffix) for the cleanest setup; the server-side catch is a safety net.
+
 ## v0.8.75 — 2026-05-29
 
 ### Fixed

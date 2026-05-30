@@ -2004,6 +2004,21 @@ def _sse_delta(content: str) -> str:
     return f"data: {_json.dumps(payload)}\n\n"
 
 
+@app.post("/v1/chat/completions/chat/completions")
+async def _proxy_chat_doubled_path(
+    request: dict[str, Any],
+    _raw: Request,
+    _: None = Depends(_check_auth),
+) -> Any:
+    """
+    Catch doubled path /v1/chat/completions/chat/completions.
+    Kilroy (and some other OpenAI clients) send this when their baseURL
+    already includes '/v1/chat/completions' and the SDK appends the path again.
+    Correct baseURL should be http://host:port (no trailing path).
+    """
+    return await proxy_chat(request, _raw, _)
+
+
 @app.post("/v1/chat/completions")
 async def proxy_chat(
     request: dict[str, Any],
