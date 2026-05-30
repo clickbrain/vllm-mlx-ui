@@ -1,5 +1,15 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.84 — 2026-05-30
+
+### Fixed
+- **Diffusion engine install failed** — `pip install git+https://github.com/MacPaw/Fast-dLLM-mlx` fails because the repo has multiple top-level packages with no explicit setuptools config. Fixed by cloning the repo, injecting a `setup.cfg` that pins `fast_dllm_mlx`, and installing with `--no-build-isolation`. Verified end-to-end.
+- **Lightning-MLX shows "not installed" after brew upgrade** — `get_package_name()` returned `"lightning-mlx"` (not on PyPI), so `process_pending_engine_reinstalls()` did `pip install lightning-mlx` after upgrade → failed silently. Fixed to return the git URL so auto-reinstall works after upgrade.
+- **Diffusion-MLX pending reinstall loop** — `get_package_name()` was returning the engine ID (`diffusion-mlx`, not on PyPI), causing a silent `pip install diffusion-mlx` failure after every brew upgrade. Now returns `""` to skip auto-reinstall; user reinstalls via UI when needed.
+- Manually installed `lightning-mlx` into the current (0.8.83) Homebrew venv so users who already upgraded see it as installed immediately.
+
+---
+
 ## v0.8.83 — 2026-05-30
 
 ### Fixed

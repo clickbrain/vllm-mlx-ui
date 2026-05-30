@@ -146,6 +146,11 @@ class LightningMlxEngine(BaseEngine):
             "git+https://github.com/samuelfaj/lightning-mlx.git",
         ]
 
+    def get_package_name(self) -> str:
+        # lightning-mlx is not on PyPI; use the git URL so that
+        # process_pending_engine_reinstalls() can restore it after brew upgrade.
+        return "git+https://github.com/samuelfaj/lightning-mlx.git"
+
     def uninstall_command(self) -> list[str]:
         return [sys.executable, "-m", "pip", "uninstall", "-y", "lightning-mlx"]
 

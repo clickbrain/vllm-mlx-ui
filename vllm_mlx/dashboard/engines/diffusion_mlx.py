@@ -272,11 +272,46 @@ class DiffusionMlxEngine(BaseEngine):
         except Exception:
             return None
 
+    # MacPaw/Fast-dLLM-mlx has multiple top-level packages in a flat layout
+    # (fast_dllm_mlx, dream_mlx, prompts) with no explicit [tool.setuptools]
+    # packages config.  setuptools auto-discovery fails with:
+    #   "Multiple top-level packages discovered in a flat-layout"
+    # Workaround: clone the repo, inject a setup.cfg that pins the package we
+    # want, then install with --no-build-isolation (so setup.cfg is visible).
+    _FAST_DLLM_INSTALL_SCRIPT = (
+        "import subprocess, sys, tempfile, os, shutil\n"
+        "print('Installing server dependencies...', flush=True)\n"
+        "subprocess.run(\n"
+        "    [sys.executable, '-m', 'pip', 'install', '--upgrade',\n"
+        "     'fastapi', 'uvicorn[standard]', 'pydantic', 'mlx-lm', 'huggingface_hub'],\n"
+        "    check=True)\n"
+        "print('Cloning MacPaw/Fast-dLLM-mlx...', flush=True)\n"
+        "d = tempfile.mkdtemp(prefix='fast-dllm-build-')\n"
+        "try:\n"
+        "    subprocess.run(\n"
+        "        ['git', 'clone', '--depth=1',\n"
+        "         'https://github.com/MacPaw/Fast-dLLM-mlx', d],\n"
+        "        check=True)\n"
+        "    with open(os.path.join(d, 'setup.cfg'), 'w') as fh:\n"
+        "        fh.write('[options]\\npackages = fast_dllm_mlx\\n')\n"
+        "    subprocess.run(\n"
+        "        [sys.executable, '-m', 'pip', 'install', '--no-build-isolation', d],\n"
+        "        check=True)\n"
+        "    print('fast-dllm-mlx installed.', flush=True)\n"
+        "except subprocess.CalledProcessError as exc:\n"
+        "    sys.exit(f'ERROR: {exc}')\n"
+        "finally:\n"
+        "    shutil.rmtree(d, ignore_errors=True)\n"
+    )
+
     def install_command(self) -> list[str]:
         """Install fast-dllm-mlx and required server deps into the Python 3.13 env.
 
         Also installs fastapi/uvicorn/pydantic because diffusion_server.py is run
         as a standalone script under the 3.13 interpreter (not inside the vmui venv).
+
+        Uses a clone+patch approach to work around MacPaw/Fast-dLLM-mlx's packaging
+        issue (multiple top-level packages with no explicit setuptools config).
         """
         python = _find_python313()
         if python is None:
@@ -286,12 +321,13 @@ class DiffusionMlxEngine(BaseEngine):
                 "import sys; sys.exit('ERROR: Python 3.13+ not found. Install via conda or brew install python@3.13')",
             ]
         _invalidate_caches()
-        return [
-            python, "-m", "pip", "install", "--upgrade",
-            "fastapi", "uvicorn[standard]", "pydantic",
-            "mlx-lm", "huggingface_hub",
-            "git+https://github.com/MacPaw/Fast-dLLM-mlx",
-        ]
+        return [python, "-c", self._FAST_DLLM_INSTALL_SCRIPT]
+
+    def get_package_name(self) -> str:
+        # fast-dllm-mlx is not on PyPI and requires a special clone+patch install.
+        # Return "" so process_pending_engine_reinstalls() skips it — the user
+        # must reinstall via the UI after a brew upgrade.
+        return ""
 
     def uninstall_command(self) -> list[str]:
         python = _find_python313() or sys.executable
