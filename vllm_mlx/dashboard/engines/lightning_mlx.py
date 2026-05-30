@@ -151,6 +151,19 @@ class LightningMlxEngine(BaseEngine):
         # process_pending_engine_reinstalls() can restore it after brew upgrade.
         return "git+https://github.com/samuelfaj/lightning-mlx.git"
 
+    def latest_version(self) -> str | None:
+        """Return the latest lightning-mlx release tag from GitHub."""
+        try:
+            import urllib.request
+            import json as _json
+            url = "https://api.github.com/repos/samuelfaj/lightning-mlx/releases/latest"
+            req = urllib.request.Request(url, headers={"User-Agent": "vllm-mlx-ui"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = _json.loads(resp.read())
+                return data.get("tag_name", "").lstrip("v") or None
+        except Exception:
+            return None
+
     def uninstall_command(self) -> list[str]:
         return [sys.executable, "-m", "pip", "uninstall", "-y", "lightning-mlx"]
 

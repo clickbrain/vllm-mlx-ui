@@ -291,7 +291,7 @@ class DiffusionMlxEngine(BaseEngine):
         "    subprocess.run(\n"
         "        ['git', 'clone', '--depth=1',\n"
         "         'https://github.com/MacPaw/Fast-dLLM-mlx', d],\n"
-        "        check=True)\n"
+        "        check=True, timeout=120)\n"
         "    with open(os.path.join(d, 'setup.cfg'), 'w') as fh:\n"
         "        fh.write('[options]\\npackages = fast_dllm_mlx\\n')\n"
         "    subprocess.run(\n"
