@@ -43,11 +43,14 @@ class TestIdentity:
 class TestBuildCommand:
     def test_uses_apfel_binary(self, engine):
         cmd = engine.build_command({"host": "127.0.0.1", "port": 8080})
-        assert cmd[0] == "apfel"
+        import os
+        assert os.path.basename(cmd[0]) == "apfel"
 
-    def test_includes_serve_subcommand(self, engine):
+    def test_includes_serve_flag(self, engine):
+        # Must be --serve (flag), NOT "serve" (positional arg / chat prompt).
         cmd = engine.build_command({"host": "127.0.0.1", "port": 8080})
-        assert "serve" in cmd
+        assert "--serve" in cmd
+        assert "serve" not in cmd  # bare positional would be passed as a chat prompt
 
     def test_passes_host(self, engine):
         cmd = engine.build_command({"host": "0.0.0.0", "port": 8080})

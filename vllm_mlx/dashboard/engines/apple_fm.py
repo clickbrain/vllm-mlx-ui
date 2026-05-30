@@ -67,15 +67,15 @@ class AppleFMEngine(BaseEngine):
     release_url: ClassVar[str] = "https://github.com/Arthur-Ficial/apfel/releases"
 
     def build_command(self, config: dict[str, Any]) -> list[str]:
-        """Return the ``apfel serve`` command.
+        """Return the ``apfel --serve`` command.
 
         The server exposes an OpenAI-compatible /v1/chat/completions endpoint.
-        Binds to the dashboard-configured host and port.
+        Binds to the dashboard-configured host and port (default: 11434).
         """
         host = config.get("host", "127.0.0.1")
-        port = str(int(config.get("port", 8080)))
+        port = str(int(config.get("port", 11434)))
         apfel_bin = self._which("apfel") or "apfel"
-        return [apfel_bin, "serve", "--host", host, "--port", port]
+        return [apfel_bin, "--serve", "--host", host, "--port", port]
 
     def is_installed(self) -> bool:
         return self._which("apfel") is not None

@@ -1,5 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.83 — 2026-05-30
+
+### Fixed
+- **Apple FM engine would not start** — `build_command()` was passing `"serve"` as a positional argument (treated as a chat prompt by apfel), causing the model to generate PHP server code instead of starting. Fixed to use the correct `--serve` flag. ([apple_fm.py])
+- Updated default port fallback from 8000 to 11434 (apfel's native default) in case config omits the port field.
+
+---
+
 ## v0.8.82 — 2026-05-30
 
 ### Fixed
