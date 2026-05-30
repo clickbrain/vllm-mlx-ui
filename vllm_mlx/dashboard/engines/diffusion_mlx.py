@@ -52,7 +52,7 @@ def _find_python313() -> str | None:
     """Find a Python >= 3.13 executable on this machine.
 
     Checks (in order):
-    1. Explicit version names on PATH: python3.14, python3.13
+    1. Explicit version names on PATH: python3.13, python3.14
     2. Known conda/anaconda base locations
     3. python3 on PATH (works when conda is active in the shell that launched vmui)
 
@@ -149,9 +149,16 @@ class DiffusionMlxEngine(BaseEngine):
 
         Prefers: (1) a Python >=3.13 that already has fast-dllm-mlx installed,
         (2) any Python >=3.13 found on the machine.
-        Falls back to sys.executable with a warning logged if nothing found.
+        Falls back to sys.executable (Python 3.11) if nothing found — the server
+        will fail visibly at startup with an import error.
         """
+        import logging as _logging
         py313 = _find_python313()
+        if py313 is None:
+            _logging.getLogger(__name__).warning(
+                "diffusion-mlx: no Python >=3.13 found; falling back to %s — "
+                "fast-dllm-mlx will likely fail to import", sys.executable
+            )
         return py313 if py313 else sys.executable
 
     def build_command(self, config: dict[str, Any]) -> list[str]:

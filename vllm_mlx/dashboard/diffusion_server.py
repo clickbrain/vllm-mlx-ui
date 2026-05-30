@@ -9,13 +9,13 @@ Uses MacPaw's Fast-dLLM-mlx backend which adds KV-cache reuse and
 confidence-threshold parallel token finalization for substantially faster
 inference than naive Dream generation (~20 steps ≈ 256 naive steps).
 
-Usage (launched by the engine adapter, not directly):
-    python -m vllm_mlx.dashboard.diffusion_server \\
-        --model mlx-community/DiffuCoder-7B-cpGRPO-8bit \\
+Usage (launched by DiffusionMlxEngine, not directly):
+    python /path/to/vllm_mlx/dashboard/diffusion_server.py \
+        --model mlx-community/DiffuCoder-7B-cpGRPO-8bit \
         --port 8511
 
-Requires fast-dllm-mlx:
-    pip install "git+https://github.com/MacPaw/Fast-dLLM-mlx"
+Requires fast-dllm-mlx (installed via DiffusionMlxEngine.install_command()):
+    python3.13 -m pip install "git+https://github.com/MacPaw/Fast-dLLM-mlx"
 """
 from __future__ import annotations
 
