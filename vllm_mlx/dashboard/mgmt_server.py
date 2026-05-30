@@ -683,6 +683,27 @@ def cached_models(_: None = Depends(_check_auth)) -> list:
                 logger.warning("Failed to discover models for engine %s", engine.id, exc_info=True)
     except Exception:
         logger.warning("Failed to query engine registry for models", exc_info=True)
+
+    # Inject a synthetic entry for fixed-model engines (e.g. apple-fm) that don't
+    # have HuggingFace models in the cache. This lets the Benchmark tab display
+    # them in the model selector even though nothing is "downloaded".
+    try:
+        _active_eid = sm.load_config().get("engine_id", "rapid-mlx")
+        from vllm_mlx.dashboard.engines.registry import get_engine as _ge_fm
+        _ae = _ge_fm(_active_eid)
+        _fixed_display = _ae.get_fixed_model_display()
+        if _fixed_display and _ae.is_installed():
+            # Use "<engine-id>/fixed" as a stable synthetic model ID.
+            models.append({
+                "id": f"{_active_eid}/fixed",
+                "name": _fixed_display,
+                "size_gb": 0,
+                "engine": _active_eid,
+                "source": "fixed",
+            })
+    except Exception:
+        logger.warning("Failed to inject fixed-model entry for active engine", exc_info=True)
+
     return models
 
 
@@ -1452,6 +1473,39 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
                         err = result.get("error", "Unknown error")
                         _output_cb(f"\n[✗ Benchmark failed: {err}]\n")
                 else:
+                    # Fixed-model engines (e.g. apple-fm) expose a single on-device
+                    # model with a synthetic ID of the form "<engine-id>/fixed".
+                    # Benchmark against the already-running server — no model loading.
+                    _fixed_engine_id = model_id.rsplit("/", 1)[0] if model_id.endswith("/fixed") else None
+                    if _fixed_engine_id:
+                        try:
+                            from vllm_mlx.dashboard.engines.registry import get_engine as _ge_fixed
+                            _fx_eng = _ge_fixed(_fixed_engine_id)
+                            if _fx_eng.get_fixed_model_display() and _fx_eng.is_installed():
+                                _output_cb(f"[🔧 Fixed-model engine ({_fixed_engine_id}) — benchmarking running server]\n")
+                                _fx_url = sm.get_server_url()
+                                _fx_hp = getattr(_fx_eng, "health_path", "/health")
+                                result = br.run_live_benchmark(
+                                    model_id,
+                                    server_url=_fx_url,
+                                    prompts=runs,
+                                    max_tokens=max_tokens,
+                                    label=label,
+                                    stop_event=_stop,
+                                    server_settings=server_settings_snapshot,
+                                    output_callback=_output_cb,
+                                    health_path=_fx_hp,
+                                )
+                                if not result.get("success"):
+                                    err = result.get("error", "Unknown error")
+                                    _output_cb(f"\n[✗ Benchmark failed: {err}]\n")
+                                continue
+                            else:
+                                _output_cb(f"[⚠ Engine {_fixed_engine_id} not installed or has no fixed model]\n")
+                                continue
+                        except (KeyError, Exception) as exc:
+                            _output_cb(f"[⚠ Fixed-model benchmark error: {exc}]\n")
+                            continue
                     # Auto-switch to diffusion server for diffusion-mlx engine.
                     if override_engine_id == "diffusion-mlx" or sm._is_diffusion_model(model_id):
                         try:

@@ -1,6 +1,23 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.80 — 2026-05-30
+## v0.8.81 — 2026-05-30
+
+### Added
+- **Apple Foundation Model (apple-fm) now benchmarkable** — the Benchmark tab now shows a
+  `"Apple On-Device LLM (~3B)"` entry when apple-fm is the active engine and `apfel` is installed.
+  Clicking Run benchmarks against the currently running apfel server (no model loading needed).
+  - `/models/cached` injects a synthetic `"apple-fm/fixed"` entry for fixed-model engines.
+  - Benchmark `_run()` detects `"/fixed"` model IDs and routes to the running server via
+    `run_live_benchmark()` with the engine's correct health path (`/v1/models` for apfel vs `/health`
+    for most engines).
+  - `run_live_benchmark()` now accepts an optional `health_path` parameter (default: `/health`)
+    so engines that use a different health endpoint can be benchmarked without errors.
+
+### Fixed
+- **Benchmark model list uses API-provided name** — model entries returned from `/models/cached`
+  with a `name` field (e.g. fixed-model engines, engine-discovered models) now display their
+  correct readable name in the Benchmark tab instead of the raw last path component of the ID.
+
 
 ### Changed
 - **Diffusion MLX engine now uses Fast-dLLM-mlx** (MacPaw/Fast-dLLM-mlx) instead of the experimental mlx-lm PR branch.

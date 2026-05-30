@@ -1407,7 +1407,7 @@ watch(activeTab, (tab) => {
                       @change="toggleBenchModel(m.id)"
                     />
                     <div class="bench-check-info">
-                      <span class="bench-check-label mono">{{ m.id.split('/').pop() }}</span>
+                      <span class="bench-check-label mono">{{ m.name }}</span>
                       <span class="bench-check-desc">{{ m.id.split('/')[0] }} &middot; {{ m.size_gb?.toFixed(1) ?? '?' }} GB &middot; {{ m.quantization }}</span>
                     </div>
                     <span v-if="benchRunning && benchSelectedModels.includes(m.id)" class="bench-model-badge" :class="speedCurrentModel && m.id === speedCurrentModel ? '' : (serverStore.modelId && m.id === serverStore.modelId ? '' : 'badge-pending')">
@@ -2265,7 +2265,7 @@ watch(activeTab, (tab) => {
               >
                 <input type="checkbox" :disabled="advisorRunning" :checked="advisorModels.includes(m.id)" @change="toggleAdvisorModel(m.id)" />
                 <div class="bench-check-info">
-                  <span class="bench-check-label mono">{{ m.id.split('/').pop() }}</span>
+                  <span class="bench-check-label mono">{{ m.name }}</span>
                   <span class="bench-check-desc">{{ m.id.split('/')[0] }} · {{ m.size_gb?.toFixed(1) ?? '?' }} GB · {{ m.quantization }}</span>
                 </div>
               </label>

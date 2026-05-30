@@ -532,11 +532,16 @@ def run_live_benchmark(
     label: str = "",
     stop_event: threading.Event | None = None,
     server_settings: dict[str, Any] | None = None,
+    health_path: str = "/health",
 ) -> dict[str, Any]:
     """Benchmark the RUNNING inference server by sending live requests.
 
     Unlike run_benchmark(), this does not load the model — it uses the already-running
     inference server. Results are stored in the benchmark history.
+
+    ``health_path`` controls which path is polled to verify the server is up.
+    Most engines expose ``/health``; some (e.g. apfel/apple-fm) only expose
+    ``/v1/models``.
     """
     import requests as _req
 
@@ -553,7 +558,7 @@ def run_live_benchmark(
 
     # Verify the server is running
     try:
-        health = _req.get(f"{server_url}/health", timeout=5)
+        health = _req.get(f"{server_url}{health_path}", timeout=5)
         if health.status_code != 200:
             raise RuntimeError("Inference server not responding")
     except Exception as e:

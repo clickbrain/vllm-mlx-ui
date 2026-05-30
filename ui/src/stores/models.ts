@@ -199,10 +199,12 @@ export const useModelsStore = defineStore('models', () => {
     loading.value = true
     try {
       const activeModel = serverStore.modelId
-      const raw = await api.get<Array<{ id: string; size_gb: number; size_bytes?: number; engine?: string; source?: string }>>('/models/cached')
+      const raw = await api.get<Array<{ id: string; name?: string; size_gb: number; size_bytes?: number; engine?: string; source?: string }>>('/models/cached')
       models.value = raw.map(m => ({
         id: m.id,
-        name: m.id.split('/').pop() ?? m.id,
+        // Use API-provided name for synthetic entries (e.g. fixed-model engines);
+        // fall back to the last path component for normal HuggingFace models.
+        name: m.name || (m.id.split('/').pop() ?? m.id),
         size_gb: m.size_gb,
         quantization: deriveQuantization(m.id),
         cached: true,
