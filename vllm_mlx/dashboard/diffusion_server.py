@@ -5,19 +5,17 @@ A lightweight FastAPI server that loads Dream-architecture diffusion language
 models (e.g. DiffuCoder) and exposes an OpenAI-compatible API endpoint.
 Launched as a subprocess by DiffusionMlxEngine.
 
-Diffusion generation is bidirectional: all output tokens are refined in
-parallel across N denoising steps. This means there is no per-token stream
-— the model produces nothing until the final denoising step completes.
-The server simulates SSE streaming by sending the full response as a single
-chunk immediately when generation finishes.
+Uses MacPaw's Fast-dLLM-mlx backend which adds KV-cache reuse and
+confidence-threshold parallel token finalization for substantially faster
+inference than naive Dream generation (~20 steps ≈ 256 naive steps).
 
 Usage (launched by the engine adapter, not directly):
     python -m vllm_mlx.dashboard.diffusion_server \\
         --model mlx-community/DiffuCoder-7B-cpGRPO-8bit \\
         --port 8511
 
-Requires mlx-lm with Dream support (mlx-lm PR #270 or later release).
-Install: pip install "git+https://github.com/Goekdeniz-Guelmez/mlx-lm@adding-DiffuCoder"
+Requires fast-dllm-mlx:
+    pip install "git+https://github.com/MacPaw/Fast-dLLM-mlx"
 """
 from __future__ import annotations
 
@@ -25,6 +23,7 @@ import argparse
 import asyncio
 import json
 import logging
+import math
 import os
 import sys
 import time
@@ -46,11 +45,12 @@ logger = logging.getLogger(__name__)
 _model = None
 _tokenizer = None
 _model_id: str = ""
-_default_steps: int = 256
+_default_steps: int = 24
 _default_temperature: float = 0.4
-_default_alg: str = "entropy"
+_default_block_length: int = 32
+_default_threshold: float = 0.9
 
-app = FastAPI(title="DiffusionMLX", version="0.1.0")
+app = FastAPI(title="DiffusionMLX", version="0.2.0")
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -66,9 +66,10 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: int | None = None
     temperature: float | None = None
     stream: bool = False
-    # Diffusion-specific (passed as extra fields by informed clients)
+    # Fast-dLLM specific (passed as extra fields by informed clients)
     steps: int | None = None
-    alg: str | None = None
+    block_length: int | None = None
+    threshold: float | None = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -100,39 +101,49 @@ def _build_prompt(messages: list[ChatMessage], tokenizer: Any) -> str:
     return "\n".join(parts)
 
 
-def _clean_response_text(text: str) -> str:
-    """Strip special tokens and pad tokens from the generated text."""
-    for token in ("<|dlm_pad|>", "<|im_end|>", "<|endoftext|>"):
-        text = text.split(token)[0]
-    return text.strip()
+def _round_up_to_multiple(n: int, m: int) -> int:
+    """Round n up to the nearest multiple of m."""
+    return math.ceil(n / m) * m
 
 
-def _run_generation(request: ChatCompletionRequest) -> tuple[str, int, float]:
-    """Run diffusion generation. Returns (text, token_count, tps)."""
+def _run_generation(request: ChatCompletionRequest) -> tuple[str, int, int, float]:
+    """Run diffusion generation. Returns (text, prompt_tokens, completion_tokens, tps)."""
     try:
-        from mlx_lm.generate_diffusion import DreamGenerationConfig, stream_diffusion_generate
+        from fast_dllm_mlx import DreamGenerationConfig, stream_diffusion_generate
     except ImportError as exc:
         raise RuntimeError(
-            "Dream model support not found in mlx-lm. "
-            "Install with: pip install 'git+https://github.com/Goekdeniz-Guelmez/mlx-lm@adding-DiffuCoder'"
+            "fast-dllm-mlx not found. "
+            "Install with: pip install 'git+https://github.com/MacPaw/Fast-dLLM-mlx'"
         ) from exc
 
     prompt = _build_prompt(request.messages, _tokenizer)
     steps = request.steps or _default_steps
     temperature = request.temperature if request.temperature is not None else _default_temperature
-    alg = request.alg or _default_alg
-    max_new_tokens = request.max_tokens or 256
+    block_length = request.block_length or _default_block_length
+    threshold = request.threshold if request.threshold is not None else _default_threshold
+    max_new_tokens_raw = request.max_tokens or 256
+
+    # Fast-dLLM requires max_new_tokens to be a multiple of block_length.
+    # Round up; also ensure steps is divisible by num_blocks.
+    max_new_tokens = _round_up_to_multiple(max_new_tokens_raw, block_length)
+    num_blocks = max_new_tokens // block_length
+    # Round steps up to the nearest multiple of num_blocks.
+    steps = _round_up_to_multiple(steps, num_blocks)
 
     cfg = DreamGenerationConfig(
         steps=steps,
         temperature=temperature,
-        alg=alg,
+        alg="confidence_threshold",
+        threshold=threshold,
+        block_length=block_length,
+        dual_cache=True,
         max_new_tokens=max_new_tokens,
     )
 
     logger.info(
-        "Diffusion generate: steps=%d alg=%s temperature=%.2f max_new_tokens=%d",
-        steps, alg, temperature, max_new_tokens,
+        "Diffusion generate: steps=%d block_length=%d threshold=%.2f temperature=%.2f "
+        "max_new_tokens=%d (requested %d)",
+        steps, block_length, threshold, temperature, max_new_tokens, max_new_tokens_raw,
     )
     t0 = time.perf_counter()
 
@@ -143,13 +154,19 @@ def _run_generation(request: ChatCompletionRequest) -> tuple[str, int, float]:
     elapsed = time.perf_counter() - t0
 
     if final_response is None:
-        return "", 0, 0.0
+        return "", 0, 0, 0.0
 
-    text = _clean_response_text(final_response.text)
-    tokens = getattr(final_response, "generation_tokens", len(text.split()))
-    tps = tokens / elapsed if elapsed > 0 else 0.0
-    logger.info("Generation done: %d tokens in %.2fs (%.1f tok/s)", tokens, elapsed, tps)
-    return text, tokens, tps
+    text = final_response.text  # fast_dllm_mlx decodes with skip_special_tokens=True
+    prompt_tokens = getattr(final_response, "prompt_tokens", 0)
+    completion_tokens = getattr(final_response, "generation_tokens", len(text.split()))
+    tps = getattr(final_response, "generation_tps", None) or (
+        completion_tokens / elapsed if elapsed > 0 else 0.0
+    )
+    logger.info(
+        "Generation done: %d prompt + %d completion tokens in %.2fs (%.1f tok/s)",
+        prompt_tokens, completion_tokens, elapsed, tps,
+    )
+    return text, prompt_tokens, completion_tokens, tps
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -181,8 +198,10 @@ async def chat_completions(request: ChatCompletionRequest, raw_request: Request)
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     try:
-        loop = asyncio.get_event_loop()
-        text, token_count, tps = await loop.run_in_executor(None, _run_generation, request)
+        loop = asyncio.get_running_loop()
+        text, prompt_tokens, completion_tokens, tps = await loop.run_in_executor(
+            None, _run_generation, request
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
@@ -226,9 +245,9 @@ async def chat_completions(request: ChatCompletionRequest, raw_request: Request)
             }
         ],
         "usage": {
-            "prompt_tokens": 0,
-            "completion_tokens": token_count,
-            "total_tokens": token_count,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
         },
         "x_diffusion_tps": round(tps, 1),
     })
@@ -243,18 +262,16 @@ def _load_model(model_id: str) -> None:
     logger.info("Loading Dream model: %s", model_id)
 
     try:
-        from mlx_lm.generate_diffusion import DreamGenerationConfig  # noqa: F401 — import check
+        from fast_dllm_mlx import load
     except ImportError:
         logger.error(
-            "Dream model support not found in mlx-lm. "
-            "Install the PR branch:\n"
-            "  pip install 'git+https://github.com/Goekdeniz-Guelmez/mlx-lm@adding-DiffuCoder'"
+            "fast-dllm-mlx not found. Install with:\n"
+            "  pip install 'git+https://github.com/MacPaw/Fast-dLLM-mlx'"
         )
         sys.exit(1)
 
     try:
-        from mlx_lm import load
-        _model, _tokenizer = load(model_id, trust_remote_code=True)
+        _model, _tokenizer = load(model_id)
         _model_id = model_id
         logger.info("Model loaded: %s", model_id)
     except Exception as exc:
@@ -263,17 +280,18 @@ def _load_model(model_id: str) -> None:
 
 
 def main() -> None:
-    global _default_steps, _default_temperature, _default_alg
+    global _default_steps, _default_temperature, _default_block_length, _default_threshold
 
-    parser = argparse.ArgumentParser(description="Diffusion model inference server")
+    parser = argparse.ArgumentParser(description="Diffusion model inference server (Fast-dLLM-mlx)")
     parser.add_argument("--model", required=True, help="HuggingFace model ID or local path")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host")
     parser.add_argument("--port", type=int, default=8511, help="Bind port")
-    parser.add_argument("--steps", type=int, default=256, help="Denoising steps (default 256)")
+    parser.add_argument("--steps", type=int, default=24, help="Denoising steps (default 24)")
     parser.add_argument("--temperature", type=float, default=0.4, help="Sampling temperature")
-    parser.add_argument("--alg", default="entropy",
-                        choices=["origin", "maskgit_plus", "topk_margin", "entropy"],
-                        help="Unmasking algorithm")
+    parser.add_argument("--block-length", type=int, default=32,
+                        help="Tokens per denoising block (default 32)")
+    parser.add_argument("--threshold", type=float, default=0.9,
+                        help="Confidence threshold for early token finalization (default 0.9)")
     parser.add_argument("--hf-cache", default="", help="HuggingFace cache directory")
     args = parser.parse_args()
 
@@ -282,7 +300,8 @@ def main() -> None:
 
     _default_steps = args.steps
     _default_temperature = args.temperature
-    _default_alg = args.alg
+    _default_block_length = args.block_length
+    _default_threshold = args.threshold
 
     _load_model(args.model)
 

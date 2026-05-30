@@ -1452,6 +1452,34 @@ def run_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check_auth)) 
                         err = result.get("error", "Unknown error")
                         _output_cb(f"\n[✗ Benchmark failed: {err}]\n")
                 else:
+                    # Auto-switch to diffusion server for diffusion-mlx engine.
+                    if override_engine_id == "diffusion-mlx" or sm._is_diffusion_model(model_id):
+                        try:
+                            from vllm_mlx.dashboard.engines.registry import get_engine as _get_engine
+                            diff_eng = _get_engine("diffusion-mlx")
+                            if diff_eng.is_installed():
+                                _output_cb(f"[🌀 Diffusion model — using fast-dllm-mlx benchmark]\n")
+                                diff_es = base_cfg.get("engine_settings", {}).get("diffusion-mlx", {})
+                                diff_port = base_cfg.get("port", 8511) if base_cfg.get("engine_id") == "diffusion-mlx" else 8511
+                                result = br.run_diffusion_benchmark(
+                                    model_id,
+                                    prompts=runs,
+                                    max_tokens=max_tokens,
+                                    output_callback=_output_cb,
+                                    stop_event=_stop,
+                                    engine_settings=diff_es,
+                                    port=diff_port,
+                                )
+                                if not result.get("success"):
+                                    err = result.get("error", "Unknown error")
+                                    _output_cb(f"\n[✗ Diffusion benchmark failed: {err}]\n")
+                                continue
+                            else:
+                                _output_cb(f"[⚠ fast-dllm-mlx not installed — cannot benchmark diffusion model]\n")
+                                continue
+                        except Exception as exc:
+                            _output_cb(f"[⚠ Diffusion benchmark error: {exc}]\n")
+                            continue
                     # Auto-switch to lightning-mlx for MTPLX models if installed.
                     if sm._is_mtplx_model(model_id):
                         try:

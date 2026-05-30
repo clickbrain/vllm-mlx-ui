@@ -2,20 +2,19 @@
 """DiffusionMlxEngine — adapter for Dream-architecture diffusion language models.
 
 Supports models built on the Dream masked-diffusion architecture, such as
-Apple's DiffuCoder family. These models denoise a masked token sequence over N
-steps rather than generating one token at a time, so they have different
-performance characteristics from autoregressive models:
+Apple's DiffuCoder family.  Uses MacPaw's Fast-dLLM-mlx backend which adds
+KV-cache reuse and confidence-threshold parallel token finalization on top of
+standard Dream inference, giving substantially faster generation than a naive
+step-by-step implementation.
 
-- No per-token streaming (all tokens refined simultaneously per step)
-- Generation latency is dominated by steps × full-model-forward-pass
-- Output quality improves with more steps (default 256; 512 for best quality)
-- Tool calls and multi-step reasoning are NOT supported
+Performance characteristics vs. autoregressive models:
+- No per-token streaming (all tokens denoised in parallel per step)
+- Fast-dLLM path: ~20 steps with confidence thresholding ≈ quality of 256 naive steps
+- Generation latency: typically 5-15s for DiffuCoder-7B on M-series chips
+- Tool calls and thinking/reasoning are NOT supported
 
-Requires mlx-lm with Dream architecture support:
-    pip install "git+https://github.com/Goekdeniz-Guelmez/mlx-lm@adding-DiffuCoder"
-
-Once mlx-lm PR #270 is merged, the standard `pip install --upgrade mlx-lm`
-will suffice and this engine will automatically detect that and use it.
+Requires fast-dllm-mlx:
+    pip install "git+https://github.com/MacPaw/Fast-dLLM-mlx"
 
 Recommended model: mlx-community/DiffuCoder-7B-cpGRPO-8bit
 """
@@ -34,13 +33,9 @@ _DEFAULT_PORT = 8511
 
 
 def _has_dream_support() -> bool:
-    """Return True if the installed mlx-lm has Dream/diffusion generation support.
-
-    Does a real import (not just find_spec) to catch broken partial installs
-    where the file exists on disk but fails to load.
-    """
+    """Return True if fast-dllm-mlx is installed and importable."""
     try:
-        from mlx_lm.generate_diffusion import stream_diffusion_generate  # noqa: F401
+        from fast_dllm_mlx import stream_diffusion_generate  # noqa: F401
         return True
     except Exception:
         return False
@@ -50,11 +45,12 @@ class DiffusionMlxEngine(BaseEngine):
     """Adapter for Dream-architecture diffusion language models via MLX."""
 
     id: ClassVar[str] = "diffusion-mlx"
-    name: ClassVar[str] = "Diffusion MLX"
+    name: ClassVar[str] = "Diffusion MLX (Fast-dLLM)"
     description: ClassVar[str] = (
         "Runs Dream-architecture masked-diffusion language models (e.g. DiffuCoder) on Apple "
-        "Silicon via MLX. Diffusion models generate ALL tokens simultaneously over N denoising "
-        "steps — no per-token streaming, but high output quality for code generation tasks.\n\n"
+        "Silicon using MacPaw's Fast-dLLM-mlx backend.\n\n"
+        "Fast-dLLM adds KV-cache reuse and confidence-threshold parallel token finalization "
+        "for substantially faster inference than naive Dream: ~20 steps ≈ quality of 256 steps.\n\n"
         "Recommended model: mlx-community/DiffuCoder-7B-cpGRPO-8bit\n"
         "Note: tool calls and thinking/reasoning are not supported by this architecture."
     )
@@ -62,8 +58,8 @@ class DiffusionMlxEngine(BaseEngine):
         "diffusion",
     })
     install_method: ClassVar[str] = "pip"
-    homepage_url: ClassVar[str] = "https://github.com/apple/ml-diffucoder"
-    release_url: ClassVar[str] = "https://github.com/ml-explore/mlx-lm/pull/270"
+    homepage_url: ClassVar[str] = "https://github.com/MacPaw/Fast-dLLM-mlx"
+    release_url: ClassVar[str] = "https://github.com/MacPaw/Fast-dLLM-mlx/releases"
     health_path: ClassVar[str] = "/health"
 
     # ── BaseEngine implementation ─────────────────────────────────────────────
@@ -75,9 +71,10 @@ class DiffusionMlxEngine(BaseEngine):
         port = config.get("port", _DEFAULT_PORT)
 
         es = config.get("engine_settings", {}).get(self.id, {})
-        steps = int(es.get("steps", 256))
+        steps = int(es.get("steps", 24))
         temperature = float(es.get("temperature", 0.4))
-        alg = es.get("alg", "entropy")
+        block_length = int(es.get("block_length", 32))
+        threshold = float(es.get("threshold", 0.9))
 
         server_module = "vllm_mlx.dashboard.diffusion_server"
 
@@ -88,7 +85,8 @@ class DiffusionMlxEngine(BaseEngine):
             "--port", str(port),
             "--steps", str(steps),
             "--temperature", str(temperature),
-            "--alg", alg,
+            "--block-length", str(block_length),
+            "--threshold", str(threshold),
         ]
 
         try:
@@ -100,14 +98,14 @@ class DiffusionMlxEngine(BaseEngine):
         return cmd
 
     def is_installed(self) -> bool:
-        """Return True if mlx-lm with Dream support is available."""
+        """Return True if fast-dllm-mlx is available."""
         return _has_dream_support()
 
     def get_version(self) -> str | None:
-        """Return the mlx-lm version (Dream support is gated on the version)."""
+        """Return the installed fast-dllm-mlx version string, or None."""
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "show", "mlx-lm"],
+                [sys.executable, "-m", "pip", "show", "fast-dllm-mlx"],
                 capture_output=True, text=True, timeout=10,
             )
             if result.returncode == 0:
@@ -118,50 +116,41 @@ class DiffusionMlxEngine(BaseEngine):
             pass
         return None
 
+    def check_requirements(self) -> list[str]:
+        import sys as _sys
+        v = _sys.version_info
+        if (v.major, v.minor) < (3, 13):
+            return [
+                f"fast-dllm-mlx requires Python ≥ 3.13 (running {v.major}.{v.minor}.{v.micro}). "
+                "Please upgrade Python and reinstall."
+            ]
+        return []
+
+    def check_warnings(self) -> list[str]:
+        return []
+
     def latest_version(self) -> str | None:
-        """Return latest mlx-lm version from PyPI."""
+        """Return latest fast-dllm-mlx version from GitHub API."""
         try:
             import urllib.request
             import json as _json
-            with urllib.request.urlopen(
-                "https://pypi.org/pypi/mlx-lm/json", timeout=5
-            ) as resp:
+            url = "https://api.github.com/repos/MacPaw/Fast-dLLM-mlx/releases/latest"
+            req = urllib.request.Request(url, headers={"User-Agent": "vllm-mlx-ui"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
                 data = _json.loads(resp.read())
-                return data["info"]["version"]
+                return data.get("tag_name", "").lstrip("v") or None
         except Exception:
             return None
 
     def install_command(self) -> list[str]:
-        """Install the mlx-lm PR branch with Dream support."""
+        """Install fast-dllm-mlx from GitHub."""
         return [
             sys.executable, "-m", "pip", "install", "--upgrade",
-            "git+https://github.com/Goekdeniz-Guelmez/mlx-lm@adding-DiffuCoder",
+            "git+https://github.com/MacPaw/Fast-dLLM-mlx",
         ]
 
     def uninstall_command(self) -> list[str]:
-        # mlx-lm is shared with other engines (rapid-mlx, etc.) so we can't
-        # `pip uninstall mlx-lm`. Instead, downgrade to the stable PyPI release,
-        # which removes Dream support (generate_diffusion.py) without breaking
-        # other engines that depend on mlx-lm.
-        return [
-            sys.executable, "-m", "pip", "install", "--upgrade", "mlx-lm",
-        ]
-
-    def check_requirements(self) -> list[str]:
-        # No hardware/OS requirements — Dream models run on any Apple Silicon.
-        # "Dream support not installed" is NOT a requirements error; it's fixed by Install.
-        return []
-
-    def check_warnings(self) -> list[str]:
-        # Always warn while Dream support is from the PR branch (not a released mlx-lm).
-        # The git+ pip install reports the branch version (e.g. "0.0.30"), NOT "x.y.z+git...",
-        # so checking the version string is unreliable. Warn whenever Dream support is present.
-        if _has_dream_support():
-            return [
-                "Using pre-release mlx-lm branch (PR #270 not yet merged in mlx-lm). "
-                "Once PR #270 merges, upgrade with: pip install --upgrade mlx-lm"
-            ]
-        return []
+        return [sys.executable, "-m", "pip", "uninstall", "-y", "fast-dllm-mlx"]
 
     def validate_model_id(self, model_id: str) -> bool:
         # Accept any HF repo ID; DiffuCoder models are under apple/ or mlx-community/
@@ -173,12 +162,14 @@ class DiffusionMlxEngine(BaseEngine):
                 "key": "steps",
                 "label": "Denoising Steps",
                 "type": "int",
-                "default": 256,
-                "min": 32,
-                "max": 1024,
+                "default": 24,
+                "min": 8,
+                "max": 256,
                 "help": (
-                    "Number of denoising steps. More steps = higher quality but slower. "
-                    "256 is a good default; use 512 for maximum quality."
+                    "Number of denoising steps. Fast-dLLM uses confidence thresholding so "
+                    "24 steps delivers quality comparable to 256 naive steps. "
+                    "Must be a multiple of num_blocks (max_new_tokens ÷ block_length); "
+                    "steps are automatically rounded up to satisfy this constraint."
                 ),
             },
             {
@@ -191,23 +182,39 @@ class DiffusionMlxEngine(BaseEngine):
                 "help": "Sampling temperature. Lower = more deterministic. 0.4 works well for code.",
             },
             {
-                "key": "alg",
-                "label": "Unmasking Algorithm",
-                "type": "enum",
-                "default": "entropy",
-                "options": ["entropy", "origin", "maskgit_plus", "topk_margin"],
+                "key": "block_length",
+                "label": "Block Length",
+                "type": "int",
+                "default": 32,
+                "min": 8,
+                "max": 128,
                 "help": (
-                    "Algorithm used to select which masked tokens to unmask each step. "
-                    "'entropy' (default) picks the most confident tokens first."
+                    "Number of tokens processed per denoising block. "
+                    "Larger blocks = more parallelism but coarser granularity. "
+                    "max_new_tokens will be rounded up to the nearest multiple of this value."
+                ),
+            },
+            {
+                "key": "threshold",
+                "label": "Confidence Threshold",
+                "type": "float",
+                "default": 0.9,
+                "min": 0.5,
+                "max": 1.0,
+                "help": (
+                    "Confidence gate for early token finalization. Tokens whose predicted "
+                    "probability exceeds this threshold are finalized early, skipping later steps. "
+                    "Higher = more conservative (more steps); lower = faster but lower quality."
                 ),
             },
         ]
 
     def default_engine_settings(self) -> dict[str, Any]:
         return {
-            "steps": 256,
+            "steps": 24,
             "temperature": 0.4,
-            "alg": "entropy",
+            "block_length": 32,
+            "threshold": 0.9,
         }
 
     def build_env(self, config: dict[str, Any]) -> dict[str, str] | None:

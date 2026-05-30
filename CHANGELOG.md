@@ -1,5 +1,25 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.80 — 2026-05-30
+
+### Changed
+- **Diffusion MLX engine now uses Fast-dLLM-mlx** (MacPaw/Fast-dLLM-mlx) instead of the experimental mlx-lm PR branch.
+  - Fast-dLLM-mlx uses KV-cache reuse and confidence-threshold parallel token finalization: 20 steps delivers quality comparable to 256 naive steps — ~5–10× faster generation.
+  - No longer depends on `Goekdeniz-Guelmez/mlx-lm@adding-DiffuCoder` (unstable PR branch). Requires Python ≥ 3.13.
+  - Install via Settings → Engines → Diffusion MLX → Install (now installs `fast-dllm-mlx` from GitHub).
+  - Removed `alg` config field (fast-dllm-mlx uses `confidence_threshold` only). Added `block_length` (default 32) and `threshold` (default 0.9) config fields.
+  - Default steps changed from 256 → 20 (equivalent quality, much faster).
+  - Usage/token counts now accurate: `prompt_tokens` and `completion_tokens` populated from model response.
+  - Special token stripping removed — fast-dllm-mlx decodes with `skip_special_tokens=True`.
+
+### Added
+- **Diffusion model benchmarking** — diffusion models can now be benchmarked via the Benchmark tab.
+  - Auto-detected by engine ID (`diffusion-mlx`) or by model name keywords (diffucoder, diffusion, etc.).
+  - `run_diffusion_benchmark()` in `benchmark_runner.py`: starts a temporary `diffusion_server.py` subprocess, waits for `/health`, runs `run_live_benchmark()` against it, then tears it down.
+  - If a diffusion server is already running at port 8511, it is reused (no restart needed).
+  - Results stored in the same `~/.vllm_mlx_ui/benchmark_results.json` as other benchmark results.
+  - `_is_diffusion_model()` helper in `server_manager.py` detects diffusion models by name keywords.
+
 ## v0.8.79 — 2026-05-30
 
 ### Added

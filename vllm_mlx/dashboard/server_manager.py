@@ -975,6 +975,18 @@ def _is_mtplx_model(model_id: str) -> bool:
     return "mtplx" in model_id.lower()
 
 
+def _is_diffusion_model(model_id: str) -> bool:
+    """Return True if *model_id* is likely a Dream-architecture diffusion model.
+
+    Detects DiffuCoder-family and similar models by specific name keywords.
+    Deliberately avoids the bare word "diffusion" to prevent matching image
+    models (Stable Diffusion, etc.) and non-Dream diffusion LMs.
+    """
+    lower = model_id.lower()
+    _DIFFUSION_KEYWORDS = ("diffucoder", "dream-", "-dllm", "diffullama", "masked-diffusion-lm")
+    return any(kw in lower for kw in _DIFFUSION_KEYWORDS)
+
+
 def _apply_mtplx_engine_switch(config: dict[str, Any]) -> tuple[dict[str, Any], str]:
     """If *config* selects an MTPLX model and the engine is not lightning-mlx,
     switch the engine to lightning-mlx automatically.

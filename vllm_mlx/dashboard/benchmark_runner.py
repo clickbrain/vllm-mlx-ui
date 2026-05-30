@@ -721,3 +721,149 @@ def run_live_benchmark(
 
     save_result(result)
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Diffusion model benchmarking
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DIFFUSION_SERVER_PORT = 8511
+_DIFFUSION_SERVER_STARTUP_TIMEOUT = 180  # seconds — model load can be slow
+
+
+def run_diffusion_benchmark(
+    model_id: str,
+    prompts: int = 6,
+    max_tokens: int = 128,
+    output_callback: Callable[[str], None] | None = None,
+    stop_event: threading.Event | None = None,
+    engine_settings: dict[str, Any] | None = None,
+    port: int = _DIFFUSION_SERVER_PORT,
+) -> dict[str, Any]:
+    """Benchmark a Dream-architecture diffusion model via Fast-dLLM-mlx.
+
+    Starts a temporary diffusion_server.py subprocess for the given model,
+    runs run_live_benchmark() against it, then tears the server down.
+
+    Diffusion models do NOT support streaming so TTFT equals full generation
+    time.  Use avg_e2e_tps as the primary throughput metric.
+    """
+    import requests as _req
+
+    es = engine_settings or {}
+    steps = int(es.get("steps", 24))
+    block_length = int(es.get("block_length", 32))
+    threshold = float(es.get("threshold", 0.9))
+    temperature = float(es.get("temperature", 0.4))
+
+    server_url = f"http://127.0.0.1:{port}"
+
+    def _cb(msg: str) -> None:
+        if output_callback:
+            output_callback(msg)
+
+    _cb(f"[diffusion-bench] Starting diffusion server for: {model_id}\n")
+    _cb(f"[diffusion-bench] steps={steps} block_length={block_length} threshold={threshold}\n")
+
+    # Reuse an already-running server at this port if it has the right model loaded.
+    server_already_running = False
+    try:
+        resp = _req.get(f"{server_url}/health", timeout=3)
+        if resp.status_code == 200:
+            loaded_model = resp.json().get("model", "")
+            if loaded_model == model_id:
+                server_already_running = True
+                _cb(f"[diffusion-bench] Reusing existing server at {server_url}\n")
+            else:
+                _cb(f"[diffusion-bench] Port {port} has different model ({loaded_model}) — starting fresh.\n")
+    except Exception:
+        pass
+
+    proc: subprocess.Popen | None = None
+
+    try:
+        if not server_already_running:
+            cmd = [
+                sys.executable, "-m", "vllm_mlx.dashboard.diffusion_server",
+                "--model", model_id,
+                "--port", str(port),
+                "--steps", str(steps),
+                "--block-length", str(block_length),
+                "--threshold", str(threshold),
+                "--temperature", str(temperature),
+            ]
+            _cb(f"[diffusion-bench] Launching: {' '.join(cmd)}\n")
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            # Poll /health until the server is ready.
+            deadline = time.monotonic() + _DIFFUSION_SERVER_STARTUP_TIMEOUT
+            started = False
+            while time.monotonic() < deadline:
+                if stop_event and stop_event.is_set():
+                    _cb("[diffusion-bench] Stopped while waiting for server startup.\n")
+                    return _diffusion_bench_error(model_id, "Stopped before server was ready")
+                if proc.poll() is not None:
+                    _cb("[diffusion-bench] Server exited early (check system logs for details).\n")
+                    return _diffusion_bench_error(model_id, f"Server process exited with code {proc.returncode}")
+                try:
+                    h = _req.get(f"{server_url}/health", timeout=3)
+                    if h.status_code == 200:
+                        started = True
+                        break
+                except Exception:
+                    pass
+                time.sleep(3)
+
+            if not started:
+                _cb("[diffusion-bench] Timeout waiting for server startup.\n")
+                return _diffusion_bench_error(model_id, "Server startup timeout")
+
+            _cb("[diffusion-bench] Server ready.\n")
+
+        result = run_live_benchmark(
+            model_id=model_id,
+            server_url=server_url,
+            prompts=prompts,
+            max_tokens=max_tokens,
+            output_callback=output_callback,
+            label="diffusion",
+            stop_event=stop_event,
+            server_settings={
+                "engine_id": "diffusion-mlx",
+                "steps": steps,
+                "block_length": block_length,
+                "threshold": threshold,
+                "temperature": temperature,
+            },
+        )
+        return result
+
+    finally:
+        if proc is not None and proc.poll() is None:
+            _cb("[diffusion-bench] Stopping server...\n")
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            _cb("[diffusion-bench] Server stopped.\n")
+
+
+def _diffusion_bench_error(model_id: str, error: str) -> dict[str, Any]:
+    """Return a failed benchmark result dict."""
+    result: dict[str, Any] = {
+        "schema_version": _SCHEMA_VERSION,
+        "result_type": "live",
+        "model": model_id,
+        "label": "diffusion",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "success": False,
+        "error": error,
+        "raw_output": error,
+    }
+    save_result(result)
+    return result
