@@ -326,7 +326,7 @@ def _migrate_config(saved: dict[str, Any]) -> dict[str, Any]:
       - Raise ``max_tokens`` to 32768 if it was the old 16384 default
     """
     version = saved.get("config_version", 1)
-    if version >= 3:
+    if version >= 4:
         return saved
 
     migrated = dict(saved)
