@@ -220,6 +220,10 @@ TAP_CLONE_DIR="$(mktemp -d)"
 git clone "https://github.com/${TAP_REPO}.git" "$TAP_CLONE_DIR"
 
 TAP_FORMULA="${TAP_CLONE_DIR}/Formula/vllm-mlx-ui.rb"
+# Copy the full formula from the main repo so post_install, install steps, caveats,
+# and all other formula body changes are always in sync with the main repo.
+# Then patch in the correct URL/SHA/version computed above.
+cp "${REPO_ROOT}/Formula/vllm-mlx-ui.rb" "$TAP_FORMULA"
 sed -i '' "s|url \"https://github.com/clickbrain/vllm-mlx-ui/archive/refs/tags/v[^\"]*\"|url \"${TARBALL_URL}\"|" "$TAP_FORMULA"
 sed -i '' "s|sha256 \"[a-f0-9]*\"|sha256 \"${SHA256}\"|" "$TAP_FORMULA"
 sed -i '' "s|version \"[^\"]*\"|version \"${VERSION}\"|" "$TAP_FORMULA"

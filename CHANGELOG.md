@@ -1,5 +1,10 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.75 — 2026-05-29
+
+### Fixed
+- **In-app upgrade to 0.8.74 was hanging** — the Homebrew tap formula (`homebrew-vllm-mlx-ui`) was not receiving full formula body updates from the main repo; `release.sh` only patched URL/SHA/version via `sed`, leaving the old `post_install` (which auto-downloaded a 1.8 GB model) in the tap. Upgraded installs would therefore re-trigger the download on every `brew upgrade`. Fixed by rewriting `release.sh` step 9 to `cp` the full formula from the main repo before patching version fields, ensuring tap and main repo are always in sync.
+
 ## v0.8.74 — 2026-05-29
 
 ### Fixed
