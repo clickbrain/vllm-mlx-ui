@@ -1,5 +1,12 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.90 — 2026-05-31
+
+### Fixed
+- **Find tab stuck on "No models found"** — when an HF search timed out and the user dismissed the error banner, the tab was permanently stuck showing "No models found" with no way to retry short of manually typing a search. Fixed by removing the one-time `trendingLoaded` guard: the tab now auto-searches whenever it's opened/re-activated with no results and no active error. Also fixes the KeepAlive re-entry case (navigate away and back).
+
+---
+
 ## v0.8.89 — 2026-05-31
 
 ### Fixed

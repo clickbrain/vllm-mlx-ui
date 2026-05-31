@@ -277,10 +277,12 @@ async function loadMore() {
   modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
 }
 
-// Preload newest mlx-community models when Find tab is opened for the first time
+// Preload newest mlx-community models when Find tab is opened (or re-opened with no results).
+// Conditions: no results, not already searching, and no active error banner —
+// this handles first-open, retry-after-dismiss, and KeepAlive re-activation.
 const trendingLoaded = ref(false)
 function onFindTabActivated() {
-  if (!trendingLoaded.value && modelsStore.searchResults.length === 0) {
+  if (modelsStore.searchResults.length === 0 && !modelsStore.searching && !modelsStore.actionError) {
     trendingLoaded.value = true
     sortCol.value = 'downloads'
     sortDir.value = 'desc'
@@ -387,9 +389,11 @@ onMounted(() => {
 
 // When navigating back to this tab (KeepAlive), refresh model list and
 // re-attach any download polls that may have been interrupted.
+// Also retry Find search if results were lost (e.g. after a previous timeout).
 onActivated(() => {
   modelsStore.fetchModels()
   modelsStore.resumeActiveDownloadPolls()
+  if (activeTab.value === 'Find') onFindTabActivated()
 })
 
 watch(activeTab, (tab) => {
