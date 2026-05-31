@@ -954,9 +954,22 @@ def search_hf_models(
         logger.warning("Operation failed: %s", e, exc_info=True)
         total_gb = 0.0
 
+    # Retry up to 3 attempts with exponential back-off — HF API is occasionally slow.
+    _last_exc: Exception | None = None
+    resp = None
+    for _attempt in range(3):
+        try:
+            resp = _requests.get(url, timeout=30)
+            resp.raise_for_status()
+            break
+        except (_requests.exceptions.Timeout, _requests.exceptions.ConnectionError) as exc:
+            _last_exc = exc
+            if _attempt < 2:
+                _time.sleep(2 ** _attempt)  # 1 s, 2 s
+    if resp is None:
+        return [{"error": f"HuggingFace search timed out — check your connection and try again. ({_last_exc})"}]
+
     try:
-        resp = _requests.get(url, timeout=15)
-        resp.raise_for_status()
         results = []
         raw_models = resp.json()
         # Lazy-import the family resolver — it loads the curated table on init
