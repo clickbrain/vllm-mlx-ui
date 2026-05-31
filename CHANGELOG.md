@@ -1,5 +1,13 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.89 — 2026-05-31
+
+### Fixed
+- **Most search results missing model sizes** — the HuggingFace search API doesn't return size data by default. Added `expand[0]=safetensors&expand[1]=cardData` to the search request (free — same single HTTP call) and implemented a 3-tier size resolution: (1) existing name-based heuristic, (2) `safetensors.total` BF16 parameter count from the API (exact for base/BF16 models — applies quant factor from model name), (3) base model name lookup via `cardData.base_model` for quantized models that inherit from a named base. Coverage went from ~50% to ~100% on tested queries including DiffuCoder and OLMo MLX.
+- **Family resolver crash on list-typed `base_model`** — `cardData.base_model` can be a list (e.g. `['Qwen/Qwen2.5-7B']`) but `_normalize_model_name()` expected a string, causing `AttributeError: 'list' object has no attribute 'lower'` on every affected model. Now normalizes to the first element.
+
+---
+
 ## v0.8.88 — 2026-05-31
 
 ### Fixed

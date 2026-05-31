@@ -196,6 +196,9 @@ class ModelFamilyResolver:
 
         # ── Tier 2: Follow base_model tag chain ─────────────────────────
         base_model_id = hf_base_model
+        # cardData.base_model can be a list (e.g. ['Qwen/Qwen2.5-7B']) — take first
+        if isinstance(base_model_id, list):
+            base_model_id = base_model_id[0] if base_model_id else None
         # Also check tags for base_model:* entries
         if not base_model_id and hf_tags:
             for tag in hf_tags:

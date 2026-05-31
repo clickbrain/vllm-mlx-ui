@@ -897,6 +897,22 @@ def check_model_fit(
     }
 
 
+def _size_gb_from_params(total_params: int, model_name: str) -> float:
+    """Convert a BF16 parameter count to an estimated GB size.
+
+    Applies the quantization factor found in *model_name* (e.g. "4bit" → 0.5
+    bytes/param).  Defaults to BF16 (2 bytes/param) if no quant pattern is
+    detected — this is correct for models that expose safetensors in BF16.
+    """
+    bpp = 2.0  # default BF16
+    name = model_name.lower()
+    for pat, b in _BITS_PER_QUANT.items():
+        if pat in name:
+            bpp = b
+            break
+    return (total_params * bpp / (1024 ** 3)) * 1.10
+
+
 def search_hf_models(
     query: str = "",
     tags: list[str] | None = None,
@@ -944,7 +960,10 @@ def search_hf_models(
                 params["filter"] = "mlx"
         else:
             params["filter"] = ",".join(tags)
-    url = "https://huggingface.co/api/models?" + urllib.parse.urlencode(params)
+    # Append indexed expand[] params — the HF API requires expand[0]=, expand[1]=
+    # syntax (not expand[]=) and does NOT accept them in urlencode's dict form.
+    base_url = "https://huggingface.co/api/models?" + urllib.parse.urlencode(params)
+    url = base_url + "&expand%5B0%5D=safetensors&expand%5B1%5D=cardData"
 
     # Get total RAM for fit calculation
     try:
@@ -984,7 +1003,52 @@ def search_hf_models(
             if not model_id:
                 continue
             model_tags = list(m.get("tags") or [])
+            card_data = m.get("cardData") or {}
+
+            # --- 3-tier size resolution (no extra API calls) ---
+            # Tier 1: name-based heuristic (fast, works for standard NB naming)
             size_gb = estimate_size_from_name(model_id)
+
+            # Tier 2: safetensors.total from expand — exact BF16 param count
+            # returned by the HF API for most non-quantized models.
+            if size_gb is None:
+                st = m.get("safetensors") or {}
+                total_params = st.get("total") if isinstance(st, dict) else None
+                if total_params:
+                    size_gb = _size_gb_from_params(int(total_params), model_id)
+
+            # Tier 3: base_model card field — e.g. quantized MLX models link to
+            # their BF16 parent whose name usually contains the param count.
+            if size_gb is None:
+                base_model = card_data.get("base_model")
+                if isinstance(base_model, list):
+                    base_model = base_model[0] if base_model else None
+                if base_model and isinstance(base_model, str):
+                    base_size = estimate_size_from_name(base_model)
+                    if base_size is not None:
+                        # Re-apply quant factor from the CURRENT model's name
+                        # (base_size was computed with its own quant, so extract
+                        # raw param_b estimate and reweight for this model).
+                        raw_b = base_size / 1.10  # strip overhead
+                        # Determine current model's bpp
+                        cur_bpp = 0.50  # default 4-bit for quantized MLX models
+                        cur_name = model_id.lower()
+                        for pat, bval in _BITS_PER_QUANT.items():
+                            if pat in cur_name:
+                                cur_bpp = bval
+                                break
+                        # base_size was computed as param_b * base_bpp * 1.10
+                        # Recover param_b = base_size / (base_bpp * 1.10)
+                        base_name = base_model.lower()
+                        base_bpp = 2.0  # BF16 default for base models
+                        for pat, bval in _BITS_PER_QUANT.items():
+                            if pat in base_name:
+                                base_bpp = bval
+                                break
+                        param_b = base_size / (base_bpp * 1.10)
+                        size_gb = param_b * cur_bpp * 1.10
+            # --- end size resolution ---
+
             fit_level = None
             if size_gb is not None and total_gb > 0:
                 fit_level = _score_fit(size_gb, total_gb)
@@ -992,7 +1056,6 @@ def search_hf_models(
             family_data = None
             if resolver is not None:
                 try:
-                    card_data = m.get("cardData") or {}
                     config = m.get("config")
                     family_data = resolver.resolve(
                         model_id=model_id,
