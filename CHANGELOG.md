@@ -1,5 +1,12 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.87 — 2026-05-31
+
+### Fixed
+- **HuggingFace search timing out** — increased read timeout from 15 s to 30 s and added automatic retry with exponential back-off (up to 3 attempts). Timeout errors now surface a user-visible message instead of a raw exception.
+
+---
+
 ## v0.8.86 — 2026-05-30
 
 ### Fixed
