@@ -3908,14 +3908,59 @@ def delete_chat(chat_id: str, _: None = Depends(_check_auth)) -> dict:
 if _os.path.isdir(_UI_DIST):
     app.mount("/assets", StaticFiles(directory=_os.path.join(_UI_DIST, "assets")), name="assets")
 
+    _LOADING_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="2">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vllm-mlx-ui — starting…</title>
+<style>
+  body { margin: 0; display: flex; align-items: center; justify-content: center;
+         min-height: 100vh; background: #0d1117; color: #c9d1d9; font-family: system-ui, sans-serif; }
+  .card { text-align: center; padding: 2rem; }
+  .spinner { width: 36px; height: 36px; border: 3px solid #30363d;
+             border-top-color: #58a6ff; border-radius: 50%;
+             animation: spin 0.8s linear infinite; margin: 0 auto 1.2rem; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  h2 { margin: 0 0 0.5rem; font-size: 1.1rem; font-weight: 500; }
+  p  { margin: 0; font-size: 0.85rem; color: #8b949e; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="spinner"></div>
+  <h2>Starting vllm-mlx-ui…</h2>
+  <p>This page will refresh automatically.</p>
+</div>
+</body>
+</html>"""
+
+    _spa_relaunch_triggered = False
+
     @app.get("/", include_in_schema=False)
     @app.get("/{full_path:path}", include_in_schema=False)
     async def _serve_spa(full_path: str = "") -> PlainTextResponse:
+        global _spa_relaunch_triggered
         index = _os.path.join(_UI_DIST, "index.html")
         if not _os.path.isfile(index):
-            return PlainTextResponse(
-                "Serving vllm-mlx-ui… this page appears after the app has started.\n"
-                "If this persists, run `brew upgrade vllm-mlx-ui` and restart the process.",
+            # Our install path was removed (e.g. brew upgrade ran externally).
+            # Trigger a self-restart so the new version takes over, then return
+            # an auto-refreshing HTML page so the browser recovers automatically.
+            if not _spa_relaunch_triggered:
+                try:
+                    import signal as _sig
+                    from vllm_mlx.dashboard.server_manager import RELAUNCH_FLAG, STATE_DIR as _sd
+                    _sd.mkdir(parents=True, exist_ok=True)
+                    RELAUNCH_FLAG.write_text("1")
+                    (_sd / "no_browser.flag").touch()
+                    _os.kill(_os.getpid(), _sig.SIGTERM)
+                    _spa_relaunch_triggered = True  # only set after kill succeeds
+                except Exception:
+                    logger.warning("Failed to trigger self-restart after missing ui_dist", exc_info=True)
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse(
+                content=_LOADING_HTML,
                 status_code=503,
                 headers={"Cache-Control": "no-store"},
             )

@@ -1,5 +1,12 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.88 — 2026-05-31
+
+### Fixed
+- **"Serving vllm-mlx-ui…" splash on restart** — when `brew upgrade` was run from the terminal (not from inside the app), brew removed the old Cellar directory while the old server process was still running. The next browser request couldn't find `index.html` in the now-deleted path and showed a confusing plain-text 503. The server now detects this, automatically triggers a self-relaunch (the new version takes over), and returns a clean animated loading page with `<meta refresh>` so the browser recovers automatically without any user action.
+
+---
+
 ## v0.8.87 — 2026-05-31
 
 ### Fixed
