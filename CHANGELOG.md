@@ -1,5 +1,12 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.91 — 2026-05-31
+
+### Fixed
+- **Find tab still shows "No models found" after error dismiss** — v0.8.90's fix didn't handle the case where: search fails → error banner shown → user dismisses error → tab stuck with no results and no retry trigger. Fixed with two additions: (1) a `watch(actionError)` that auto-retries when the error is cleared while on Find tab with no results; (2) a visible "↺ Retry search" button in the empty state so the user always has a manual escape hatch.
+
+---
+
 ## v0.8.90 — 2026-05-31
 
 ### Fixed

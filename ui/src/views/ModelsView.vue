@@ -278,19 +278,26 @@ async function loadMore() {
 }
 
 // Preload newest mlx-community models when Find tab is opened (or re-opened with no results).
-// Conditions: no results, not already searching, and no active error banner —
-// this handles first-open, retry-after-dismiss, and KeepAlive re-activation.
 const trendingLoaded = ref(false)
 function onFindTabActivated() {
-  if (modelsStore.searchResults.length === 0 && !modelsStore.searching && !modelsStore.actionError) {
+  if (modelsStore.searchResults.length === 0 && !modelsStore.searching) {
     trendingLoaded.value = true
     sortCol.value = 'downloads'
     sortDir.value = 'desc'
+    modelsStore.actionError = null
     modelsStore.searchHF('', true, 0, 'downloads', false, 100, 'desc').then(() => {
       modelsStore.fetchModelScores(modelsStore.searchResults.map(r => r.id))
     })
   }
 }
+
+// Auto-retry when the error banner is dismissed while Find tab is open with no results.
+watch(() => modelsStore.actionError, (err) => {
+  if (err === null && activeTab.value === 'Find' && modelsStore.searchResults.length === 0 && !modelsStore.searching) {
+    // Small delay so the dismiss animation completes before spinner appears
+    setTimeout(onFindTabActivated, 300)
+  }
+})
 
 // Load toast state
 const loadToast = ref<string | null>(null)
@@ -783,7 +790,10 @@ watch(activeTab, (tab) => {
       <!-- Empty: searched but no results or all filtered out -->
       <div v-else-if="!modelsStore.searching && !modelsStore.actionError" class="empty-state">
         <span v-if="preFilterCount > 0" class="empty-label">No models match the current filters — adjust filters or <button class="link-btn" @click="loadMore">load more</button></span>
-        <span v-else class="empty-label">No models found — try a different search or provider</span>
+        <template v-else>
+          <span class="empty-label">No models found — try a different search or provider</span>
+          <AppButton variant="secondary" size="sm" style="margin-top: 12px" @click="onFindTabActivated">↺ Retry search</AppButton>
+        </template>
       </div>
     </div>
 
