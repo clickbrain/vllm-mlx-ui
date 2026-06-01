@@ -334,6 +334,33 @@ async function doShutdown() {
       </div>
     </div>
 
+    <!-- Active downloads tray -->
+    <div v-if="modelsStore.downloadQueue.length" class="download-tray" aria-label="Active downloads">
+      <div class="download-tray-header">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="11" height="11" aria-hidden="true">
+          <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
+        </svg>
+        <span>Downloads</span>
+      </div>
+      <div
+        v-for="item in modelsStore.downloadQueue"
+        :key="item.id"
+        class="download-item"
+      >
+        <div class="download-item-name" :title="item.id">{{ item.name }}</div>
+        <div class="download-progress-row">
+          <div class="download-progress-track">
+            <div
+              class="download-progress-fill"
+              :class="item.status === 'error' ? 'error' : item.status === 'done' ? 'done' : ''"
+              :style="{ width: item.progress + '%' }"
+            />
+          </div>
+          <span class="download-pct">{{ item.status === 'error' ? '✕' : item.progress + '%' }}</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Footer -->
     <div class="sidebar-footer">
       <button
@@ -705,7 +732,64 @@ async function doShutdown() {
   margin: var(--space-1) var(--space-1);
 }
 
-/* Footer */
+/* Download tray */
+.download-tray {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--bd-subtle);
+  flex-shrink: 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.download-tray-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--tx-muted);
+  margin-bottom: var(--space-2);
+}
+.download-item {
+  margin-bottom: var(--space-2);
+}
+.download-item:last-child { margin-bottom: 0; }
+.download-item-name {
+  font-size: 11px;
+  color: var(--tx-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 3px;
+}
+.download-progress-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.download-progress-track {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-elevated);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.download-progress-fill {
+  height: 100%;
+  background: var(--si-500);
+  border-radius: 2px;
+  transition: width .4s ease;
+}
+.download-progress-fill.done { background: var(--ph-500); }
+.download-progress-fill.error { background: var(--cu-500); }
+.download-pct {
+  font-size: 10px;
+  color: var(--tx-muted);
+  min-width: 24px;
+  text-align: right;
+}
+
 .sidebar-footer {
   display: flex;
   flex-direction: column;

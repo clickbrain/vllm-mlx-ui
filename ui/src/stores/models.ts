@@ -12,6 +12,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/api/client'
 import { useServerStore } from './server'
+import { useToastStore } from './toast'
 
 export interface Model {
   id: string
@@ -255,11 +256,18 @@ export const useModelsStore = defineStore('models', () => {
         if (s.status === 'done' || s.status === 'error') {
           window.clearInterval(interval)
           delete pollIntervals[modelId]
+          const name = item?.name ?? modelId.split('/').pop() ?? modelId
           if (s.status === 'done') {
+            try { useToastStore().success(`Downloaded: ${name}`) } catch { /* toast store may not be ready */ }
             setTimeout(() => {
               downloadQueue.value = downloadQueue.value.filter(q => q.id !== modelId)
               fetchModels()
-            }, 1500)
+            }, 2500)
+          } else if (s.status === 'error') {
+            try { useToastStore().error(`Download failed: ${name}${s.error ? ' — ' + s.error : ''}`) } catch { /* toast store may not be ready */ }
+            setTimeout(() => {
+              downloadQueue.value = downloadQueue.value.filter(q => q.id !== modelId)
+            }, 4000)
           }
         }
       } catch {
@@ -271,14 +279,52 @@ export const useModelsStore = defineStore('models', () => {
     pollIntervals[modelId] = interval
   }
 
+  /** Query the backend for any in-progress or recently-completed downloads and
+   *  hydrate the queue with any that are missing (e.g. after page refresh or
+   *  navigating away while a download was running). */
+  let _syncInFlight = false
+  async function syncDownloadsFromServer() {
+    if (_syncInFlight) return
+    _syncInFlight = true
+    try {
+      const active = await api.get<Array<{
+        model_id: string
+        status: string
+        error: string | null
+        bytes_downloaded: number
+        total_bytes: number
+        completed_at?: number
+      }>>('/models/downloads')
+
+      for (const d of active) {
+        if (d.status !== 'downloading' && d.status !== 'queued') continue
+        const existing = downloadQueue.value.find(q => q.id === d.model_id)
+        if (!existing) {
+          const name = d.model_id.split('/').pop() ?? d.model_id
+          const progress = d.total_bytes > 0
+            ? Math.round((d.bytes_downloaded / d.total_bytes) * 100)
+            : 0
+          downloadQueue.value.push({ id: d.model_id, name, progress, status: d.status as DownloadQueueItem['status'] })
+        }
+        pollDownloadStatus(d.model_id)
+      }
+    } catch {
+      // Non-critical — silently ignore if the endpoint is unavailable (older server).
+    } finally {
+      _syncInFlight = false
+    }
+  }
+
   /** Re-attach polling for any downloads that are still in-progress but have
-   *  no active poll interval (e.g. after navigating away and back). */
+   *  no active poll interval (e.g. after navigating away and back). Also syncs
+   *  from the server to recover downloads started in a previous page load. */
   function resumeActiveDownloadPolls() {
     for (const item of downloadQueue.value) {
       if (item.status === 'queued' || item.status === 'downloading') {
         pollDownloadStatus(item.id)
       }
     }
+    syncDownloadsFromServer()
   }
 
   async function loadModel(modelId: string) {
@@ -596,7 +642,7 @@ export const useModelsStore = defineStore('models', () => {
     bestBenchmarkPerModel,
     modelScores,
     loadingModelId, actionError, serverRestartingFor, pendingInstall,
-    fetchModels, downloadModel, pollDownloadStatus, resumeActiveDownloadPolls, clearAllDownloadPolls,
+    fetchModels, downloadModel, pollDownloadStatus, resumeActiveDownloadPolls, syncDownloadsFromServer, clearAllDownloadPolls,
     loadModel, deleteModel, clearPendingInstall, retryLoadAfterInstall,
     searchHF, searchHFMore,
     fetchModelScores,

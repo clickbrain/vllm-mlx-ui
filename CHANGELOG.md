@@ -1,5 +1,12 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.94 — 2026-05-31
+
+### Added
+- **Persistent download progress tray in sidebar** — active downloads are now shown in a compact tray at the bottom of the sidebar, visible on every page regardless of where you navigate. Progress bars update in real-time; the tray disappears automatically once all downloads complete.
+- **Downloads survive page navigation and refresh** — new `GET /models/downloads` backend endpoint exposes all in-progress downloads from the management server. The frontend syncs this on app startup and every time the Models page is activated, recovering any downloads that were started before the current session or after a page refresh.
+- **Toast notifications on download completion** — a success toast fires when a model finishes downloading (e.g. "Downloaded: Qwen2.5-72B-4bit"). An error toast fires on failure with the error message.
+
 ## v0.8.93 — 2026-05-31
 
 ### Fixed

@@ -33,6 +33,7 @@ let stopPolling: (() => void) | null = null
 onMounted(() => {
   stopPolling = serverStore.startPolling()
   tour.checkFirstRun()
+  modelsStore.resumeActiveDownloadPolls()
   document.addEventListener('keydown', handleGlobalKeydown)
 })
 

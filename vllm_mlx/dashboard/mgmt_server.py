@@ -843,6 +843,26 @@ def download_status(model_id: str, _: None = Depends(_check_auth)) -> dict:
         return _download_status.get(model_id, {"status": "unknown", "error": None})
 
 
+@app.get("/models/downloads")
+def list_downloads(_: None = Depends(_check_auth)) -> list:
+    """Return all in-progress and recently-completed downloads.
+
+    The frontend calls this on page load and navigation to discover any
+    downloads that are running but not in the in-memory UI queue (e.g. after
+    a page refresh or navigating away while a download was in-progress).
+
+    Returns:
+        List of dicts with keys: model_id, status, error, bytes_downloaded,
+        total_bytes, completed_at (optional).
+    """
+    _prune_download_status()
+    with _download_lock:
+        return [
+            {"model_id": mid, **info}
+            for mid, info in _download_status.items()
+        ]
+
+
 @app.delete("/models/{model_id:path}")
 def delete_model(model_id: str, _: None = Depends(_check_auth)) -> dict:
     """Delete a cached model from the HuggingFace model cache.
