@@ -5,4 +5,4 @@ logger = logging.getLogger(__name__)
 """vllm-mlx Dashboard — browser-based UI for managing the inference server."""
 
 # Dashboard UI version — keep in sync with pyproject.toml.
-__version__ = "0.8.91"
+__version__ = "0.8.92"
