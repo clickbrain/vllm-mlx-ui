@@ -944,8 +944,9 @@ def search_hf_models(
         "sort": hf_sort,
         "direction": hf_direction,
         "limit": str(fetch_limit),
-        "full": "true",
-        "config": "true",
+        # Note: full=true and config=true are intentionally omitted — using
+        # indexed expand[] params below, which replace those and give explicit
+        # control over which fields are returned.
     }
     if query.strip():
         params["search"] = query.strip()
@@ -962,8 +963,20 @@ def search_hf_models(
             params["filter"] = ",".join(tags)
     # Append indexed expand[] params — the HF API requires expand[0]=, expand[1]=
     # syntax (not expand[]=) and does NOT accept them in urlencode's dict form.
+    # IMPORTANT: using expand[] replaces full=true/config=true — ALL needed fields
+    # must be explicitly listed or they will be absent from the response.
     base_url = "https://huggingface.co/api/models?" + urllib.parse.urlencode(params)
-    url = base_url + "&expand%5B0%5D=safetensors&expand%5B1%5D=cardData"
+    url = (
+        base_url
+        + "&expand%5B0%5D=safetensors"   # for size estimation
+        + "&expand%5B1%5D=cardData"       # for base_model / family resolver
+        + "&expand%5B2%5D=tags"           # for is_mlx detection (REQUIRED)
+        + "&expand%5B3%5D=likes"          # for likes sort / display
+        + "&expand%5B4%5D=lastModified"   # for recency sort / display
+        + "&expand%5B5%5D=createdAt"      # for recency display
+        + "&expand%5B6%5D=config"         # for family resolver hf_config
+        + "&expand%5B7%5D=downloads"      # NOT a guaranteed base field — must expand explicitly
+    )
 
     # Get total RAM for fit calculation
     try:

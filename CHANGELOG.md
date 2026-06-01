@@ -1,5 +1,12 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.92 — 2026-05-31
+
+### Fixed
+- **Find tab shows "No models found" for ALL searches (root cause)** — the v0.8.89 size-resolution change added `expand[0]=safetensors&expand[1]=cardData` to the HuggingFace API URL. Using `expand[]` params causes the HF API to return *only* the explicitly expanded fields plus minimal base fields — it silently drops `tags`, `likes`, `lastModified`, `createdAt`, `config`, and `modelId`. Without `tags`, every model got `is_mlx: false`, and the frontend's "MLX only" filter (`mlxOnlySearch`) hid all 100 results. Fixed by enumerating all 7 required fields in the expand list: `safetensors`, `cardData`, `tags`, `likes`, `lastModified`, `createdAt`, `config`. Also removed the now-redundant `full=true` and `config=true` query params (the expand list supersedes them).
+
+---
+
 ## v0.8.91 — 2026-05-31
 
 ### Fixed
