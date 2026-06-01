@@ -3407,9 +3407,42 @@ def install_updates_endpoint(_: None = Depends(_check_auth)) -> dict:
             logger.warning("Main upgrade failed: %s", e, exc_info=True)
             _uc.upgrade_status = "error:upgrade command failed"
             return
-        # Engine upgrades — run as argv lists, no shell quoting issues
+        # Engine upgrades — run as argv lists, no shell quoting issues.
+        # After brew upgrade the old Cellar venv is deleted, so sys.executable
+        # may no longer exist.  Re-resolve the Python path from the new Cellar
+        # before running any pip-based engine commands.
+        import sys as _sys, os as _os, glob as _glob, re as _re
+        _resolved_python = _sys.executable
+        if not _os.path.exists(_resolved_python):
+            try:
+                _r = _sp.run(
+                    ["brew", "--prefix", "vllm-mlx-ui"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if _r.returncode == 0:
+                    _prefix = _r.stdout.strip()
+                    # Only match pure version interpreters like python3.11 / python3.12.
+                    # Exclude build helpers like python3.11-config, python3-embed, etc.
+                    _py_matches = sorted(
+                        p for p in _glob.glob(f"{_prefix}/libexec/venv/bin/python3.*")
+                        if _re.match(r"python3\.\d+$", _os.path.basename(p))
+                    )
+                    if _py_matches:
+                        _resolved_python = _py_matches[-1]
+                        logger.info("Old venv gone; using new Python for engine upgrades: %s", _resolved_python)
+            except Exception as _pe:
+                logger.warning("Could not resolve new Python after upgrade: %s", _pe)
+        _effective_engine_cmds = [
+            [_resolved_python] + ec[1:] if ec and ec[0] == _sys.executable and ec[0] != _resolved_python
+            else ec
+            for ec in engine_cmds
+        ]
         engine_errors = 0
-        for ec in engine_cmds:
+        for ec in _effective_engine_cmds:
+            if ec and not _os.path.exists(ec[0]):
+                logger.warning("Skipping engine upgrade, executable not found: %s", ec[0])
+                engine_errors += 1
+                continue
             try:
                 result = _sp.run(ec, timeout=300, check=False)
                 if result.returncode != 0:

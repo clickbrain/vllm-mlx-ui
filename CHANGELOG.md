@@ -1,5 +1,10 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.96 — 2026-05-31
+
+### Fixed
+- **Engine upgrade `FileNotFoundError` after brew upgrade** — When `brew upgrade vllm-mlx-ui` runs, Homebrew replaces the old Cellar directory (and its venv) before the engine pip-upgrade commands run. The upgrade worker now detects that `sys.executable` no longer exists after the main upgrade, resolves the new Python via `brew --prefix vllm-mlx-ui`, and re-targets any pip-based engine commands to the new venv. If the new Python still can't be found, the command is skipped with a warning (the pending-reinstalls mechanism on next boot handles those packages anyway).
+
 ## v0.8.95 — 2026-05-31
 
 ### Fixed
