@@ -267,8 +267,8 @@ class RapidMlxEngine(BaseEngine):
                 "key": "kv_turboquant",
                 "label": "TurboQuant V-Cache",
                 "type": "bool",
-                "default": True,
-                "help": "Rotate + Lloyd-Max compress V cache (86% savings on dense models). On by default for maximum memory efficiency. Flag: --kv-cache-turboquant",
+                "default": False,
+                "help": "Rotate + Lloyd-Max compress V cache (~86% savings on dense models). Reduces memory significantly but increases TTFT. Enable for large-context sessions where memory is the bottleneck. Flag: --kv-cache-turboquant",
             },
             {
                 "key": "kv_quantization",
@@ -381,7 +381,7 @@ class RapidMlxEngine(BaseEngine):
 
     def default_engine_settings(self) -> dict[str, Any]:
         return {
-            "kv_turboquant": True,
+            "kv_turboquant": False,  # Off by default — adds latency; enable for large-context sessions
             "kv_quantization": True,
             "enable_prefix_cache": True,
             "prefill_step_size": 8192,

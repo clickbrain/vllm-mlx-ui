@@ -57,6 +57,7 @@ interface EngineStatus {
   error?: string
   external?: boolean
   base_url?: string
+  no_detailed_status?: boolean
 }
 
 const records = ref<RequestRecord[]>([])
@@ -226,6 +227,10 @@ onUnmounted(() => {
       </div>
 
       <template v-else>
+        <!-- Note for engines that don't expose /v1/status (e.g. rapid-mlx) -->
+        <div v-if="engineStatus.no_detailed_status" class="engine-limited-note">
+          <span class="status-dot dot-idle" /> Engine running — this engine doesn't expose detailed metrics
+        </div>
         <div class="engine-stats-grid">
           <!-- Status + model -->
           <div class="estat">
@@ -534,6 +539,14 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+.engine-limited-note {
+  font-size: 0.8125rem;
+  color: var(--tx-secondary);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
 }
 .engine-external {
   font-size: 0.8125rem;

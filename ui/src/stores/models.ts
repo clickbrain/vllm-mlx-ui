@@ -23,6 +23,7 @@ export interface Model {
   active: boolean
   engine?: string   // set for engine-discovered models (e.g. ds4)
   source?: string   // "engine" for engine-discovered, undefined for HF cache
+  family_data?: FamilyData | null
 }
 
 export interface HFModel {
@@ -200,7 +201,7 @@ export const useModelsStore = defineStore('models', () => {
     loading.value = true
     try {
       const activeModel = serverStore.modelId
-      const raw = await api.get<Array<{ id: string; name?: string; size_gb: number; size_bytes?: number; engine?: string; source?: string }>>('/models/cached')
+      const raw = await api.get<Array<{ id: string; name?: string; size_gb: number; size_bytes?: number; engine?: string; source?: string; family_data?: FamilyData | null }>>('/models/cached')
       models.value = raw.map(m => ({
         id: m.id,
         // Use API-provided name for synthetic entries (e.g. fixed-model engines);
@@ -212,6 +213,7 @@ export const useModelsStore = defineStore('models', () => {
         active: m.id === activeModel,
         engine: m.engine,
         source: m.source,
+        family_data: m.family_data ?? null,
       }))
     } finally {
       loading.value = false

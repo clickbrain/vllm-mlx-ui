@@ -41,6 +41,7 @@ import type { QualitySuiteResult } from '@/stores/models'
 import { useBenchmarkRunStore } from '@/stores/benchmarkRun'
 import { useToastStore } from '@/stores/toast'
 import AppButton from '@/components/shared/AppButton.vue'
+import BenchmarkReport from '@/components/benchmark/BenchmarkReport.vue'
 import { api } from '@/api/client'
 
 ChartJS.register(
@@ -1013,6 +1014,7 @@ const sortedHistory = computed(() => {
 })
 
 const historySelected = ref<Set<number>>(new Set())
+const showReport = ref(false)
 const historySearch  = ref('')
 const historyTypeFilter = ref<'all' | 'speed' | 'quality' | 'custom'>('all')
 const comparePanelRef = ref<HTMLElement | null>(null)
@@ -1049,6 +1051,10 @@ const selectedRun = computed(() =>
     ? sortedHistory.value.find(r => historySelected.value.has(r.id)) ?? null
     : null
 )
+
+watch(compareRuns, (runs) => {
+  if (runs.length < 2) showReport.value = false
+})
 
 /** Returns true when a custom run was recorded before the tok/s fix in v0.3.80. */
 function hasStaleMetrics(run: { benchmark_type?: string; dashboard_version?: string }): boolean {
@@ -1824,6 +1830,14 @@ watch(activeTab, (tab) => {
             Compare {{ historySelected.size }} runs
           </AppButton>
           <AppButton
+            v-if="historySelected.size >= 2"
+            variant="primary"
+            size="sm"
+            @click="showReport = true"
+          >
+            Generate Report
+          </AppButton>
+          <AppButton
             v-else-if="historySelected.size === 1"
             variant="secondary"
             size="sm"
@@ -2369,6 +2383,12 @@ watch(activeTab, (tab) => {
 
   </div>
 
+  <BenchmarkReport
+    v-if="showReport && compareRuns.length >= 2"
+    :runs="compareRuns"
+    @close="showReport = false"
+  />
+
   <!-- Floating selection bar — visible whenever history items are checked -->
   <Teleport to="body">
     <Transition name="sel-bar">
@@ -2381,6 +2401,12 @@ watch(activeTab, (tab) => {
             size="sm"
             @click="scrollToCompare"
           >Compare</AppButton>
+          <AppButton
+            v-if="historySelected.size >= 2"
+            variant="primary"
+            size="sm"
+            @click="showReport = true"
+          >Report</AppButton>
           <AppButton
             v-else-if="historySelected.size === 1"
             variant="secondary"

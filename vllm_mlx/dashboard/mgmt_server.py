@@ -1293,6 +1293,9 @@ async def debug_engine(_: None = Depends(_check_auth)) -> Any:
     Returns real-time engine state: Metal memory usage (GB), active requests,
     tokens-per-second, KV cache hit rate, and per-request progress.  Returns
     an empty dict if the engine is not running or unreachable.
+
+    For engines that don't implement /v1/status (e.g. rapid-mlx), falls back
+    to GET /v1/models as a liveness check and returns a minimal status object.
     """
     cfg = sm.load_config()
     if _is_external_api_engine():
@@ -1312,8 +1315,24 @@ async def debug_engine(_: None = Depends(_check_auth)) -> Any:
             resp.raise_for_status()
             return resp.json()
     except Exception as exc:
-        logger.debug("debug/engine: engine unreachable: %s", exc)
-        return {"error": str(exc)}
+        # /v1/status is vllm-mlx-specific.  Other engines (rapid-mlx, etc.)
+        # expose only OpenAI-compatible endpoints.  Fall back to /v1/models as
+        # a plain liveness probe — a 200 response means the engine is up.
+        try:
+            async with _get_http_client() as client:
+                fallback = await client.get(f"{server_url}/v1/models", timeout=3.0)
+                fallback.raise_for_status()
+                # Engine is alive but doesn't expose /v1/status
+                server_state = sm._read_server_state() or {}
+                return {
+                    "status": "idle",
+                    "no_detailed_status": True,
+                    "model": server_state.get("model", ""),
+                }
+        except Exception:
+            logger.debug("debug/engine: engine unreachable: %s", exc)
+            return {"error": str(exc)}
+
 
 
 
@@ -2428,14 +2447,93 @@ async def proxy_chat(
 
             return StreamingResponse(_stream(), media_type="text/event-stream")
         else:
-            # Non-streaming: race the fetch against client disconnect so we don't
-            # hold GPU/CPU resources after the client has given up and retried.
+            # Non-streaming: force SSE streaming to the inference engine, then
+            # assemble the SSE chunks into a single JSON response.
+            #
+            # Why: with stream=false the inference server only sends its HTTP
+            # response *after* the last token is generated.  The proxy must then
+            # wait the entire inference duration (often 10–60 s) with a silent
+            # open connection before the client receives the first byte.
+            # Forcing stream=true lets the engine emit tokens as they are
+            # produced; we buffer them here and return the assembled JSON, so
+            # the client's wall-clock wait equals only our assembly time on top
+            # of inference — identical latency, but the proxy connection is
+            # active throughout rather than appearing frozen.
+            stream_request = {**request, "stream": True}
+
             async def _do_fetch() -> Any:
-                r = await _get_httpx_client().post(
-                    f"{target}/v1/chat/completions",
-                    timeout=300, json=request, headers=req_headers,
-                )
-                return r.json()
+                chunks: list[str] = []
+                async with _get_httpx_client().stream(
+                    "POST", f"{target}/v1/chat/completions",
+                    timeout=300, json=stream_request, headers=req_headers,
+                ) as resp:
+                    async for raw in resp.aiter_bytes():
+                        chunks.append(raw.decode("utf-8", errors="replace"))
+
+                # Assemble SSE chunks → OpenAI non-streaming response object
+                content_parts: list[str] = []
+                usage: dict[str, Any] = {}
+                finish_reason: str | None = "stop"
+                resp_id: str = ""
+                created: int = int(time.time())
+                model_ret: str = requested_model or cfg.get("model", "")
+                tool_calls_accum: list[dict[str, Any]] = []
+
+                # Join all chunks before splitting so that SSE lines that span
+                # HTTP chunk boundaries are reassembled correctly.
+                for line in "".join(chunks).split("\n"):
+                        line = line.strip()
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            continue
+                        try:
+                            parsed = _json.loads(data_str)
+                        except _json.JSONDecodeError:
+                            continue
+                        if not resp_id:
+                            resp_id = parsed.get("id", "")
+                            created = parsed.get("created", created)
+                            model_ret = parsed.get("model", model_ret)
+                        choice = (parsed.get("choices") or [{}])[0]
+                        delta = choice.get("delta") or {}
+                        if delta.get("content"):
+                            content_parts.append(delta["content"])
+                        # Accumulate tool call deltas
+                        for tc in delta.get("tool_calls") or []:
+                            idx = tc.get("index", 0)
+                            while len(tool_calls_accum) <= idx:
+                                tool_calls_accum.append({"id": "", "type": "function",
+                                                          "function": {"name": "", "arguments": ""}})
+                            if tc.get("id"):
+                                tool_calls_accum[idx]["id"] = tc["id"]
+                            fn = tc.get("function") or {}
+                            if fn.get("name"):
+                                tool_calls_accum[idx]["function"]["name"] += fn["name"]
+                            if fn.get("arguments"):
+                                tool_calls_accum[idx]["function"]["arguments"] += fn["arguments"]
+                        if choice.get("finish_reason"):
+                            finish_reason = choice["finish_reason"]
+                        if parsed.get("usage"):
+                            usage = parsed["usage"]
+
+                content_str: str | None = "".join(content_parts) or None
+                message: dict[str, Any] = {"role": "assistant", "content": content_str}
+                if tool_calls_accum:
+                    message["tool_calls"] = tool_calls_accum
+                    # Per OpenAI spec, content must be null (not "") when only tool_calls
+                    if not content_str:
+                        message["content"] = None
+
+                return {
+                    "id": resp_id,
+                    "object": "chat.completion",
+                    "created": created,
+                    "model": model_ret,
+                    "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+                    "usage": usage,
+                }
 
             async def _wait_disconnect() -> None:
                 while not await _raw.is_disconnected():

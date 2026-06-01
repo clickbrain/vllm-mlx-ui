@@ -1,5 +1,18 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.97 — 2026-06-01
+
+### Fixed
+- **Kilroy / non-streaming client severe lag** — External clients (like Kilroy) using `stream: false` (the OpenAI SDK default) received no response until the *entire* inference completed. The proxy now forces `stream: true` to the inference engine for all non-streaming requests and assembles SSE chunks → JSON at the proxy level. Clients see identical response format; latency equals inference time as before, but the connection is active and requests are less likely to appear hung. Includes correct SSE chunk-boundary handling (chunks joining before line-split), tool-call delta accumulation, and OpenAI-spec `content: null` for tool-only responses.
+- **Diagnostics page shows "Engine offline" for rapid-mlx** — `/debug/engine` now falls back to `GET /v1/models` when `/v1/status` returns an error (rapid-mlx doesn't implement the vllm-mlx-specific `/v1/status` endpoint). If the fallback succeeds, the diagnostics page shows "Engine running — this engine doesn't expose detailed metrics" instead of the offline banner.
+
+### Changed
+- **rapid-mlx: `kv_turboquant` default changed from `True` to `False`** — KV cache turboquantization significantly increases TTFT (time-to-first-token). It is now off by default for better out-of-the-box response speed. Enable it manually in engine settings if you need maximum memory efficiency for large-context sessions.
+
+### Added
+- **Rich model library cards** — Library tab model cards now show family badge, quantization, architecture/parameter count, size, memory fit level, benchmark performance summary (avg t/s and overall quality score), and quality score pills (MMLU, HumanEval, MATH, IFEval) when available. Graceful "Run benchmarks" CTA when no benchmark data exists.
+- **Benchmark comparative report** — Select 2+ runs from benchmark history and click "Generate Report" to open a full-screen printable report with Chart.js bar charts (speed, quality, TTFT, suite breakdown), per-model detail cards, and hardware info. Export as PDF via browser print or as PNG image via html2canvas.
+
 ## v0.8.96 — 2026-05-31
 
 ### Fixed

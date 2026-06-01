@@ -388,9 +388,21 @@ async function handleDownload(modelId: string) {
   catch (err) { modelsStore.actionError = `Failed to download ${modelId}: ${String(err)}` }
 }
 
+async function refreshLibraryTab() {
+  await modelsStore.fetchModels()
+
+  const ids = [...new Set(modelsStore.models.map(model => model.id))]
+  if (ids.length) {
+    void modelsStore.fetchModelScores(ids)
+  }
+  void modelsStore.fetchBenchmarkResults().catch(err => {
+    console.warn('Failed to fetch benchmark history for library cards', err)
+  })
+}
+
 onMounted(() => {
   modelsStore.actionError = null
-  modelsStore.fetchModels()
+  void refreshLibraryTab()
   modelsStore.resumeActiveDownloadPolls()
 })
 
@@ -398,7 +410,7 @@ onMounted(() => {
 // re-attach any download polls that may have been interrupted.
 // Also retry Find search if results were lost (e.g. after a previous timeout).
 onActivated(() => {
-  modelsStore.fetchModels()
+  void refreshLibraryTab()
   modelsStore.resumeActiveDownloadPolls()
   if (activeTab.value === 'Find') onFindTabActivated()
 })
@@ -496,16 +508,14 @@ watch(activeTab, (tab) => {
         </AppButton>
       </div>
       <div v-else class="model-list">
-        <!-- Column headers -->
         <div class="lib-col-header">
-          <span class="lib-hdr-model">Model</span>
-          <span class="lib-hdr-fit">Size · Fit <span class="lib-hdr-note">(based on available RAM)</span></span>
-          <span class="lib-hdr-actions">Actions</span>
+          <span class="lib-hdr-model">Downloaded models</span>
+          <span class="lib-hdr-note">Each card shows memory fit, benchmarks, and quality signals when available.</span>
         </div>
         <div class="virtual-scroller-wrapper">
           <RecycleScroller
             :items="filteredModels"
-            :item-size="80"
+            :item-size="248"
             key-field="id"
             class="virtual-scroller"
             v-slot="{ item }"
@@ -516,6 +526,7 @@ watch(activeTab, (tab) => {
               :quantization="item.quantization"
               :active="item.active"
               :cached="item.cached"
+              :family-data="item.family_data"
               @load="handleLoad(item.id)"
               @delete="handleDelete(item.id)"
               @download="handleDownload(item.id)"
@@ -1326,47 +1337,24 @@ watch(activeTab, (tab) => {
 .lib-col-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-2) var(--space-5);
+  padding: var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--bd-default);
   background: var(--bg-elevated);
 }
 
 .lib-hdr-model {
-  flex: 1;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
   color: var(--tx-muted);
-}
-
-.lib-hdr-fit {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-  color: var(--tx-muted);
-  min-width: 120px;
-  text-align: right;
 }
 
 .lib-hdr-note {
   font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--tx-muted);
-  opacity: 0.6;
-}
-
-.lib-hdr-actions {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--tx-muted);
-  min-width: 100px;
+  color: var(--tx-tertiary);
   text-align: right;
 }
 
