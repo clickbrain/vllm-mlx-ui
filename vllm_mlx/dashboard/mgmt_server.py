@@ -1296,7 +1296,15 @@ async def debug_engine(_: None = Depends(_check_auth)) -> Any:
     """
     cfg = sm.load_config()
     if _is_external_api_engine():
-        return {"error": "external API engine — no local status available"}
+        cfg = sm.load_config()
+        server_state = sm._read_server_state() or {}
+        base_url = _get_external_target(cfg) or "—"
+        return {
+            "external": True,
+            "base_url": base_url,
+            "model": server_state.get("model", ""),
+            "status": "external",
+        }
     server_url = sm.get_server_url(cfg)
     try:
         async with _get_http_client() as client:

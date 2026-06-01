@@ -1,5 +1,10 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.95 — 2026-05-31
+
+### Fixed
+- **"Model families file not found" spam in terminal** — `vllm_mlx/dashboard/data/` was missing from `pyproject.toml` `package-data`, so `model_families.json` was never included in the Homebrew-installed package. Added `"data/**/*"` to the package-data manifest.
+
 ## v0.8.94 — 2026-05-31
 
 ### Added

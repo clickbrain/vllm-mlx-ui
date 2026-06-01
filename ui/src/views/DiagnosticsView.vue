@@ -55,6 +55,8 @@ interface EngineStatus {
   cache?: { hits: number; misses: number; hit_rate: number; evictions: number; current_memory_mb: number; max_memory_mb: number; memory_utilization: number }
   requests?: EngineRequest[]
   error?: string
+  external?: boolean
+  base_url?: string
 }
 
 const records = ref<RequestRecord[]>([])
@@ -129,7 +131,8 @@ async function fetchRecords() {
 async function fetchEngineStatus() {
   try {
     const data = await api.get<EngineStatus>('/debug/engine')
-    engineStatus.value = data?.error ? null : data
+    // External API engines return {external: true, ...} — treat as valid status
+    engineStatus.value = (data?.error && !data?.external) ? null : data
   } catch {
     engineStatus.value = null
   } finally {
@@ -213,6 +216,13 @@ onUnmounted(() => {
       <div v-else-if="!engineStatus" class="engine-offline">
         <span class="status-dot dot-offline" />
         Engine offline or unreachable
+      </div>
+      <div v-else-if="engineStatus.external" class="engine-external">
+        <span class="status-dot dot-idle" />
+        <div>
+          <div class="engine-ext-label">External API (proxy)</div>
+          <div class="engine-ext-url" :title="engineStatus.base_url">{{ engineStatus.base_url }}</div>
+        </div>
       </div>
 
       <template v-else>
@@ -524,6 +534,27 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+.engine-external {
+  font-size: 0.8125rem;
+  color: var(--tx-secondary);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+.engine-ext-label {
+  font-weight: 600;
+  color: var(--tx-primary);
+  font-size: 0.75rem;
+}
+.engine-ext-url {
+  font-size: 0.75rem;
+  color: var(--tx-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
 }
 
 .engine-stats-grid {
