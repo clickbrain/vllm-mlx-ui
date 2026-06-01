@@ -152,7 +152,8 @@ cp -r ui/dist vllm_mlx/dashboard/ui_dist
 # ── 4. Commit everything ───────────────────────────────────
 echo "→ Committing..."
 git add -A
-git commit -m "${TAG}: release
+# Allow "nothing to commit" for backend-only releases where no UI assets changed
+git diff --cached --quiet && echo "  (no new files to commit — skipping release commit)" || git commit -m "${TAG}: release
 
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 
