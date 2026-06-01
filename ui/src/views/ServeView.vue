@@ -496,6 +496,12 @@ async function doClearCache(type: string) {
       <button class="error-dismiss" @click="switchError = null">✕</button>
     </div>
 
+    <!-- Start/stop error (e.g. port in use, engine not installed) -->
+    <div v-if="serverStore.error && !serverStore.isRunning" class="error-banner">
+      ⚠ {{ serverStore.error }}
+      <button class="error-dismiss" @click="serverStore.error = null">✕</button>
+    </div>
+
     <!-- Server crash log -->
     <div v-if="serverStore.crashLog && !serverStore.isRunning" class="crash-banner">
       <div class="crash-header">

@@ -1,6 +1,11 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.8.92 — 2026-05-31
+## v0.8.93 — 2026-05-31
+
+### Fixed
+- **Server stuck spinning forever on Start** — when `/start` returns `ok: false` (port in use, engine not installed, no model, etc.) the frontend was falling through to a 120-second polling loop with no feedback. The error message was silently discarded. Fixed: `startServer()` now checks `ok: false` immediately, sets the error, and stops. Error banner added to Serve page so start/stop errors are always visible.
+- **Cannot adopt apple-fm server after management restart** — after a mgmt server restart, `_try_adopt_server` read the state file's `engine_id` (from the previous session's engine, e.g. `rapid-mlx`) and compared it to the desired engine (`apple-fm`). Since the state file's stored PID (from the old session) didn't match the PID actually holding the port, this was a stale comparison. Fix: the engine mismatch check is now only applied when the state file's stored PID matches the process currently on the port. Stale state files (different PID) are ignored for the engine_id comparison, allowing correct re-adoption.
+
 
 ### Fixed
 - **Find tab shows "No models found" for ALL searches (root cause)** — the v0.8.89 size-resolution change added `expand[0]=safetensors&expand[1]=cardData` to the HuggingFace API URL. Using `expand[]` params causes the HF API to return *only* the explicitly expanded fields plus minimal base fields — it silently drops `tags`, `likes`, `lastModified`, `createdAt`, `config`, and `modelId`. Without `tags`, every model got `is_mlx: false`, and the frontend's "MLX only" filter (`mlxOnlySearch`) hid all 100 results. Fixed by enumerating all 7 required fields in the expand list: `safetensors`, `cardData`, `tags`, `likes`, `lastModified`, `createdAt`, `config`. Also removed the now-redundant `full=true` and `config=true` query params (the expand list supersedes them).

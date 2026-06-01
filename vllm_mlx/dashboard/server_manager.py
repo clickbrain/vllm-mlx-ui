@@ -712,20 +712,8 @@ def _try_adopt_server(port: int, host: str, config: dict[str, Any] | None = None
     if not probe_ok:
         return None  # nothing responded — don't adopt
 
-    # Check for engine mismatch against existing state file (if any)
-    if config is not None:
-        existing_state = _read_server_state()
-        if existing_state:
-            running_engine = existing_state.get("engine_id", "rapid-mlx")
-            desired_engine = config.get("engine_id", "rapid-mlx")
-            if running_engine != desired_engine:
-                logger.warning(
-                    "Cannot adopt server: running engine=%r, desired engine=%r",
-                    running_engine, desired_engine,
-                )
-                return None
-
     # Find PID of the process holding the port via lsof.
+    port_pid: int | None = None
     try:
         import subprocess as _sp
         out = _sp.check_output(
@@ -734,15 +722,41 @@ def _try_adopt_server(port: int, host: str, config: dict[str, Any] | None = None
         ).strip()
         for tok in out.split():
             try:
-                pid = int(tok)
+                candidate = int(tok)
             except ValueError:
                 continue
-            if _is_process_alive(pid):
-                _write_server_state(pid, config or {"host": host, "port": port})
-                return pid
+            if _is_process_alive(candidate):
+                port_pid = candidate
+                break
     except Exception:
         logger.warning("Operation failed", exc_info=True)
-    return None
+
+    if port_pid is None:
+        return None
+
+    # Engine mismatch check — only meaningful when the state file's stored PID
+    # matches the process actually on the port.  A stale state file (PID from a
+    # previous session, already dead) has an engine_id that belongs to that old
+    # run, not to whatever is currently listening on the port.  Trusting it would
+    # falsely block re-adoption of a perfectly valid server.
+    if config is not None:
+        existing_state = _read_server_state()
+        if existing_state:
+            stored_pid = existing_state.get("pid")
+            if stored_pid == port_pid:
+                # The state file describes THIS process — its engine_id is reliable.
+                running_engine = existing_state.get("engine_id", "rapid-mlx")
+                desired_engine = config.get("engine_id", "rapid-mlx")
+                if running_engine != desired_engine:
+                    logger.warning(
+                        "Cannot adopt server: running engine=%r, desired engine=%r",
+                        running_engine, desired_engine,
+                    )
+                    return None
+            # else: stale state file (different PID) — skip engine mismatch check.
+
+    _write_server_state(port_pid, config or {"host": host, "port": port})
+    return port_pid
 
 
 def get_server_url(config: dict[str, Any] | None = None) -> str:
