@@ -1,5 +1,10 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.99 — 2026-07-06
+
+### Fixed
+- **`brew upgrade` fails — `mlx-embeddings 0.1.0` vs `transformers<5.0.0` dependency conflict** — `mlx-embeddings 0.1.0` (released ~July 2026) added a hard `transformers>=5.0.0` requirement, directly conflicting with the `transformers<5.0.0` pin introduced in v0.8.98. pip's resolver raised `ResolutionImpossible` and aborted the install. Fix: pin `mlx-embeddings>=0.0.5,<0.1.0` in both `pyproject.toml` and the Homebrew formula. `mlx-embeddings 0.0.5` requires only `transformers>=4.44.0` (no upper bound) and is fully compatible with the `<5.0.0` guard. Also tightened the `transformers` lower bound to `>=4.44.0` to match.
+
 ## v0.8.98 — 2026-07-06
 
 ### Fixed
