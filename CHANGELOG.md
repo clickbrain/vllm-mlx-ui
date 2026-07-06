@@ -1,5 +1,17 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.8.98 — 2026-07-06
+
+### Fixed
+- **Server fails to start after engine upgrade — `transformers 5.x` incompatibility** — Upgrading an engine (e.g. rapid-mlx) could pull in `transformers>=5.0.0` as a transitive dependency. `transformers 5.x` added a `key.__module__` validation check in `AutoTokenizer.register()` that breaks `mlx-lm`, which passes a string `"NewlineTokenizer"` as the config class (a pattern that worked fine in transformers 4.x). The full error chain: `mlx_lm/tokenizer_utils.py:505 → transformers/auto/auto_factory.py:680 → AttributeError: 'str' object has no attribute '__module__'`. Two fixes applied:
+  1. **Formula**: `transformers>=4.40.0,<5.0.0` is now pinned in the Homebrew venv so fresh installs and `brew upgrade` never land on transformers 5.x.
+  2. **In-app engine upgrade guard** (`update_checker.py`): A dep-compatibility re-pin step runs after all engine upgrades complete, ensuring a mid-upgrade pip install cannot silently override the transformers version to 5.x.
+
+  **Immediate workaround for affected machines** (no reinstall needed):
+  ```bash
+  /opt/homebrew/Cellar/vllm-mlx-ui/0.8.97/libexec/venv/bin/pip install "transformers>=4.40.0,<5.0.0"
+  ```
+
 ## v0.8.97 — 2026-06-01
 
 ### Fixed

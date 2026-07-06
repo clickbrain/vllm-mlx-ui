@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vllm-mlx-ui"
-version = "0.8.97"
+version = "0.8.98"
 description = "vLLM-like inference for Apple Silicon - GPU-accelerated Text, Image, Video & Audio on Mac"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -31,7 +31,9 @@ dependencies = [
     "mlx>=0.29.0",
     "mlx-lm>=0.31.0",  # 0.31+ required for ArraysCache native batching (hybrid models)
     "mlx-vlm>=0.4.3",  # 0.4.3+ required for Gemma 4 support
-    "transformers>=5.0.0",  # mlx-lm 0.30.5+ requires transformers 5.0 (rc3 bug fixed in stable)
+    "transformers>=4.40.0,<5.0.0",  # mlx-lm passes a string to AutoTokenizer.register() which
+    # breaks in transformers 5.x (5.x added key.__module__ check that fails for strings).
+    # Pin until mlx-lm upstream fixes tokenizer_utils.py to pass a class instead of a string.
     "tokenizers>=0.19.0",
     "huggingface-hub>=0.23.0",
     "numpy>=1.24.0",
