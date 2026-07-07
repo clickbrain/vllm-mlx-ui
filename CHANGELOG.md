@@ -1,5 +1,10 @@
 # Changelog — vllm-mlx Dashboard UI
 
+## v0.9.0 — 2026-07-06
+
+### Fixed
+- **`brew upgrade` fails with `ResolutionImpossible` — incorrect `transformers<5.0.0` pin** — The `transformers<5.0.0` constraint introduced in v0.8.98 was based on a misdiagnosis. `mlx-lm>=0.30.0` legitimately requires `transformers>=5.0.0`, and `transformers 5.8.1` from PyPI does **not** contain the `key.__module__` check that caused the original server crash (the Mac Studio had a non-standard transformers build). Removing the incorrect pin allows pip to resolve the dependency graph normally. The `mlx-embeddings<0.1.0` pin from v0.8.99 is retained — `mlx-embeddings 0.1.0` has its own separate conflict. The post-engine-upgrade dep guard in `update_checker.py` is updated to guard `mlx-embeddings<0.1.0` instead of transformers.
+
 ## v0.8.99 — 2026-07-06
 
 ### Fixed

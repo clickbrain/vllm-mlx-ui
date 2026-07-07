@@ -784,14 +784,12 @@ def engine_upgrade_commands() -> list[list[str]]:
         logger.warning("Failed to discover engine upgrades", exc_info=True)
 
     # Dependency compatibility guard — always runs LAST, after all engine upgrades.
-    # Some engines (e.g. rapid-mlx) transitively require transformers and may pull in
-    # transformers 5.x, which breaks mlx-lm's AutoTokenizer.register() call:
-    #   mlx_lm/tokenizer_utils.py passes a string as config_class, but transformers
-    #   5.x added a key.__module__ check that raises AttributeError on strings.
-    # Re-pinning here undoes any accidental upgrade to transformers 5.x.
+    # mlx-embeddings 0.1.0 requires transformers>=5.0.0 which conflicts with
+    # mlx-lm's resolved transformers version on some installs.  Re-pin to <0.1.0
+    # to prevent engine upgrades from pulling in the incompatible version.
     cmds.append([
         sys.executable, "-m", "pip", "install",
-        "transformers>=4.40.0,<5.0.0",
+        "mlx-embeddings>=0.0.5,<0.1.0",
     ])
 
     return cmds
