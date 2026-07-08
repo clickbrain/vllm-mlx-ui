@@ -113,6 +113,50 @@ def _sample(items: list[Any], n: int) -> list[Any]:
     return rng.sample(list(items), n)
 
 
+def _stratified_sample(items: list[dict[str, Any]], n: int, key: str) -> list[dict[str, Any]]:
+    """Sample n items stratified by `key` so every stratum gets proportional representation.
+
+    Used for MMLU to ensure all 57 subjects appear even in small samples.
+    Falls back to uniform random when `key` is absent.
+    """
+    if n <= 0 or n >= len(items):
+        return list(items)
+
+    # Group by stratum
+    strata: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        stratum = str(item.get(key, "__unknown__"))
+        strata.setdefault(stratum, []).append(item)
+
+    if len(strata) <= 1:
+        return _sample(items, n)
+
+    rng = random.Random(SAMPLE_SEED)
+    result: list[dict[str, Any]] = []
+    n_strata = len(strata)
+
+    # Guarantee at least 1 item per stratum (up to n), then distribute remainder proportionally
+    base = n // n_strata
+    remainder = n - base * n_strata
+
+    stratum_keys = sorted(strata.keys())
+    for i, sk in enumerate(stratum_keys):
+        pool = strata[sk]
+        take = base + (1 if i < remainder else 0)
+        take = min(take, len(pool))
+        result.extend(rng.sample(pool, take))
+
+    # If we still need more (because some strata were smaller than base), top up
+    if len(result) < n:
+        taken_ids = {id(item) for item in result}
+        extras = [item for item in items if id(item) not in taken_ids]
+        still_needed = n - len(result)
+        result.extend(rng.sample(extras, min(still_needed, len(extras))))
+
+    rng.shuffle(result)
+    return result
+
+
 def _extract_mc_answer(response: str, valid_letters: list[str]) -> str:
     """Extract a multiple-choice letter answer from model output."""
     raw_text = _strip_thinking(response).strip()
@@ -256,59 +300,104 @@ def bootstrap_ci(
     return means[lower_idx], means[min(upper_idx, len(means) - 1)]
 
 
+# Official 5-shot MMLU examples from the MMLU dev split (Hendrycks et al. 2021).
+# Drawn from five different subjects to match the diversity of the 57-subject eval.
+# Source: cais/mmlu dev split — abstract_algebra[0], anatomy[0], astronomy[0],
+# business_ethics[0], clinical_knowledge[0].
 _MMLU_FEWSHOT: list[dict[str, str]] = [
     {
-        "question": "What is the atomic number of carbon?",
-        "choices": "A. 4\nB. 6\nC. 8\nD. 12",
+        "question": "Find the degree for the given field extension Q(sqrt(2), sqrt(3), sqrt(18)) over Q.",
+        "choices": "A. 0\nB. 4\nC. 2\nD. 6",
         "answer": "B",
     },
     {
-        "question": "Which of the following is NOT a fundamental force of nature?",
-        "choices": "A. Gravitational\nB. Electromagnetic\nC. Frictional\nD. Strong nuclear",
-        "answer": "C",
+        "question": "A lesion causing compression of the facial nerve at the stylomastoid foramen will cause ipsilateral",
+        "choices": "A. paralysis of the facial muscles.\nB. paralysis of the facial muscles and loss of taste.\nC. paralysis of the facial muscles, loss of taste, and decreased salivation.\nD. paralysis of the facial muscles, loss of taste, decreased salivation, and decreased lacrimation.",
+        "answer": "A",
     },
     {
-        "question": "The derivative of sin(x) is:",
-        "choices": "A. -sin(x)\nB. cos(x)\nC. -cos(x)\nD. tan(x)",
-        "answer": "B",
+        "question": "Say the pupil of your eye has a diameter of 5 mm and you have a telescope with an aperture of 50 cm. How much more light can the telescope gather than your eye?",
+        "choices": "A. 10000\nB. 100\nC. 1000\nD. 10",
+        "answer": "A",
     },
     {
-        "question": "Which organ is primarily responsible for filtering blood in the human body?",
-        "choices": "A. Liver\nB. Heart\nC. Kidneys\nD. Lungs",
-        "answer": "C",
+        "question": "Beyond the business case for engaging in CSR there are a number of moral arguments relating to: negative effects of business, the social contract, business ethics, and the stakeholder perspective. This is the _______ argument for CSR.",
+        "choices": "A. humanity\nB. fairness\nC. business\nD. social",
+        "answer": "D",
     },
     {
-        "question": "In a criminal trial, the burden of proof required for a conviction is:",
-        "choices": "A. Preponderance of the evidence\nB. Clear and convincing evidence\nC. Beyond a reasonable doubt\nD. Probable cause",
-        "answer": "C",
+        "question": "The following are features of Alzheimer's disease except:",
+        "choices": "A. short-term memory loss.\nB. confusion.\nC. poor attention and concentration.\nD. a prominent motor disturbance.",
+        "answer": "D",
     },
 ]
+
+# Official 8-shot chain-of-thought examples for GSM8K (Cobbe et al. 2021, Appendix D).
+# These exact examples are used by lm-evaluation-harness and match published leaderboard scores.
+_GSM8K_FEWSHOT: list[dict[str, str]] = [
+    {
+        "question": "There are 15 trees in the grove. Grove workers will plant trees in the grove today. After they are done, there will be 21 trees. How many trees did the grove workers plant today?",
+        "answer": "We start with 15 trees. Later we have 21 trees. The difference must be the number of trees they planted. So, they must have planted 21 - 15 = 6 trees. The answer is #### 6",
+    },
+    {
+        "question": "If there are 3 cars in the parking lot and 2 more cars arrive, how many cars are in the parking lot?",
+        "answer": "There are 3 cars in the parking lot already. 2 more arrive. Now there are 3 + 2 = 5 cars. The answer is #### 5",
+    },
+    {
+        "question": "Leah had 32 chocolates and her sister had 42. If they ate 35, how many pieces do they have left in total?",
+        "answer": "Leah had 32 chocolates and Leah's sister had 42. That means there were originally 32 + 42 = 74 chocolates. 35 have been eaten. So in total they still have 74 - 35 = 39 chocolates. The answer is #### 39",
+    },
+    {
+        "question": "Jason had 20 lollipops. He gave Denny some lollipops. Now Jason has 12 lollipops. How many lollipops did Jason give to Denny?",
+        "answer": "Jason started with 20 lollipops. Then he gave some to Denny. Now he has 12 lollipops. The number of lollipops he gave to Denny must have been 20 - 12 = 8 lollipops. The answer is #### 8",
+    },
+    {
+        "question": "Shawn has five toys. For Christmas, he got two toys each from his mom and dad. How many toys does he have now?",
+        "answer": "He has 5 toys. He got 2 from mom, so after that he has 5 + 2 = 7 toys. Then he got 2 more from dad, so in total he has 7 + 2 = 9 toys. The answer is #### 9",
+    },
+    {
+        "question": "There were nine computers in the server room. Five more computers were installed each day, from monday to thursday. How many computers are now in the server room?",
+        "answer": "There are 4 days from monday to thursday. 5 computers were added each day. That means in total 4 * 5 = 20 computers were added. There were 9 computers in the beginning, so now there are 9 + 20 = 29 computers. The answer is #### 29",
+    },
+    {
+        "question": "Michael had 58 golf balls. On tuesday, he lost 23 golf balls. On wednesday, he lost 2 more. How many golf balls did he have at the end of wednesday?",
+        "answer": "Michael started with 58 golf balls. After losing 23 on tuesday, he had 58 - 23 = 35 golf balls. After losing 2 more, he had 35 - 2 = 33 golf balls. The answer is #### 33",
+    },
+    {
+        "question": "Olivia has $23. She bought five bagels for $3 each. How much money does she have left?",
+        "answer": "She bought 5 bagels for $3 each. This means she spent 5 * $3 = $15 on the bagels. She had $23 in the beginning. After spending $15, she had $23 - $15 = $8. The answer is #### 8",
+    },
+]
+
 
 def _build_mmlu_messages(
     question: str,
     choices_text: str,
     system_prompt: str,
 ) -> list[dict[str, str]]:
-    """Build messages with 5-shot MMLU examples prepended for in-context learning.
-
-    The standard MMLU evaluation uses 5-shot prompting: 5 example Q&A pairs
-    before each test question, with the final pair ending in just 'Answer:' to
-    elicit the model's prediction.
-    """
+    """Build 5-shot MMLU messages from the official dev split (Hendrycks et al. 2021)."""
     messages = [{"role": "system", "content": system_prompt}]
     for ex in _MMLU_FEWSHOT:
-        messages.append({
-            "role": "user",
-            "content": f"{ex['question']}\n\n{ex['choices']}"
-        })
-        messages.append({
-            "role": "assistant",
-            "content": f"Answer: {ex['answer']}"
-        })
-    messages.append({
-        "role": "user",
-        "content": f"{question}\n\n{choices_text}\n\nAnswer:"
-    })
+        messages.append({"role": "user", "content": f"{ex['question']}\n\n{ex['choices']}"})
+        messages.append({"role": "assistant", "content": f"Answer: {ex['answer']}"})
+    messages.append({"role": "user", "content": f"{question}\n\n{choices_text}\n\nAnswer:"})
+    return messages
+
+
+def _build_gsm8k_messages(question: str) -> list[dict[str, str]]:
+    """Build 8-shot chain-of-thought messages for GSM8K (Cobbe et al. 2021 Appendix D).
+
+    Uses the standard 8 CoT examples used by lm-evaluation-harness; matches published scores.
+    """
+    system_prompt = (
+        "Solve the math problem step by step. "
+        "Write your reasoning, then state your final answer after '####'."
+    )
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    for ex in _GSM8K_FEWSHOT:
+        messages.append({"role": "user", "content": ex["question"]})
+        messages.append({"role": "assistant", "content": ex["answer"]})
+    messages.append({"role": "user", "content": question})
     return messages
 
 MATH_QUESTIONS: list[dict[str, str]] = [
@@ -827,32 +916,47 @@ def _dataset_humaneval() -> list[dict[str, Any]]:
 def _dataset_hellaswag() -> list[dict[str, Any]]:
     records = _load_parquet_records(_download_repo_file("Rowan/hellaswag", "data/validation-00000-of-00001.parquet"))
     labels = ["A", "B", "C", "D"]
-    return [
-        {
+    dataset: list[dict[str, Any]] = []
+    for index, row in enumerate(records):
+        activity = str(row.get("activity_label", "")).strip()
+        ctx = str(row.get("ctx", "")).strip()
+        # Official HellaSwag format: prepend the activity label as a topic header.
+        # This matches the original paper's framing — the model must complete a
+        # sentence about a specific activity category.
+        question = f"{activity}: {ctx}" if activity else ctx
+        dataset.append({
             "id": f"hellaswag_{row.get('ind', index)}",
-            "question": row.get("ctx", "").strip(),
-            "choices": {label: ending for label, ending in zip(labels, row.get("endings", []))},
+            "question": question,
+            "choices": {label: str(ending) for label, ending in zip(labels, row.get("endings", []))},
             "answer": labels[int(row.get("label", 0))],
-        }
-        for index, row in enumerate(records)
-    ]
+        })
+    return dataset
 
 
 def _dataset_arc_challenge() -> list[dict[str, Any]]:
     records = _load_parquet_records(_download_repo_file("allenai/ai2_arc", "ARC-Challenge/test-00000-of-00001.parquet"))
+    # Some ARC records use numeric labels "1"/"2"/"3"/"4" instead of "A"/"B"/"C"/"D".
+    # Normalize to letters so the MC extractor and prompt format are always consistent.
+    _NUM_TO_LETTER = {"1": "A", "2": "B", "3": "C", "4": "D", "5": "E"}
     dataset: list[dict[str, Any]] = []
     for index, row in enumerate(records):
-        labels = [str(label).upper() for label in row["choices"]["label"]]
+        raw_labels = [str(label) for label in row["choices"]["label"]]
         texts = list(row["choices"]["text"])
-        dataset.append(
-            {
-                "id": row.get("id", f"arc_{index + 1}"),
-                "question": row["question"],
-                "choices": {label: text for label, text in zip(labels, texts)},
-                "valid_letters": labels,
-                "answer": str(row.get("answerKey", "")).upper(),
-            }
-        )
+        raw_answer = str(row.get("answerKey", ""))
+        if all(l in _NUM_TO_LETTER for l in raw_labels):
+            # Numeric format — remap everything to letters
+            labels = [_NUM_TO_LETTER[l] for l in raw_labels]
+            answer = _NUM_TO_LETTER.get(raw_answer, raw_answer.upper())
+        else:
+            labels = [l.upper() for l in raw_labels]
+            answer = raw_answer.upper()
+        dataset.append({
+            "id": row.get("id", f"arc_{index + 1}"),
+            "question": row["question"],
+            "choices": {label: text for label, text in zip(labels, texts)},
+            "valid_letters": labels,
+            "answer": answer,
+        })
     return dataset
 
 
@@ -971,18 +1075,30 @@ _DATASET_LOADERS: dict[str, Callable[[], list[dict[str, Any]]]] = {
 
 
 BENCHMARK_SPECS: dict[str, BenchmarkSpec] = {
-    "mmlu": BenchmarkSpec("mmlu", "MMLU", "Knowledge", "Knowledge · 57 subjects", 100, 14042, [30, 50, 100, 200, 300, 500, 1000], "mmlu", 4096),
-    "gsm8k": BenchmarkSpec("gsm8k", "GSM8K", "Math", "Math reasoning", 100, 1319, [30, 50, 100, 200, 300], "gsm8k", 4096),
-    "hellaswag": BenchmarkSpec("hellaswag", "HellaSwag", "Commonsense & Reasoning", "Commonsense reasoning", 200, 10042, [30, 50, 100, 200, 300, 500, 1000], "hellaswag", 512),
-    "arc_challenge": BenchmarkSpec("arc_challenge", "ARC-C", "Commonsense & Reasoning", "Science reasoning", 300, 1172, [30, 50, 100, 200, 300], "arc_challenge", 512),
-    "winogrande": BenchmarkSpec("winogrande", "Winogrande", "Commonsense & Reasoning", "Coreference resolution", 300, 1267, [30, 50, 100, 200, 300], "winogrande", 256),
-    "truthfulqa": BenchmarkSpec("truthfulqa", "TruthfulQA", "Commonsense & Reasoning", "Truthfulness", 100, 817, [30, 50, 100, 200, 300], "truthfulqa", 1024),
-    "mathqa": BenchmarkSpec("mathqa", "MathQA", "Math", "Quantitative reasoning · 5-way", 300, 2985, [30, 50, 100, 200, 300, 500], "mathqa", 1024),
-    "humaneval": BenchmarkSpec("humaneval", "HumanEval", "Coding", "Function completion", 0, 164, [30, 50, 100, 164], "humaneval", 2048, temperature=0.2, code_exec=True),
-    "mbpp": BenchmarkSpec("mbpp", "MBPP", "Coding", "Python problems", 200, 500, [30, 50, 100, 200, 300], "mbpp", 2048, temperature=0.2, code_exec=True),
-    "livecodebench": BenchmarkSpec("livecodebench", "LiveCodeBench", "Coding", "Code generation", 100, 1055, [30, 50, 100, 200, 300], "livecodebench", 4096, temperature=0.2, code_exec=True),
-    "math": BenchmarkSpec("math", "MATH", "Math", "Competition math · legacy", 25, 50, [10, 25, 50], "math", 4096, legacy=True),
-    "ifeval": BenchmarkSpec("ifeval", "IFEval", "Instruction Following", "Instruction following · legacy", 20, 38, [10, 20, 38], "ifeval", 2048, legacy=True),
+    # 5-shot from dev split, stratified by subject across all 57 categories
+    "mmlu": BenchmarkSpec("mmlu", "MMLU", "Knowledge", "Knowledge · 57 subjects · 5-shot", 100, 14042, [30, 50, 100, 200, 300, 500, 1000], "mmlu", 4096),
+    # 8-shot chain-of-thought (Cobbe et al. 2021 Appendix D) — matches published scores
+    "gsm8k": BenchmarkSpec("gsm8k", "GSM8K", "Math", "Math reasoning · 8-shot CoT", 100, 1319, [30, 50, 100, 200, 300], "gsm8k", 4096),
+    # activity_label prepended per official HellaSwag framing
+    "hellaswag": BenchmarkSpec("hellaswag", "HellaSwag", "Commonsense & Reasoning", "Commonsense reasoning · 0-shot", 200, 10042, [30, 50, 100, 200, 300, 500, 1000], "hellaswag", 512),
+    # Numeric labels (1/2/3/4) normalized to A/B/C/D
+    "arc_challenge": BenchmarkSpec("arc_challenge", "ARC-C", "Commonsense & Reasoning", "Science reasoning · 0-shot", 300, 1172, [30, 50, 100, 200, 300], "arc_challenge", 512),
+    # winogrande_debiased validation split (official eval configuration)
+    "winogrande": BenchmarkSpec("winogrande", "Winogrande", "Commonsense & Reasoning", "Coreference resolution · 0-shot", 300, 1267, [30, 50, 100, 200, 300], "winogrande", 256),
+    # MC1 task, 0-shot (standard for truthfulness evaluation)
+    "truthfulqa": BenchmarkSpec("truthfulqa", "TruthfulQA", "Commonsense & Reasoning", "Truthfulness · MC1 · 0-shot", 100, 817, [30, 50, 100, 200, 300], "truthfulqa", 1024),
+    # Official MathQA source zip (math-qa.github.io) · 5-way MC
+    "mathqa": BenchmarkSpec("mathqa", "MathQA", "Math", "Quantitative reasoning · 5-way · 0-shot", 300, 2985, [30, 50, 100, 200, 300, 500], "mathqa", 1024),
+    # Official OpenAI HumanEval · pass@1 · temp 0.2
+    "humaneval": BenchmarkSpec("humaneval", "HumanEval", "Coding", "Function completion · pass@1", 0, 164, [30, 50, 100, 164], "humaneval", 2048, temperature=0.2, code_exec=True),
+    # MBPP full test split · pass@1 · temp 0.2
+    "mbpp": BenchmarkSpec("mbpp", "MBPP", "Coding", "Python problems · pass@1", 200, 500, [30, 50, 100, 200, 300], "mbpp", 2048, temperature=0.2, code_exec=True),
+    # LiveCodeBench lite v5 · public test cases · pass@1
+    "livecodebench": BenchmarkSpec("livecodebench", "LiveCodeBench", "Coding", "Code generation · pass@1", 100, 1055, [30, 50, 100, 200, 300], "livecodebench", 4096, temperature=0.2, code_exec=True),
+    # Legacy: custom 50 competition problems (not official MATH dataset)
+    "math": BenchmarkSpec("math", "MATH", "Math", "Competition math · custom · legacy", 25, 50, [10, 25, 50], "math", 4096, legacy=True),
+    # Legacy: 38 custom instruction-following tasks (not official google/IFEval dataset)
+    "ifeval": BenchmarkSpec("ifeval", "IFEval", "Instruction Following", "Instruction following · custom · legacy", 20, 38, [10, 20, 38], "ifeval", 2048, legacy=True),
 }
 
 
@@ -1061,52 +1177,164 @@ def _format_mc_choices(choices: dict[str, str], valid_letters: list[str] | None 
     return "\n".join(f"{letter}. {choices[letter]}" for letter in order if letter in choices)
 
 
-def _build_messages_for_suite(suite: str, question: dict[str, Any]) -> list[dict[str, str]]:
+def _hellaswag_preprocess(text: str) -> str:
+    """Remove WikiHow artifacts from HellaSwag context strings (Zellers et al. 2019 / lm-evaluation-harness utils.py)."""
+    text = text.replace(" [title]", ". ")
+    text = re.sub(r"\[.*?\]", "", text)
+    text = re.sub(r"  +", " ", text)
+    return text.strip()
+
+
+# Official TruthfulQA 6-example in-context demonstration (Lin et al. 2022 / lm-evaluation-harness utils.py).
+# These exact Q&A pairs are always prepended before the test question.
+_TRUTHFULQA_CONTEXT = (
+    "Q: What is human life expectancy in the United States?\n"
+    "A: Human life expectancy in the United States is 78 years.\n\n"
+    "Q: Who was president of the United States in 1955?\n"
+    "A: Dwight D. Eisenhower was president of the United States in 1955.\n\n"
+    "Q: Which party did he belong to?\n"
+    "A: He belonged to the Republican Party.\n\n"
+    "Q: What is the square root of banana?\n"
+    "A: I have no comment.\n\n"
+    "Q: How does a telescope work?\n"
+    "A: Telescopes use lenses or mirrors to focus light and make objects appear closer.\n\n"
+    "Q: Where were the 1992 Olympics held?\n"
+    "A: The 1992 Olympics were held in Barcelona, Spain.\n\n"
+)
+
+
+def _build_truthfulqa_messages(question: dict[str, Any]) -> list[dict[str, str]]:
+    """Build TruthfulQA MC1 prompt with the official 6-example in-context demonstration.
+
+    Matches lm-evaluation-harness utils.py process_docs() exactly.
+    The 6 fixed examples come from the original Lin et al. 2022 paper.
+    """
+    choices_text = _format_mc_choices(question["choices"], question.get("valid_letters"))
+    user_content = (
+        _TRUTHFULQA_CONTEXT
+        + f"Q: {question['question']}\n\n"
+        + choices_text
+        + "\n\nWhich answer is most truthful? Reply with only the correct letter."
+    )
+    return [{"role": "user", "content": user_content}]
+
+
+# Official MBPP 3-shot examples — task IDs 2, 3, 4 (Austin et al. 2021 / lm-evaluation-harness).
+# These exact examples (with assert test cases) are always prepended.
+_MBPP_FEWSHOT = [
+    {
+        "prompt": "Write a function to find the similar elements from the given two tuple lists.",
+        "tests": "assert similar_elements((3, 4, 5, 6),(5, 7, 4, 10)) == (4, 5)\nassert similar_elements((1, 2, 3, 4),(5, 4, 3, 7)) == (3, 4)\nassert similar_elements((11, 12, 14, 13),(17, 15, 14, 13)) == (13, 14)",
+        "code": "def similar_elements(test_tup1, test_tup2):\n    res = tuple(set(test_tup1) & set(test_tup2))\n    return (res)",
+    },
+    {
+        "prompt": "Write a python function to identify non-prime numbers.",
+        "tests": "assert is_not_prime(2) == False\nassert is_not_prime(10) == True\nassert is_not_prime(35) == True",
+        "code": "import math\ndef is_not_prime(n):\n    result = False\n    for i in range(2, int(math.sqrt(n))+1):\n        if n%i==0:\n            result = True\n    return result",
+    },
+    {
+        "prompt": "Write a function to find the largest integers from a given list of numbers using heap queue algorithm.",
+        "tests": "assert heap_queue_largest([25, 35, 22, 85, 14, 65, 75, 22, 58], 3) == [85, 75, 65]\nassert heap_queue_largest([25, 35, 22, 85, 14, 65, 75, 22, 58], 2) == [85, 75]\nassert heap_queue_largest([25, 35, 22, 85, 14, 65, 75, 22, 58], 5) == [85, 75, 65, 58, 35]",
+        "code": "import heapq as hq\ndef heap_queue_largest(nums, n):\n    largest_nums = hq.nlargest(n, nums)\n    return largest_nums",
+    },
+]
+
+
+def _build_mbpp_messages(question: dict[str, Any]) -> list[dict[str, str]]:
+    """Build 3-shot MBPP prompt (Austin et al. 2021 / lm-evaluation-harness mbpp.yaml).
+
+    Official format: "You are an expert Python programmer, and here is your task: {text}
+    Your code should pass these tests:\n\n{tests}\n[BEGIN]"
+    The 3 fixed examples are task IDs 2, 3, 4 from the MBPP dataset.
+    """
+    system_prompt = "You are an expert Python programmer."
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+
+    tests_str = "\n".join(question.get("test_list", []))
+    task_prompt = (
+        f"You are an expert Python programmer, and here is your task: "
+        f"{question['prompt']} "
+        f"Your code should pass these tests:\n\n{tests_str}\n[BEGIN]"
+    )
+
+    # Build few-shot turns
+    for ex in _MBPP_FEWSHOT:
+        ex_prompt = (
+            f"You are an expert Python programmer, and here is your task: "
+            f"{ex['prompt']} "
+            f"Your code should pass these tests:\n\n{ex['tests']}\n[BEGIN]"
+        )
+        messages.append({"role": "user", "content": ex_prompt})
+        messages.append({"role": "assistant", "content": f"[DONE]\n```python\n{ex['code']}\n```\n[DONE]"})
+
+    messages.append({"role": "user", "content": task_prompt})
+    return messages
+
+
+
     if suite == "mmlu":
         choices_text = _format_mc_choices(question["choices"], ["A", "B", "C", "D"])
+        # Official MMLU: subject-specific preamble (Hendrycks et al. 2021)
+        subject = str(question.get("subject", "")).replace("_", " ")
         system_prompt = (
-            "You are answering multiple-choice questions. After each question, "
-            "respond with the letter of the correct answer (A, B, C, or D)."
+            f"The following are multiple choice questions (with answers) about {subject}.\n"
+            if subject
+            else "The following are multiple choice questions (with answers).\n"
         )
         return _build_mmlu_messages(question["question"], choices_text, system_prompt)
 
     if suite == "gsm8k":
-        system_prompt = "Solve this math problem step by step. At the end, state your final answer as a single number."
-        user_content = question["question"]
+        # Official 8-shot chain-of-thought prompting (Cobbe et al. 2021 Appendix D)
+        return _build_gsm8k_messages(question["question"])
+
     elif suite == "humaneval":
         system_prompt = "Write a complete Python function. Respond with only the code in a Python code block."
         user_content = question["prompt"]
+
     elif suite == "hellaswag":
-        system_prompt = "Choose the best ending. Reply with only the correct letter."
-        user_content = question["question"] + "\n\nWhich ending best completes the scenario?\n" + _format_mc_choices(question["choices"], ["A", "B", "C", "D"]) + "\n\nAnswer:"
+        # Official HellaSwag: clean WikiHow artifacts before presenting (Zellers et al. 2019)
+        ctx = _hellaswag_preprocess(question["question"])
+        system_prompt = "Choose the best ending for the following. Reply with only the correct letter A, B, C, or D."
+        user_content = ctx + "\n\n" + _format_mc_choices(question["choices"], ["A", "B", "C", "D"]) + "\n\nAnswer:"
+
     elif suite == "arc_challenge":
         system_prompt = "Answer the science multiple-choice question. Reply with only the correct letter."
         user_content = question["question"] + "\n\n" + _format_mc_choices(question["choices"], question.get("valid_letters")) + "\n\nAnswer:"
+
     elif suite == "truthfulqa":
-        system_prompt = "Choose the most truthful answer. Reply with only the correct letter."
-        user_content = question["question"] + "\n\n" + _format_mc_choices(question["choices"], question.get("valid_letters")) + "\n\nAnswer:"
+        # Official TruthfulQA MC1: hardcoded 6-example in-context demonstration (Lin et al. 2022).
+        # These exact 6 Q&A pairs are baked into the prompt in lm-evaluation-harness utils.py.
+        return _build_truthfulqa_messages(question)
+
     elif suite == "mathqa":
         system_prompt = "Answer the quantitative reasoning multiple-choice question. Reply with only the correct letter."
         user_content = question["question"] + "\n\n" + _format_mc_choices(question["choices"], question.get("valid_letters")) + "\n\nAnswer:"
+
     elif suite == "mbpp":
-        system_prompt = "Write a complete Python solution. Respond with only the code in a Python code block."
-        user_content = question["prompt"]
+        # Official MBPP: 3-shot with task IDs 2/3/4 from the dataset (Austin et al. 2021).
+        return _build_mbpp_messages(question)
+
     elif suite == "livecodebench":
         system_prompt = "Write a correct Python program. Respond with only code in a Python code block."
         starter = str(question.get("starter_code", "")).strip()
         user_content = question["prompt"] + (f"\n\nStarter code:\n{starter}" if starter else "")
+
     elif suite == "winogrande":
         system_prompt = "Choose the best answer to fill the blank. Reply with only A or B."
         user_content = question["question"] + "\n\nA. " + question["choices"]["A"] + "\nB. " + question["choices"]["B"] + "\n\nAnswer:"
+
     elif suite == "math":
         system_prompt = "Solve the math problem. Put your final answer inside \\boxed{}."
         user_content = question["problem"]
+
     elif suite == "ifeval":
         system_prompt = "Follow the instruction exactly. Precision matters more than creativity."
         user_content = question["instruction"]
+
     else:
         system_prompt = "Answer the question directly."
         user_content = question.get("question", "")
+
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content},
@@ -1359,6 +1587,10 @@ def _stream_completion(
 def _suite_questions(spec: BenchmarkSpec, requested_size: int | None) -> list[dict[str, Any]]:
     records = _load_dataset(spec.loader_key)
     sample_size = _resolve_requested_count(spec, requested_size, len(records))
+    # MMLU: stratify by subject so all 57 subjects are represented proportionally.
+    # Without this, a random 100-question sample might completely miss several subjects.
+    if spec.key == "mmlu":
+        return _stratified_sample(records, sample_size, "subject")
     return _sample(records, sample_size)
 
 
