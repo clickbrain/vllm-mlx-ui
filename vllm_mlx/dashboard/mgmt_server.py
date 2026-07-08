@@ -2856,10 +2856,68 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
     server switches models sequentially, restoring the original model when done.
     """
     import uuid
-    suites = req.get("suites", ["gsm8k"])
-    num_questions = int(req.get("num_questions", 20))
-    label = req.get("label", "")
-    model_ids: list[str] = req.get("model_ids", [])
+
+    def _parse_int(value: Any, default: int) -> int:
+        if value is None or value == "":
+            return default
+        return int(value)
+
+    def _parse_bool(value: Any, default: bool = False) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"1", "true", "yes", "on"}:
+                return True
+            if lowered in {"0", "false", "no", "off"}:
+                return False
+            raise ValueError(f"Invalid boolean value: {value}")
+        if isinstance(value, (int, float)):
+            return bool(value)
+        raise ValueError(f"Invalid boolean value: {value}")
+
+    try:
+        benchmarks_req = req.get("benchmarks")
+        suites_req = req.get("suites", ["gsm8k"])
+        num_questions = _parse_int(req.get("num_questions", 20), 20)
+        valid_benchmarks = {entry["key"]: entry for group in qr.BENCHMARK_CATALOG for entry in group["benchmarks"]}
+        if isinstance(benchmarks_req, dict):
+            if not benchmarks_req:
+                raise ValueError("At least one benchmark must be selected")
+            suites: dict[str, int] | list[str] = {
+                str(name): _parse_int(size, 0) for name, size in benchmarks_req.items()
+            }
+        else:
+            suites = [str(suite) for suite in suites_req]
+            if not suites:
+                raise ValueError("At least one benchmark must be selected")
+
+        label = req.get("label", "")
+        model_ids: list[str] = req.get("model_ids", [])
+        engine_id = str(req.get("engine_id", "")).strip() or None
+        batch_size = _parse_int(req.get("batch_size", 1), 1)
+        enable_thinking = _parse_bool(req.get("enable_thinking", False), False)
+        if batch_size not in {1, 2, 4, 8, 16, 32}:
+            raise ValueError("batch_size must be one of 1, 2, 4, 8, 16, or 32")
+        requested_suite_names = list(suites.keys()) if isinstance(suites, dict) else suites
+        unknown_suites = [suite for suite in requested_suite_names if suite not in valid_benchmarks]
+        if unknown_suites:
+            raise ValueError(f"Unknown benchmarks: {', '.join(sorted(unknown_suites))}")
+        if isinstance(suites, dict):
+            for suite_name, sample_size in suites.items():
+                if sample_size <= 0:
+                    continue
+                allowed_sizes = set(valid_benchmarks[suite_name]["sizes"])
+                full_size = int(valid_benchmarks[suite_name]["full_size"])
+                if sample_size not in allowed_sizes and sample_size != full_size:
+                    raise ValueError(
+                        f"Invalid sample size {sample_size} for {suite_name}; "
+                        f"allowed sizes: {sorted(allowed_sizes | {full_size})}"
+                    )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     run_id = str(uuid.uuid4())[:8]
     stop_event = threading.Event()
@@ -2912,6 +2970,7 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
 
                 cfg = sm.load_config()
                 current_model = cfg.get("model", "")
+                current_engine = cfg.get("engine_id")
                 port = int(cfg.get("port", 8000))
                 host_addr = cfg.get("host", "127.0.0.1")
                 if host_addr == "0.0.0.0":
@@ -2923,18 +2982,29 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
 
                 needs_start = not _server_ready(host_addr, port)
                 needs_switch = bool(target_model and target_model != current_model)
+                needs_engine_switch = bool(engine_id and engine_id != current_engine)
+                run_cfg = dict(cfg)
+                if engine_id:
+                    run_cfg["engine_id"] = engine_id
 
-                if needs_switch or needs_start:
+                if needs_switch or needs_start or needs_engine_switch:
                     if needs_switch:
                         _cb(f"\n── Switching to {target_model} ──\n")
-                        cfg["model"] = target_model
-                        sm.save_config(cfg)
+                        saved_cfg = dict(cfg)
+                        saved_cfg["model"] = target_model
+                        sm.save_config(saved_cfg)
+                        cfg = saved_cfg
+                        run_cfg = dict(saved_cfg)
+                        if engine_id:
+                            run_cfg["engine_id"] = engine_id
+                    elif needs_engine_switch:
+                        _cb(f"\n── Starting quality run with engine {engine_id} ──\n")
                     elif needs_start:
                         _cb(f"\n── Starting server for {target_model or current_model} ──\n")
 
-                    if needs_start or needs_switch:
+                    if needs_start or needs_switch or needs_engine_switch:
                         stop_ok, stop_msg = sm.stop_server()
-                        ok, msg = sm.start_server(cfg)
+                        ok, msg = sm.start_server(run_cfg)
                         if not ok:
                             if not stop_ok:
                                 _cb(f"[⚠ stop_server: {stop_msg}]\n")
@@ -2958,24 +3028,36 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
                     suites=suites,
                     server_url=server_url,
                     num_questions=num_questions,
+                    batch_size=batch_size,
+                    enable_thinking=enable_thinking,
                     output_callback=_cb,
                     stop_event=stop_event,
                 )
                 all_results.append(results)
                 overall_speed = results.get("overall_speed", {})
-                br.save_result({
-                    "model": results.get("model", target_model),
-                    "model_id": results.get("model", target_model),
-                    "timestamp": results.get("timestamp", ""),
-                    "benchmark_type": "quality",
-                    "suites": results.get("suites", {}),
-                    "overall_score": results.get("overall_score", 0.0),
-                    "overall_speed": overall_speed,
-                    "avg_tps": overall_speed.get("avg_tokens_per_sec"),
-                    "avg_ttft_ms": overall_speed.get("avg_ttft_ms"),
-                    "success": True,
-                    "label": label,
-                })
+                quality_success = any(
+                    isinstance(suite_data, dict) and int(suite_data.get("total", 0)) > 0
+                    for suite_data in results.get("suites", {}).values()
+                )
+                if stop_event.is_set():
+                    _cb("[ℹ benchmark stopped before completion; partial results were not saved]\n")
+                else:
+                    br.save_result({
+                        "model": results.get("model", target_model),
+                        "model_id": results.get("model", target_model),
+                        "timestamp": results.get("timestamp", ""),
+                        "benchmark_type": "quality",
+                        "suites": results.get("suites", {}),
+                        "overall_score": results.get("overall_score", 0.0),
+                        "overall_speed": overall_speed,
+                        "avg_tps": overall_speed.get("avg_tokens_per_sec"),
+                        "avg_ttft_ms": overall_speed.get("avg_ttft_ms"),
+                        "success": quality_success,
+                        "label": label,
+                        "enable_thinking": enable_thinking,
+                        "batch_size": results.get("batch_size", batch_size),
+                        "engine_id": engine_id or current_engine,
+                    })
 
         except Exception as exc:
             _quality_runs[run_id]["error"] = str(exc)
@@ -2995,6 +3077,12 @@ def run_quality_benchmark_endpoint(req: dict[str, Any], _: None = Depends(_check
 
     threading.Thread(target=_run, daemon=True).start()
     return {"ok": True, "run_id": run_id}
+
+
+@app.get("/quality-benchmark/catalog")
+def quality_benchmark_catalog(_: None = Depends(_check_auth)) -> dict[str, Any]:
+    """Return the benchmark catalog used by the quality benchmark UI."""
+    return {"catalog": qr.BENCHMARK_CATALOG}
 
 
 @app.get("/quality-benchmark/output/{run_id}")
@@ -3021,10 +3109,8 @@ def stop_quality_benchmark(run_id: str, _: None = Depends(_check_auth)) -> dict:
         if run_id not in _quality_runs:
             raise HTTPException(status_code=404, detail="Unknown run_id")
         stop_event = _quality_runs[run_id].get("stop_event")
-        run_flag_ref = _quality_runs[run_id]
     if stop_event:
         stop_event.set()
-    run_flag_ref["running"] = False
     return {"ok": True}
 
 

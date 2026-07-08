@@ -105,6 +105,7 @@ onMounted(() => {
   modelsStore.fetchModels()
   loadPerfSettings()
   loadBenchEngines()
+  loadQualityCatalog()
   // Reconnect poll if benchmark was running when this component was last unmounted
   // (e.g. KeepAlive evicted the instance but the backend job is still going)
   if (benchRunning.value && qualityRunId.value && !_qualityPollTimer) {
@@ -117,6 +118,7 @@ onActivated(() => {
   _startLivePolling()
   modelsStore.fetchBenchmarkResults()
   loadBenchEngines()
+  if (qualityCatalog.value.length === 0 && !qualityCatalogLoading.value) loadQualityCatalog()
   // Auto-switch to Run Tests tab so the user sees a running benchmark
   if (benchRunning.value) {
     activeTab.value = 'Run Tests'
@@ -263,13 +265,30 @@ const cacheEntries = computed(() => {
 })
 
 // ── BENCHMARK TAB — unified Speed + Quality ────────────────────────────────
-const QUALITY_SUITES = [
-  { id: 'gsm8k',     label: 'GSM8K',     description: 'Math word problems' },
-  { id: 'mmlu',      label: 'MMLU',      description: 'Multi-subject knowledge' },
-  { id: 'humaneval', label: 'HumanEval', description: 'Python coding tasks' },
-  { id: 'math',      label: 'MATH',      description: 'Competition math' },
-  { id: 'ifeval',    label: 'IFEval',    description: 'Instruction-following' },
-]
+interface QualityBenchmarkEntry {
+  key: string
+  label: string
+  description: string
+  default_n: number
+  full_size: number
+  sizes: number[]
+  code_exec?: boolean
+  legacy?: boolean
+}
+
+interface QualityBenchmarkCategory {
+  category: string
+  benchmarks: QualityBenchmarkEntry[]
+}
+
+const qualityCatalog = ref<QualityBenchmarkCategory[]>([])
+const qualityCatalogLoading = ref(false)
+const qualityCatalogError = ref('')
+const selectedBenchmarks = ref<Record<string, boolean>>({})
+const benchmarkSizes = ref<Record<string, number>>({})
+const thinkingMode = ref(false)
+const batchSize = ref<1 | 2 | 4 | 8 | 16 | 32>(1)
+const BATCH_SIZE_OPTIONS = [1, 2, 4, 8, 16, 32] as const
 
 // Mode: combined runs quality questions with streaming → captures both accuracy + speed
 type BenchMode = 'combined' | 'speed' | 'quality' | 'custom'
@@ -281,12 +300,9 @@ const BENCH_MODES = [
   { id: 'custom'   as BenchMode, label: 'Custom Prompts',  description: 'Your own prompts — TTFT, tok/s, total time per prompt' },
 ]
 
-// Quality suite selection (shown when mode !== 'speed')
-const benchSuites       = ref<string[]>(['gsm8k', 'mmlu', 'humaneval'])
 // Speed-only options (shown when mode === 'speed')
 const benchMaxTokens    = ref(256)
 const benchRuns         = ref(3)
-const benchNumQuestions = ref(20)
 // Custom prompt options
 const customMaxTokens   = ref(2048)
 const customEnableThinking = ref(false)
@@ -303,6 +319,69 @@ async function loadBenchEngines() {
     benchEngines.value = all.filter(e => e.installed)
   } catch { /* best-effort */ }
 }
+
+function applyQualityCatalogDefaults(catalog: QualityBenchmarkCategory[]) {
+  const defaults = new Set(['mmlu', 'gsm8k', 'hellaswag'])
+  const nextSelected: Record<string, boolean> = {}
+  const nextSizes: Record<string, number> = { ...benchmarkSizes.value }
+
+  catalog.forEach((category) => {
+    category.benchmarks.forEach((benchmark) => {
+      if (nextSizes[benchmark.key] == null) {
+        nextSizes[benchmark.key] = benchmark.default_n || benchmark.full_size
+      }
+      if (selectedBenchmarks.value[benchmark.key] != null) {
+        nextSelected[benchmark.key] = selectedBenchmarks.value[benchmark.key]
+      } else {
+        nextSelected[benchmark.key] = defaults.has(benchmark.key)
+      }
+    })
+  })
+
+  selectedBenchmarks.value = nextSelected
+  benchmarkSizes.value = nextSizes
+}
+
+async function loadQualityCatalog() {
+  qualityCatalogLoading.value = true
+  qualityCatalogError.value = ''
+  try {
+    const result = await api.get<{ catalog: QualityBenchmarkCategory[] }>('/quality-benchmark/catalog')
+    qualityCatalog.value = result.catalog ?? []
+    applyQualityCatalogDefaults(qualityCatalog.value)
+  } catch (e: any) {
+    qualityCatalogError.value = e?.message ?? 'Failed to load benchmark catalog'
+  } finally {
+    qualityCatalogLoading.value = false
+  }
+}
+
+function isBenchmarkSelected(key: string) {
+  return !!selectedBenchmarks.value[key]
+}
+
+function toggleBenchmarkSelection(key: string) {
+  selectedBenchmarks.value = {
+    ...selectedBenchmarks.value,
+    [key]: !selectedBenchmarks.value[key],
+  }
+}
+
+const selectedBenchmarkCount = computed(() =>
+  Object.values(selectedBenchmarks.value).filter(Boolean).length
+)
+
+const selectedBenchmarkPayload = computed<Record<string, number>>(() => {
+  const payload: Record<string, number> = {}
+  qualityCatalog.value.forEach((category) => {
+    category.benchmarks.forEach((benchmark) => {
+      if (selectedBenchmarks.value[benchmark.key]) {
+        payload[benchmark.key] = Number(benchmarkSizes.value[benchmark.key] ?? benchmark.default_n ?? 0)
+      }
+    })
+  })
+  return payload
+})
 
 async function setBenchEngine(id: string) {
   if (id === benchEngineId.value) return
@@ -482,7 +561,7 @@ function isLogErrorLine(line: string): boolean {
 async function runBenchmark() {
   if (benchRunning.value) return
   if (benchSelectedModels.value.length === 0) return
-  if (benchMode.value !== 'speed' && benchMode.value !== 'custom' && benchSuites.value.length === 0) return
+  if (benchMode.value !== 'speed' && benchMode.value !== 'custom' && selectedBenchmarkCount.value === 0) return
   if (benchMode.value === 'custom') {
     const validPrompts = customPrompts.value.map(p => p.trim()).filter(Boolean)
     if (validPrompts.length === 0) return
@@ -647,10 +726,12 @@ async function _doBenchmarkRun() {
     qualityPhase.value = 'running'
     try {
       const runData = await api.post<{ ok: boolean; run_id: string }>('/quality-benchmark/run', {
-        suites: benchSuites.value,
-        num_questions: benchNumQuestions.value,
+        benchmarks: selectedBenchmarkPayload.value,
+        batch_size: batchSize.value,
+        enable_thinking: thinkingMode.value,
         label: benchRunName.value,
         model_ids: benchSelectedModels.value,
+        engine_id: benchEngineId.value || undefined,
       })
       const runId = runData.run_id
       qualityRunId.value = runId
@@ -1083,21 +1164,180 @@ function formatRelTime(ts: string): string {
 
 // ── Export helpers ─────────────────────────────────────────────────────────────
 
-function exportCSV() {
-  const rows = sortedHistory.value
-  if (!rows.length) return
-  const headers = ['model_id', 'engine_id', 'benchmark_type', 'timestamp', 'label', 'avg_tps', 'avg_ttft_ms', 'max_tokens', 'overall_score']
-  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
-  let csv = headers.join(',') + '\n'
+/** All known quality suite keys in display order. */
+const QUALITY_SUITE_ORDER = [
+  'mmlu', 'mmlu_pro', 'hellaswag', 'arc_challenge', 'winogrande', 'truthfulqa',
+  'gsm8k', 'math', 'mathqa',
+  'humaneval', 'mbpp', 'livecodebench',
+  'bbq', 'safetybench', 'ifeval',
+]
+
+/** Collect all suite keys that appear in any run (plus known ones). */
+function _allSuiteKeys(rows: typeof sortedHistory.value): string[] {
+  const seen = new Set<string>(QUALITY_SUITE_ORDER)
   for (const r of rows) {
-    csv += headers.map(h => esc((r as any)[h] ?? '')).join(',') + '\n'
+    if (r.suites) Object.keys(r.suites).forEach(k => seen.add(k))
   }
-  _downloadBlob(csv, 'benchmarks.csv', 'text/csv')
+  // Return in canonical order first, then any extras alphabetically
+  const extras = [...seen].filter(k => !QUALITY_SUITE_ORDER.includes(k)).sort()
+  return [...QUALITY_SUITE_ORDER.filter(k => seen.has(k)), ...extras]
+}
+
+/** Build a per-model summary: best quality score and best speed across all runs. */
+function _buildSummary(rows: typeof sortedHistory.value) {
+  const byModel: Record<string, {
+    model_id: string
+    best_quality_score: number | null
+    best_speed_tps: number | null
+    quality_runs: number
+    speed_runs: number
+  }> = {}
+
+  for (const r of rows) {
+    const m = r.model_id
+    if (!byModel[m]) byModel[m] = { model_id: m, best_quality_score: null, best_speed_tps: null, quality_runs: 0, speed_runs: 0 }
+    if (r.benchmark_type === 'quality' && r.overall_score != null) {
+      byModel[m].quality_runs++
+      if (byModel[m].best_quality_score == null || r.overall_score > byModel[m].best_quality_score!)
+        byModel[m].best_quality_score = r.overall_score
+    }
+    if ((r.benchmark_type === 'speed' || r.benchmark_type === 'custom') && r.avg_tps) {
+      byModel[m].speed_runs++
+      if (byModel[m].best_speed_tps == null || r.avg_tps > byModel[m].best_speed_tps!)
+        byModel[m].best_speed_tps = r.avg_tps
+    }
+  }
+
+  return Object.values(byModel).sort((a, b) => {
+    // Sort by quality score desc, then speed desc
+    const qa = a.best_quality_score ?? -1, qb = b.best_quality_score ?? -1
+    if (qb !== qa) return qb - qa
+    return (b.best_speed_tps ?? 0) - (a.best_speed_tps ?? 0)
+  })
+}
+
+function exportCSV() {
+  const rows = modelsStore.benchmarkHistory ?? []
+  if (!rows.length) return
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const suiteKeys = _allSuiteKeys(rows)
+
+  // ── Static columns ──
+  const staticCols = [
+    'id', 'timestamp', 'model_id', 'engine_id', 'benchmark_type', 'label',
+    'enable_thinking',
+    // Performance
+    'avg_tps', 'median_tps', 'min_tps', 'max_tps', 'avg_ttft_ms', 'max_tokens',
+    // Quality overall
+    'overall_score',
+  ]
+  // ── Per-suite columns: {suite}_accuracy, {suite}_correct, {suite}_total ──
+  const suiteCols = suiteKeys.flatMap(k => [
+    `${k}_accuracy`, `${k}_correct`, `${k}_total`,
+  ])
+  // ── Hardware + settings ──
+  const hardwareCols = [
+    'hw_chip', 'hw_chip_gen', 'hw_ram_gb', 'hw_os', 'hw_mlx_version', 'dashboard_version',
+  ]
+  const settingsCols = [
+    'setting_kv_cache_quant', 'setting_use_paged_cache', 'setting_continuous_batching',
+    'setting_gpu_mem_util', 'setting_prefix_cache',
+  ]
+
+  const allHeaders = [...staticCols, ...suiteCols, ...hardwareCols, ...settingsCols]
+
+  let csv = allHeaders.join(',') + '\n'
+
+  for (const r of rows) {
+    const row: Record<string, unknown> = {
+      id: r.id,
+      timestamp: r.timestamp,
+      model_id: r.model_id,
+      engine_id: r.engine_id ?? '',
+      benchmark_type: r.benchmark_type ?? '',
+      label: r.label ?? '',
+      enable_thinking: r.enable_thinking ?? '',
+      avg_tps: r.avg_tps?.toFixed(2) ?? '',
+      median_tps: (r as any).median_tps?.toFixed(2) ?? '',
+      min_tps: (r as any).min_tps?.toFixed(2) ?? '',
+      max_tps: (r as any).max_tps?.toFixed(2) ?? '',
+      avg_ttft_ms: r.avg_ttft_ms?.toFixed(1) ?? '',
+      max_tokens: r.max_tokens ?? '',
+      overall_score: r.overall_score != null ? (r.overall_score * 100).toFixed(1) + '%' : '',
+      // Hardware
+      hw_chip: r.hardware?.chip ?? '',
+      hw_chip_gen: r.hardware?.chip_gen ?? '',
+      hw_ram_gb: r.hardware?.total_ram_gb ?? '',
+      hw_os: r.hardware?.os_version ?? '',
+      hw_mlx_version: r.hardware?.mlx_version ?? '',
+      dashboard_version: r.hardware?.dashboard_version ?? r.dashboard_version ?? '',
+      // Server settings
+      setting_kv_cache_quant: r.server_settings?.kv_cache_quantization ?? '',
+      setting_use_paged_cache: r.server_settings?.use_paged_cache ?? '',
+      setting_continuous_batching: r.server_settings?.continuous_batching ?? '',
+      setting_gpu_mem_util: r.server_settings?.gpu_memory_utilization ?? '',
+      setting_prefix_cache: r.server_settings?.enable_prefix_cache ?? '',
+    }
+    // Per-suite quality scores
+    for (const k of suiteKeys) {
+      const s = r.suites?.[k]
+      row[`${k}_accuracy`] = s ? (s.accuracy * 100).toFixed(1) + '%' : ''
+      row[`${k}_correct`]  = s?.correct ?? ''
+      row[`${k}_total`]    = s?.total ?? ''
+    }
+
+    csv += allHeaders.map(h => esc(row[h] ?? '')).join(',') + '\n'
+  }
+
+  // ── Summary block (separated by blank line) ──
+  const summary = _buildSummary(rows)
+  csv += '\n'
+  csv += '"=== MODEL SUMMARY ==="\n'
+  csv += '"model_id","best_quality_score","best_speed_tps","quality_runs","speed_runs"\n'
+  for (const s of summary) {
+    csv += [
+      esc(s.model_id),
+      esc(s.best_quality_score != null ? (s.best_quality_score * 100).toFixed(1) + '%' : '—'),
+      esc(s.best_speed_tps != null ? s.best_speed_tps.toFixed(1) + ' tok/s' : '—'),
+      esc(s.quality_runs),
+      esc(s.speed_runs),
+    ].join(',') + '\n'
+  }
+
+  const date = new Date().toISOString().slice(0, 10)
+  _downloadBlob(csv, `benchmarks-${date}.csv`, 'text/csv')
 }
 
 function exportJSON() {
-  const blob = JSON.stringify(sortedHistory.value, null, 2)
-  _downloadBlob(blob, 'benchmarks.json', 'application/json')
+  const rows = modelsStore.benchmarkHistory ?? []
+  const summary = _buildSummary(rows)
+  const suiteKeys = _allSuiteKeys(rows)
+
+  // Build per-suite leaderboard
+  const suiteLeaderboard: Record<string, Array<{ model_id: string; accuracy: number; correct: number; total: number; timestamp: string }>> = {}
+  for (const k of suiteKeys) {
+    const entries: Array<{ model_id: string; accuracy: number; correct: number; total: number; timestamp: string }> = []
+    for (const r of rows) {
+      const s = r.suites?.[k]
+      if (s) entries.push({ model_id: r.model_id, accuracy: s.accuracy, correct: s.correct, total: s.total, timestamp: r.timestamp })
+    }
+    if (entries.length) {
+      suiteLeaderboard[k] = entries.sort((a, b) => b.accuracy - a.accuracy)
+    }
+  }
+
+  const payload = {
+    exported_at: new Date().toISOString(),
+    total_runs: rows.length,
+    summary: {
+      model_rankings: summary,
+      suite_leaderboard: suiteLeaderboard,
+    },
+    runs: rows,
+  }
+
+  const date = new Date().toISOString().slice(0, 10)
+  _downloadBlob(JSON.stringify(payload, null, 2), `benchmarks-${date}.json`, 'application/json')
 }
 
 function _downloadBlob(content: string, filename: string, mime: string) {
@@ -1471,27 +1711,82 @@ watch(activeTab, (tab) => {
                 </label>
               </div>
 
-              <!-- Quality suite checkboxes (hidden for speed-only or custom mode) -->
+              <!-- Quality benchmarks (hidden for speed-only or custom mode) -->
               <template v-if="benchMode !== 'speed' && benchMode !== 'custom'">
-                <div class="bench-section-label">Quality suites</div>
-                <div class="bench-checks">
-                  <label
-                    v-for="suite in QUALITY_SUITES"
-                    :key="suite.id"
-                    class="bench-check"
-                    :class="{ checked: benchSuites.includes(suite.id) }"
-                  >
-                    <input
-                      type="checkbox"
-                      :value="suite.id"
-                      v-model="benchSuites"
-                      :disabled="benchRunning"
-                    />
-                    <div class="bench-check-info">
-                      <span class="bench-check-label">{{ suite.label }}</span>
-                      <span class="bench-check-desc">{{ suite.description }}</span>
-                    </div>
+                <div class="bench-section-label">Quality Benchmarks</div>
+                <div class="quality-controls">
+                  <label class="thinking-toggle-row" :class="{ disabled: benchRunning }">
+                    <input type="checkbox" v-model="thinkingMode" :disabled="benchRunning" />
+                    Thinking Mode
+                    <span class="opt-hint">Off by default for reproducible speed and quality comparisons.</span>
                   </label>
+
+                  <div class="quality-subsection">
+                    <div class="quality-subsection-title">Batch Size</div>
+                    <div class="batch-size-row">
+                      <label
+                        v-for="size in BATCH_SIZE_OPTIONS"
+                        :key="size"
+                        class="batch-size-option"
+                        :class="{ active: batchSize === size }"
+                      >
+                        <input v-model="batchSize" type="radio" :value="size" :disabled="benchRunning" />
+                        <span>{{ size }}x</span>
+                      </label>
+                    </div>
+                    <p class="opt-hint">Process multiple questions concurrently. Higher = faster but uses more memory.</p>
+                  </div>
+
+                  <div v-if="qualityCatalogLoading" class="panel-empty">Loading benchmark catalog…</div>
+                  <div v-else-if="qualityCatalogError" class="panel-empty warn">{{ qualityCatalogError }}</div>
+                  <template v-else>
+                    <div
+                      v-for="category in qualityCatalog"
+                      :key="category.category"
+                      class="quality-category"
+                    >
+                      <div class="quality-category-title">
+                        {{ category.category.toUpperCase() }}
+                        <span class="quality-category-count">({{ category.benchmarks.length }})</span>
+                      </div>
+                      <div class="quality-card-grid">
+                        <div
+                          v-for="benchmark in category.benchmarks"
+                          :key="benchmark.key"
+                          class="quality-card"
+                          :class="{ selected: isBenchmarkSelected(benchmark.key), disabled: benchRunning }"
+                          :aria-pressed="isBenchmarkSelected(benchmark.key)"
+                          :tabindex="benchRunning ? -1 : 0"
+                          role="button"
+                          @click="!benchRunning && toggleBenchmarkSelection(benchmark.key)"
+                          @keydown.enter.prevent="!benchRunning && toggleBenchmarkSelection(benchmark.key)"
+                          @keydown.space.prevent="!benchRunning && toggleBenchmarkSelection(benchmark.key)"
+                        >
+                          <div class="quality-card-label">{{ benchmark.label }}</div>
+                          <div class="quality-card-desc">{{ benchmark.description }}</div>
+                          <div v-if="benchmark.code_exec" class="quality-card-badge">⚠ Code exec</div>
+                          <div v-if="isBenchmarkSelected(benchmark.key)" class="quality-card-size">
+                            <select
+                              v-model.number="benchmarkSizes[benchmark.key]"
+                              class="opt-select quality-size-select"
+                              :disabled="benchRunning"
+                              @click.stop
+                              @keydown.stop
+                            >
+                              <option
+                                v-for="size in benchmark.sizes"
+                                :key="size"
+                                :value="size"
+                              >
+                                {{ size === benchmark.full_size ? `Full (${benchmark.full_size})` : size }}
+                              </option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <p class="opt-hint">Fixed seed sampling ensures the same questions across models.</p>
+                  </template>
                 </div>
               </template>
 
@@ -1514,15 +1809,6 @@ watch(activeTab, (tab) => {
                     <option :value="1024">1024</option>
                     <option :value="2048">2048</option>
                     <option :value="4096">4096</option>
-                  </select>
-                </label>
-                <label v-if="benchMode !== 'speed' && benchMode !== 'custom'" class="opt-label">
-                  Questions / suite
-                  <select v-model="benchNumQuestions" :disabled="benchRunning" class="opt-select">
-                    <option :value="5">5 (quick)</option>
-                    <option :value="10">10</option>
-                    <option :value="20">20</option>
-                    <option :value="25">25 (full)</option>
                   </select>
                 </label>
               </div>
@@ -1651,7 +1937,7 @@ watch(activeTab, (tab) => {
               <!-- Run button -->
               <div class="bench-run-row">
                 <AppButton
-                  :disabled="perfApplying || benchRunning || benchSelectedModels.length === 0 || (benchMode !== 'speed' && benchMode !== 'custom' && benchSuites.length === 0) || (benchMode === 'custom' && customPrompts.filter(p => p.trim()).length === 0)"
+                  :disabled="perfApplying || benchRunning || benchSelectedModels.length === 0 || (benchMode !== 'speed' && benchMode !== 'custom' && selectedBenchmarkCount === 0) || (benchMode === 'custom' && customPrompts.filter(p => p.trim()).length === 0)"
                   @click="runBenchmark"
                 >
                   <span v-if="perfApplying || benchRunning" class="spin" style="margin-right:6px" />
@@ -3164,6 +3450,118 @@ th.sortable:not(.active) .sort-arrow::after { content: '▽'; opacity: .3; }
 }
 .thinking-toggle-row.disabled { opacity: 0.5; cursor: default; }
 .thinking-toggle-row input[type="checkbox"] { cursor: pointer; accent-color: var(--accent); }
+.quality-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.quality-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.quality-subsection-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tx-secondary);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.batch-size-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.batch-size-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  background: var(--bg-base);
+  color: var(--tx-secondary);
+  cursor: pointer;
+}
+.batch-size-option input { margin: 0; }
+.batch-size-option.active {
+  border-color: rgba(var(--si-rgb), .5);
+  background: rgba(var(--si-rgb), .08);
+  color: var(--tx-primary);
+}
+.quality-category {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.quality-category-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tx-secondary);
+  letter-spacing: .04em;
+}
+.quality-category-count { color: var(--tx-muted); font-weight: 500; }
+.quality-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--space-2);
+}
+.quality-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-height: 120px;
+  padding: 12px;
+  border: 1px solid var(--bd-default);
+  border-radius: var(--r-md);
+  background: var(--bg-base);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .12s, background .12s, transform .12s;
+}
+.quality-card:hover:not(:disabled) {
+  border-color: rgba(var(--si-rgb), .35);
+  background: var(--bg-hover);
+  transform: translateY(-1px);
+}
+.quality-card:focus-visible {
+  outline: 2px solid rgba(var(--si-rgb), .65);
+  outline-offset: 2px;
+}
+.quality-card.selected {
+  border-color: rgba(var(--si-rgb), .55);
+  background: rgba(var(--si-rgb), .08);
+}
+.quality-card.disabled {
+  opacity: .65;
+  cursor: default;
+  transform: none;
+}
+.quality-card-label {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--tx-primary);
+}
+.quality-card-desc {
+  font-size: 13px;
+  color: var(--tx-muted);
+  line-height: 1.4;
+}
+.quality-card-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f59e0b;
+}
+.quality-card-size {
+  margin-top: auto;
+  width: 100%;
+}
+.quality-size-select {
+  width: 100%;
+}
 .badge-pending { background: var(--bg-elevated); color: var(--tx-secondary); }
 .inline-log-wrap { margin-top: var(--space-3); }
 
