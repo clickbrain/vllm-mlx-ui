@@ -1271,7 +1271,7 @@ def _build_mbpp_messages(question: dict[str, Any]) -> list[dict[str, str]]:
     return messages
 
 
-
+def _build_messages_for_suite(suite: str, question: dict[str, Any]) -> list[dict[str, str]]:
     if suite == "mmlu":
         choices_text = _format_mc_choices(question["choices"], ["A", "B", "C", "D"])
         # Official MMLU: subject-specific preamble (Hendrycks et al. 2021)
