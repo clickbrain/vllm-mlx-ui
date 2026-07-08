@@ -1,6 +1,40 @@
 # Changelog — vllm-mlx Dashboard UI
 
-## v0.9.0 — 2026-07-06
+## v0.9.1 — 2026-07-08
+
+### Added — Benchmark suites (6 new)
+- **HellaSwag** — Commonsense sentence completion from Rowan/hellaswag validation split; `activity_label: ctx` format + WikiHow artifact preprocessing per official protocol
+- **ARC-Challenge** — AI2 science reasoning from allenai/ai2_arc; numeric labels 1/2/3/4 automatically normalized to A/B/C/D
+- **TruthfulQA MC1** — Truthfulness evaluation from truthfulqa/truthful_qa; includes the official 6-example in-context demonstration from Lin et al. 2022
+- **MathQA** — 5-way quantitative reasoning from the official MathQA source zip (math-qa.github.io)
+- **MBPP** — Python programming from google-research-datasets/mbpp full test split; 3-shot prompting with official task IDs 2/3/4 and `[BEGIN]` prompt format
+- **LiveCodeBench** — Competitive coding from livecodebench/code_generation_lite v5; public test case execution; pass@1
+
+### Improved — Existing benchmark protocols
+- **GSM8K**: Upgraded from 0-shot to official 8-shot chain-of-thought (Cobbe et al. 2021 Appendix D); matches lm-evaluation-harness `gsm8k_cot.yaml` exactly
+- **MMLU**: Replaced generic custom fewshot with actual MMLU dev split examples (5 subjects); adds subject-specific preamble "The following are multiple choice questions (with answers) about {subject}"; stratified sampling ensures all 57 subjects represented proportionally even at small N
+- All benchmark catalog entries now document exact eval protocol (shot count, temperature, dataset version)
+
+### Added — Benchmark configuration UI
+- Catalog-driven benchmark picker grouped by category (Knowledge / Commonsense & Reasoning / Math / Coding / Instruction Following)
+- Per-benchmark sample-size dropdown (30/50/100/200/300/500/1000/Full)
+- Thinking Mode toggle (off by default; boosts token budget to 8192–32768)
+- Batch Size radio (1×/2×/4×/8×/16×/32× concurrent requests via ThreadPoolExecutor)
+- ⚠ Code exec badges on HumanEval / MBPP / LiveCodeBench
+- Fixed seed=42 sampling note: "same questions across models for fair comparison"
+
+### Added — New API endpoints
+- `GET /quality-benchmark/catalog` — returns full benchmark catalog with categories, sizes, descriptions for UI
+- `POST /quality-benchmark/run` now accepts `benchmarks: dict[str, int]` (per-suite sample sizes), `batch_size: int`, `enable_thinking: bool`; old `suites: list[str]` + `num_questions: int` format still works
+
+### Fixed — Benchmark export (was "garbage")
+- **CSV**: now exports all performance metrics (avg/median/min/max TPS, TTFT), per-suite accuracy + correct/total for all 15 known suites (dynamic column discovery), hardware fingerprint, server settings, enable_thinking flag; model summary block appended at end with best quality score and best speed per model; filenames date-stamped (`benchmarks-2026-07-08.csv`)
+- **JSON**: structured payload with `summary.model_rankings`, `summary.suite_leaderboard` per suite, full runs array; exports ALL history (not just filtered view)
+
+### Fixed
+- Missing `_build_messages_for_suite` function definition that caused `NameError` at runtime when running quality benchmarks
+
+
 
 ### Fixed
 - **`brew upgrade` fails with `ResolutionImpossible` — incorrect `transformers<5.0.0` pin** — The `transformers<5.0.0` constraint introduced in v0.8.98 was based on a misdiagnosis. `mlx-lm>=0.30.0` legitimately requires `transformers>=5.0.0`, and `transformers 5.8.1` from PyPI does **not** contain the `key.__module__` check that caused the original server crash (the Mac Studio had a non-standard transformers build). Removing the incorrect pin allows pip to resolve the dependency graph normally. The `mlx-embeddings<0.1.0` pin from v0.8.99 is retained — `mlx-embeddings 0.1.0` has its own separate conflict. The post-engine-upgrade dep guard in `update_checker.py` is updated to guard `mlx-embeddings<0.1.0` instead of transformers.
